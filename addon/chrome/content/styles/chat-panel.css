@@ -1,0 +1,199 @@
+.zoteroagent-chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 10px 10px 8px;
+  box-sizing: border-box;
+  border-radius: 0;
+  background: var(--material-sidepane, #f8f9fa);
+  gap: 8px;
+  overflow: hidden;
+}
+
+.zoteroagent-chat-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px 12px;
+}
+
+.zoteroagent-welcome-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.zoteroagent-welcome-desc {
+  font-size: 12px;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+}
+
+.zoteroagent-mode-buttons {
+  width: 100%;
+  max-width: 340px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.zoteroagent-mode-button {
+  height: 44px;
+  border: 1px solid var(--fill-tertiary);
+  border-radius: 10px;
+  background: var(--fill-quinary, rgba(255, 255, 255, 0.5));
+  font-size: 13px;
+  font-weight: 600;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.zoteroagent-mode-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+
+.zoteroagent-chat-messages {
+  display: none;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.zoteroagent-message {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+  gap: 4px;
+}
+
+.zoteroagent-message.user {
+  align-items: flex-end;
+}
+
+.zoteroagent-message.assistant {
+  align-items: flex-start;
+}
+
+.zoteroagent-role-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
+
+.zoteroagent-role-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.zoteroagent-role-dot.user {
+  background: #73d13d;
+}
+
+.zoteroagent-role-dot.assistant {
+  background: #ff7875;
+}
+
+.zoteroagent-message-content {
+  max-width: 95%;
+  border-radius: 10px;
+  padding: 9px 11px;
+  line-height: 1.55;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.zoteroagent-message.user .zoteroagent-message-content {
+  background: color-mix(in srgb, var(--fill-primary, #dbeafe) 72%, white);
+  border: 1px solid color-mix(in srgb, var(--fill-primary, #dbeafe) 65%, #6ea8fe);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content {
+  background: color-mix(in srgb, var(--fill-secondary, #f1f5f9) 80%, white);
+  border: 1px solid var(--fill-tertiary);
+}
+
+.zoteroagent-user-quote {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #7cb305;
+  background: color-mix(in srgb, #7cb305 10%, transparent);
+  color: color-mix(in srgb, currentColor 85%, transparent);
+  border-radius: 6px;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.zoteroagent-input-area {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--fill-tertiary);
+  padding-top: 8px;
+}
+
+.zoteroagent-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.zoteroagent-service-select,
+.zoteroagent-context-select {
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--fill-tertiary);
+  padding: 0 10px;
+  font-size: 11px;
+  background: var(--material-sidepane);
+}
+
+.zoteroagent-service-select {
+  max-width: 50%;
+}
+
+.zoteroagent-context-select {
+  max-width: 40%;
+}
+
+.zoteroagent-clear-button {
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--fill-tertiary);
+  background: transparent;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.zoteroagent-chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.zoteroagent-chat-input-row textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  max-height: 180px;
+  border-radius: 10px;
+  border: 1px solid var(--fill-tertiary);
+  background: var(--material-sidepane);
+  padding: 8px 10px;
+  box-sizing: border-box;
+  line-height: 1.45;
+}
+
+.zoteroagent-send-button {
+  min-width: 62px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #9ec5fe 40%, var(--fill-tertiary));
+  background: color-mix(in srgb, #9ec5fe 22%, white);
+  font-weight: 600;
+}

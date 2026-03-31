@@ -1,0 +1,15 @@
+zoteroagent-mainWindow = Zotero Agent
+zoteroagent-itemPaneSection-header =
+    .label = Agent Chat
+zoteroagent-itemPaneSection-sidenav =
+    .tooltiptext = Agent Chat
+zoteroagent-itemPaneSection-openStandalone =
+    .tooltiptext = Open in standalone window
+zoteroagent-itemPaneSection-fullHeight =
+    .tooltiptext = Full height
+zoteroagent-chat-mode-analyze = Analyze Paper
+zoteroagent-chat-mode-chat = Ask Question
+zoteroagent-chat-context-none = General Chat
+zoteroagent-chat-context-selectedText = Selected Text
+zoteroagent-chat-context-currentPage = Current Page
+zoteroagent-chat-context-fullPdf = Full PDF

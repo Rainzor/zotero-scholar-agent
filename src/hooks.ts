@@ -1,13 +1,10 @@
-import {
-  BasicExampleFactory,
-  HelperExampleFactory,
-  KeyExampleFactory,
-  PromptExampleFactory,
-  UIExampleFactory,
-} from "./modules/examples";
 import { config } from "../package.json";
-import { getString, initLocale } from "./utils/locale";
-import { registerPrefsScripts } from "./modules/preferenceScript";
+import { initLocale } from "./utils/locale";
+import { registerPrefsWindow, registerPrefsScripts } from "./modules/preferences";
+import { registerReaderInitializer } from "./modules/reader";
+import { injectAgentPanel, removeAgentPanel, updateSidebarPanels } from "./modules/sidebar";
+import { buildReaderPopup, updateReaderPopup } from "./modules/popup";
+import { getPref } from "./utils/prefs";
 
 async function onStartup() {
   await Promise.all([
@@ -18,162 +15,81 @@ async function onStartup() {
   initLocale();
   ztoolkit.ProgressWindow.setIconURI(
     "default",
-    `chrome://${config.addonRef}/content/icons/favicon.png`
+    `chrome://${config.addonRef}/content/icons/favicon.svg`,
   );
-
-  const popupWin = new ztoolkit.ProgressWindow(config.addonName, {
-    closeOnClick: true,
-    closeTime: -1,
-  })
-    .createLine({
-      text: getString("startup.begin"),
-      type: "default",
-      progress: 0,
-    })
-    .show();
-
-  BasicExampleFactory.registerPrefs();
-
-  BasicExampleFactory.registerNotifier();
-
-  KeyExampleFactory.registerShortcuts();
-
-  await Zotero.Promise.delay(1000);
-  popupWin.changeLine({
-    progress: 30,
-    text: `[30%] ${getString("startup.begin")}`,
-  });
-
-  UIExampleFactory.registerStyleSheet();
-
-  UIExampleFactory.registerRightClickMenuItem();
-
-  UIExampleFactory.registerRightClickMenuPopup();
-
-  UIExampleFactory.registerWindowMenuWithSeparator();
-
-  await UIExampleFactory.registerExtraColumn();
-
-  await UIExampleFactory.registerExtraColumnWithCustomCell();
-
-  await UIExampleFactory.registerCustomCellRenderer();
-
-  await UIExampleFactory.registerCustomItemBoxRow();
-
-  UIExampleFactory.registerLibraryTabPanel();
-
-  await UIExampleFactory.registerReaderTabPanel();
-
-  PromptExampleFactory.registerNormalCommandExample();
-
-  PromptExampleFactory.registerAnonymousCommandExample();
-
-  PromptExampleFactory.registerConditionalCommandExample();
-
-  await Zotero.Promise.delay(1000);
-
-  popupWin.changeLine({
-    progress: 100,
-    text: `[100%] ${getString("startup.finish")}`,
-  });
-  popupWin.startCloseTimer(5000);
-
-  addon.hooks.onDialogEvents("dialogExample");
+  addon.data.chat.contextMode = (getPref("defaultContextMode") as any) || "currentPage";
+  registerPrefsWindow();
+  registerReaderInitializer();
+  await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 }
 
-function onShutdown(): void {
+async function onMainWindowLoad(win: Window): Promise<void> {
+  await Promise.all([
+    Zotero.initializationPromise,
+    Zotero.unlockPromise,
+    Zotero.uiReadyPromise,
+  ]);
+  (win as any).MozXULElement.insertFTLIfNeeded(`${config.addonRef}-mainWindow.ftl`);
+  if (!win.document.querySelector(`#${config.addonRef}-panel-style`)) {
+    const styleLink = win.document.createElement("link");
+    styleLink.id = `${config.addonRef}-panel-style`;
+    styleLink.setAttribute("rel", "stylesheet");
+    styleLink.setAttribute(
+      "href",
+      `chrome://${config.addonRef}/content/styles/chat-panel.css`,
+    );
+    win.document.documentElement.appendChild(styleLink);
+  }
+  injectAgentPanel(win);
+}
+
+async function onMainWindowUnload(win: Window): Promise<void> {
+  removeAgentPanel(win);
+  win.document.querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)?.remove();
+  win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
+}
+
+function onShutdown() {
   ztoolkit.unregisterAll();
-  // Remove addon object
+  try {
+    addon.data.panel.standaloneWindow?.close();
+  } catch (_e) {
+    // ignore
+  }
+  Zotero.getMainWindows().forEach((win) => {
+    onMainWindowUnload(win);
+  });
   addon.data.alive = false;
+  // @ts-ignore Plugin instance is not typed
   delete Zotero[config.addonInstance];
 }
 
-/**
- * This function is just an example of dispatcher for Notify events.
- * Any operations should be placed in a function to keep this funcion clear.
- */
-async function onNotify(
-  event: string,
-  type: string,
-  ids: Array<string | number>,
-  extraData: { [key: string]: any }
+function onPrefsLoad(event: Event) {
+  registerPrefsScripts((event.target as any).ownerGlobal);
+}
+
+function onReaderPopupShow(
+  event: _ZoteroTypes.Reader.EventParams<"renderTextSelectionPopup">,
 ) {
-  // You can add your code to the corresponding notify type
-  ztoolkit.log("notify", event, type, ids, extraData);
-  if (
-    event == "select" &&
-    type == "tab" &&
-    extraData[ids[0]].type == "reader"
-  ) {
-    BasicExampleFactory.exampleNotifierCallback();
-  } else {
-    return;
-  }
+  buildReaderPopup(event);
+  updateReaderPopup();
 }
 
-/**
- * This function is just an example of dispatcher for Preference UI events.
- * Any operations should be placed in a function to keep this funcion clear.
- * @param type event type
- * @param data event data
- */
-async function onPrefsEvent(type: string, data: { [key: string]: any }) {
-  switch (type) {
-    case "load":
-      registerPrefsScripts(data.window);
-      break;
-    default:
-      return;
-  }
+function onReaderPopupRefresh() {
+  updateReaderPopup();
 }
 
-function onShortcuts(type: string) {
-  switch (type) {
-    case "larger":
-      KeyExampleFactory.exampleShortcutLargerCallback();
-      break;
-    case "smaller":
-      KeyExampleFactory.exampleShortcutSmallerCallback();
-      break;
-    case "confliction":
-      KeyExampleFactory.exampleShortcutConflictingCallback();
-      break;
-    default:
-      break;
-  }
+function onSidebarPanelRefresh() {
+  updateSidebarPanels();
 }
-
-function onDialogEvents(type: string) {
-  switch (type) {
-    case "dialogExample":
-      HelperExampleFactory.dialogExample();
-      break;
-    case "clipboardExample":
-      HelperExampleFactory.clipboardExample();
-      break;
-    case "filePickerExample":
-      HelperExampleFactory.filePickerExample();
-      break;
-    case "progressWindowExample":
-      HelperExampleFactory.progressWindowExample();
-      break;
-    case "vtableExample":
-      HelperExampleFactory.vtableExample();
-      break;
-    default:
-      break;
-  }
-}
-
-// Add your hooks here. For element click, etc.
-// Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
-// Otherwise the code would be hard to read and maintian.
 
 export default {
   onStartup,
+  onMainWindowLoad,
+  onMainWindowUnload,
   onShutdown,
-  onNotify,
-  onPrefsEvent,
-  onShortcuts,
-  onDialogEvents,
+  onPrefsLoad,
+  onReaderPopupShow,
+  onReaderPopupRefresh,
+  onSidebarPanelRefresh,
 };

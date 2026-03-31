@@ -1,31 +1,72 @@
+<linkset>
+  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+</linkset>
 <vbox
   id="zotero-prefpane-__addonRef__"
-  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', {window})"
+  onload="Zotero.__addonInstance__?.hooks?.onPrefsLoad?.(event)"
 >
   <groupbox>
-    <label><html:h2>&zotero.__addonRef__.pref.title;</html:h2></label>
-    <checkbox
-      id="zotero-prefpane-__addonRef__-enable"
-      label="&zotero.__addonRef__.pref.enable.label;"
-      preference="extensions.zotero.__addonRef__.enable"
-    />
-    <hbox>
-      <html:label for="zotero-prefpane-__addonRef__-input"
-        >&zotero.__addonRef__.pref.input.label;</html:label
-      >
-      <html:input
-        type="text"
-        id="zotero-prefpane-__addonRef__-input"
-        preference="extensions.zotero.__addonRef__.input"
-      ></html:input>
+    <label><html:h2 data-l10n-id="pref-services-title"></html:h2></label>
+    <html:div id="__addonRef__-services-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;max-height:160px;overflow-y:auto;border:1px solid #ccc;border-radius:6px;padding:4px;"></html:div>
+    <hbox align="center">
+      <button id="__addonRef__-svcAdd" data-l10n-id="pref-svc-add"></button>
+      <button id="__addonRef__-svcRemove" data-l10n-id="pref-svc-remove"></button>
+      <button id="__addonRef__-svcDefault" data-l10n-id="pref-svc-setDefault"></button>
     </hbox>
-    <hbox class="virtualized-table-container" flex="1" height="300px">
-      <html:div id="__addonRef__-table-container" />
+    <vbox id="__addonRef__-svcEditor" style="margin-top:8px;">
+      <hbox align="center">
+        <label data-l10n-id="pref-svc-name" style="min-width:80px"></label>
+        <html:input id="__addonRef__-svcName" type="text" style="min-width:200px"></html:input>
+      </hbox>
+      <hbox align="center">
+        <label data-l10n-id="pref-svc-apiUrl" style="min-width:80px"></label>
+        <html:input id="__addonRef__-svcApiUrl" type="text" style="min-width:480px"></html:input>
+      </hbox>
+      <hbox align="center">
+        <label data-l10n-id="pref-svc-apiKey" style="min-width:80px"></label>
+        <html:input id="__addonRef__-svcApiKey" type="password" style="min-width:320px"></html:input>
+      </hbox>
+      <hbox align="center">
+        <label data-l10n-id="pref-svc-model" style="min-width:80px"></label>
+        <html:input id="__addonRef__-svcModel" type="text" style="min-width:200px"></html:input>
+        <button id="__addonRef__-svcSave" data-l10n-id="pref-svc-save"></button>
+        <button id="__addonRef__-svcTest" data-l10n-id="pref-svc-test"></button>
+      </hbox>
+    </vbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-behavior-title"></html:h2></label>
+    <hbox align="center">
+      <label data-l10n-id="pref-api-temperature" style="min-width:80px"></label>
+      <html:input type="text" preference="__prefsPrefix__.temperature" style="width: 60px"></html:input>
+    </hbox>
+    <checkbox
+      id="__addonRef__-autoTranslateSelection"
+      native="true"
+      preference="__prefsPrefix__.autoTranslateSelection"
+      data-l10n-id="pref-behavior-autoTranslateSelection"
+    />
+    <hbox align="center">
+      <label data-l10n-id="pref-behavior-targetLanguage"></label>
+      <html:input type="text" preference="__prefsPrefix__.targetLanguage" style="width: 100px"></html:input>
+      <label data-l10n-id="pref-behavior-defaultContext"></label>
+      <menulist id="__addonRef__-defaultContextMode" preference="__prefsPrefix__.defaultContextMode" native="true">
+        <menupopup>
+          <menuitem value="none" data-l10n-id="context-none"></menuitem>
+          <menuitem value="currentPage" data-l10n-id="context-currentPage"></menuitem>
+          <menuitem value="selectedText" data-l10n-id="context-selectedText"></menuitem>
+          <menuitem value="fullPdf" data-l10n-id="context-fullPdf"></menuitem>
+        </menupopup>
+      </menulist>
     </hbox>
   </groupbox>
-</vbox>
-<vbox>
-  <label
-    value="&zotero.__addonRef__.help.version.label;  &zotero.__addonRef__.help.releasetime.label;"
-  ></label>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-about-title"></html:h2></label>
+    <label
+      data-l10n-id="pref-about-version"
+      data-l10n-args='{"name": "__addonName__", "version": "__buildVersion__", "time": "__buildTime__"}'
+    ></label>
+  </groupbox>
 </vbox>

@@ -1,65 +1,46 @@
 {
-  "name": "zotero-addon-template",
-  "version": "0.1.6",
-  "description": "Zotero Addon Template",
+  "name": "zotero-agent",
+  "version": "0.1.0",
+  "description": "Zotero Agent plugin for explain, translate, and ask workflows in Zotero 7.",
   "config": {
-    "addonName": "Zotero Addon Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate",
-    "releasepage": "https://github.com/windingwind/zotero-addon-template/releases/latest/download/zotero-addon-template.xpi",
-    "updaterdf": "https://raw.githubusercontent.com/windingwind/zotero-addon-template/bootstrap/update.json"
+    "addonName": "Zotero Agent",
+    "addonID": "zotero-agent@runzewang.dev",
+    "addonRef": "zoteroagent",
+    "prefsPrefix": "extensions.zotero.ZoteroAgent",
+    "addonInstance": "ZoteroAgent"
   },
   "main": "src/index.ts",
   "scripts": {
-    "build-dev": "cross-env NODE_ENV=development node scripts/build.mjs",
-    "build-prod": "cross-env NODE_ENV=production node scripts/build.mjs",
-    "build": "concurrently -c auto npm:build-prod npm:tsc",
-    "tsc": "tsc --noEmit",
-    "start-z6": "node scripts/start.mjs --z 6",
-    "start-z7": "node scripts/start.mjs --z 7",
-    "start": "node scripts/start.mjs",
-    "stop": "node scripts/stop.mjs",
-    "restart-dev": "npm run build-dev && npm run stop && npm run start",
-    "restart-prod": "npm run build-prod && npm run stop && npm run start",
-    "restart": "npm run restart-dev",
-    "release": "release-it",
-    "lint": "prettier --write . && eslint . --ext .ts --fix",
+    "start": "zotero-plugin serve",
+    "build": "tsc --noEmit && zotero-plugin build",
+    "release": "zotero-plugin release",
+    "lint": "prettier --write . && eslint . --fix",
     "test": "echo \"Error: no test specified\" && exit 1",
     "update-deps": "npm update --save"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-addon-template.git"
+    "url": "git+https://github.com/runzewang/zotero-agent.git"
   },
-  "author": "windingwind",
+  "author": "runzewang",
   "license": "AGPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-addon-template/issues"
+    "url": "https://github.com/runzewang/zotero-agent/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-addon-template#readme",
+  "homepage": "https://github.com/runzewang/zotero-agent#readme",
   "dependencies": {
-    "zotero-plugin-toolkit": "^2.1.3"
+    "markdown-it": "^14.1.0",
+    "zotero-plugin-toolkit": "^5.1.0-beta.8"
   },
   "devDependencies": {
-    "@types/node": "^20.1.1",
-    "@typescript-eslint/eslint-plugin": "^5.59.2",
-    "@typescript-eslint/parser": "^5.59.2",
-    "compressing": "^1.9.0",
-    "concurrently": "^8.0.1",
-    "cross-env": "^7.0.3",
-    "esbuild": "^0.17.18",
-    "eslint": "^8.40.0",
-    "eslint-config-prettier": "^8.8.0",
-    "minimist": "^1.2.8",
-    "prettier": "2.8.8",
-    "release-it": "^15.10.3",
-    "replace-in-file": "^6.3.5",
-    "typescript": "^5.0.4",
-    "zotero-types": "^1.0.14"
-  },
-  "prettier": {
-    "tabWidth": 2
+    "@eslint/js": "^9.39.1",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^24.5.2",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.1",
+    "zotero-plugin-scaffold": "^0.8.2",
+    "zotero-types": "^4.1.0-beta.3"
   }
 }

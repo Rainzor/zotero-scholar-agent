@@ -1,71 +1,66 @@
-import ZoteroToolkit from "zotero-plugin-toolkit/dist/index";
-import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTable";
+import { config } from "../package.json";
+import { createZToolkit } from "./utils/ztoolkit";
 import hooks from "./hooks";
+import api from "./api";
+
+export type ContextMode = "none" | "currentPage" | "selectedText" | "fullPdf";
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type ServiceProvider = {
+  id: string;
+  name: string;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+};
 
 class Addon {
   public data: {
+    config: typeof config;
     alive: boolean;
-    // Env type, see build.js
     env: "development" | "production";
-    // ztoolkit: MyToolkit;
-    ztoolkit: ZoteroToolkit;
-    locale?: {
-      stringBundle: any;
+    ztoolkit: ReturnType<typeof createZToolkit>;
+    locale: {
+      current?: any;
     };
-    prefs?: {
-      window: Window;
-      columns: Array<ColumnOptions>;
-      rows: Array<{ [dataKey: string]: string }>;
+    prefs: {
+      window: Window | null;
+    };
+    popup: {
+      currentPopup: HTMLDivElement | null;
+      selectedText: string;
+      currentReader: _ZoteroTypes.ReaderInstance | null;
+    };
+    panel: {
+      activePanels: Record<string, () => void>;
+      standaloneWindow: Window | null;
+    };
+    chat: {
+      sessions: Record<number, ChatMessage[]>;
+      prefillInput: string;
+      contextMode: ContextMode;
     };
   };
-  // Lifecycle hooks
   public hooks: typeof hooks;
-  // APIs
-  public api: object;
+  public api: typeof api;
 
   constructor() {
     this.data = {
+      config,
       alive: true,
       env: __env__,
-      // ztoolkit: new MyToolkit(),
-      ztoolkit: new ZoteroToolkit(),
+      ztoolkit: createZToolkit(),
+      locale: {},
+      prefs: { window: null },
+      popup: { currentPopup: null, selectedText: "", currentReader: null },
+      panel: { activePanels: {}, standaloneWindow: null },
+      chat: {
+        sessions: {},
+        prefillInput: "",
+        contextMode: "currentPage",
+      },
     };
     this.hooks = hooks;
-    this.api = {};
-  }
-}
-
-/**
- * Alternatively, import toolkit modules you use to minify the plugin size.
- *
- * Steps to replace the default `ztoolkit: ZoteroToolkit` with your `ztoolkit: MyToolkit`:
- *
- * 1. Uncomment this file's line 30:            `ztoolkit: new MyToolkit(),`
- *    and comment line 31:                      `ztoolkit: new ZoteroToolkit(),`.
- * 2. Uncomment this file's line 10:            `ztoolkit: MyToolkit;` in this file
- *    and comment line 11:                      `ztoolkit: ZoteroToolkit;`.
- * 3. Uncomment `./typing/global.d.ts` line 12: `declare const ztoolkit: import("../src/addon").MyToolkit;`
- *    and comment line 13:                      `declare const ztoolkit: import("zotero-plugin-toolkit").ZoteroToolkit;`.
- *
- * You can now add the modules under the `MyToolkit` class.
- */
-
-import { BasicTool, unregister } from "zotero-plugin-toolkit/dist/basic";
-import { UITool } from "zotero-plugin-toolkit/dist/tools/ui";
-import { PreferencePaneManager } from "zotero-plugin-toolkit/dist/managers/preferencePane";
-
-export class MyToolkit extends BasicTool {
-  UI: UITool;
-  PreferencePane: PreferencePaneManager;
-
-  constructor() {
-    super();
-    this.UI = new UITool(this);
-    this.PreferencePane = new PreferencePaneManager(this);
-  }
-
-  unregisterAll() {
-    unregister(this);
+    this.api = api;
   }
 }
 
