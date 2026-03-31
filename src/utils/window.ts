@@ -43,22 +43,25 @@ function isWindowAlive(win?: Window) {
  */
 function localeWindow(win: Window) {
   Array.from(win.document.querySelectorAll("*[locale-target]")).forEach(
-    (elem) => {
+    (node) => {
+      const elem = node as HTMLElement;
       const errorInfo = "Locale Error";
       const locales = elem.getAttribute("locale-target")?.split(",");
       locales?.forEach((key) => {
-        const isProp = key in elem;
+        const normalizedKey = key.trim();
+        const isProp = normalizedKey in elem;
         try {
-          const localeString = getString(
-            (isProp ? (elem as any)[key] : elem.getAttribute(key)).trim() || ""
-          );
+          const source = isProp
+            ? String((elem as any)[normalizedKey] || "")
+            : String(elem.getAttribute(normalizedKey) || "");
+          const localeString = getString(source.trim());
           isProp
-            ? ((elem as any)[key] = localeString)
-            : elem.setAttribute(key, localeString);
+            ? ((elem as any)[normalizedKey] = localeString)
+            : elem.setAttribute(normalizedKey, localeString);
         } catch (error) {
           isProp
-            ? ((elem as any)[key] = errorInfo)
-            : elem.setAttribute(key, errorInfo);
+            ? ((elem as any)[normalizedKey] = errorInfo)
+            : elem.setAttribute(normalizedKey, errorInfo);
         }
       });
     }
