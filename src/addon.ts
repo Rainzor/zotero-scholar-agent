@@ -3,8 +3,23 @@ import { createZToolkit } from "./utils/ztoolkit";
 import hooks from "./hooks";
 import api from "./api";
 
-export type ContextMode = "none" | "currentPage" | "selectedText" | "fullPdf";
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type ContextMode = "none" | "currentPage" | "fullPdf";
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  reasoning?: string;
+  timestamp?: number;
+};
+export type ChatSession = {
+  sessionId: string;
+  itemId: number;
+  itemKey: string;
+  title: string;
+  messages: ChatMessage[];
+  contextMode: ContextMode;
+  createdAt: number;
+  updatedAt: number;
+};
 export type ServiceProvider = {
   id: string;
   name: string;
@@ -35,8 +50,8 @@ class Addon {
       standaloneWindow: Window | null;
     };
     chat: {
-      sessions: Record<number, ChatMessage[]>;
       prefillInput: string;
+      referenceText: string;
       contextMode: ContextMode;
     };
   };
@@ -54,8 +69,8 @@ class Addon {
       popup: { currentPopup: null, selectedText: "", currentReader: null },
       panel: { activePanels: {}, standaloneWindow: null },
       chat: {
-        sessions: {},
         prefillInput: "",
+        referenceText: "",
         contextMode: "currentPage",
       },
     };

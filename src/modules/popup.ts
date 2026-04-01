@@ -1,7 +1,7 @@
 import { config } from "../../package.json";
 import { AIService } from "../services/ai-service";
 import { translatePrompt } from "../services/prompts";
-import { getPref } from "../utils/prefs";
+const DEFAULT_TRANSLATE_TARGET_LANG = "zh-CN";
 
 export function buildReaderPopup(
   event: _ZoteroTypes.Reader.EventParams<"renderTextSelectionPopup">,
@@ -67,10 +67,7 @@ export function buildReaderPopup(
                 onclick: () => {
                   const text = addon.data.popup.selectedText;
                   if (text) {
-                    addon.api.setPrefillInput(
-                      `> ${text.replace(/\n/g, "\n> ")}\n\n`,
-                      "selectedText",
-                    );
+                    addon.api.setReferenceText(text);
                   }
                 },
               },
@@ -127,12 +124,13 @@ async function runTranslate(
   textarea.value = "Translating...";
 
   try {
-    const targetLanguage = (getPref("targetLanguage") as string) || "zh-CN";
+    const targetLanguage = DEFAULT_TRANSLATE_TARGET_LANG;
     const messages = translatePrompt(selectedText, targetLanguage);
     await AIService.chat(messages as any, {
       stream: true,
-      onChunk: (_chunk, fullText) => {
-        textarea.value = fullText;
+      disableThinking: true,
+      onChunk: (state) => {
+        textarea.value = state.content;
         resizePopup(popup, textarea);
       },
     });
