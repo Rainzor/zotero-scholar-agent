@@ -15,8 +15,18 @@
     </hbox>
     <vbox id="__addonRef__-svcEditor" style="margin-top:8px;">
       <hbox align="center">
+        <label data-l10n-id="pref-svc-provider" style="min-width:80px"></label>
+        <html:select id="__addonRef__-svcProvider" style="min-width:200px"></html:select>
+      </hbox>
+      <hbox align="center">
         <label data-l10n-id="pref-svc-name" style="min-width:80px"></label>
         <html:input id="__addonRef__-svcName" type="text" style="min-width:200px"></html:input>
+        <label data-l10n-id="pref-svc-apiFormat" style="min-width:80px;margin-left:12px"></label>
+        <html:select id="__addonRef__-svcApiFormat" style="min-width:140px">
+          <html:option value="chat-completions" data-l10n-id="pref-svc-apiFormat-chatCompletions"></html:option>
+          <html:option value="responses" data-l10n-id="pref-svc-apiFormat-responses"></html:option>
+          <html:option value="anthropic" data-l10n-id="pref-svc-apiFormat-messages"></html:option>
+        </html:select>
       </hbox>
       <hbox align="center">
         <label data-l10n-id="pref-svc-apiUrl" style="min-width:80px"></label>

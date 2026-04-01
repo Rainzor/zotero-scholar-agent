@@ -7,7 +7,8 @@ import {
   setActiveServiceId,
 } from "../utils/services";
 import { AIService } from "../services/ai-service";
-import type { ServiceProvider } from "../addon";
+import { PROVIDER_PRESETS, getPreset } from "../utils/provider-presets";
+import type { ServiceProvider, ProviderKey, ApiFormat } from "../addon";
 
 function prefId(key: string) {
   return `${config.addonRef}-${key}`;
@@ -60,17 +61,39 @@ function bindServiceManager(doc: Document) {
   const saveBtn = doc.querySelector(`#${prefId("svcSave")}`) as XUL.Button | null;
   const testBtn = doc.querySelector(`#${prefId("svcTest")}`) as XUL.Button | null;
 
+  const providerSelect = doc.querySelector(`#${prefId("svcProvider")}`) as HTMLSelectElement | null;
   const nameInput = doc.querySelector(`#${prefId("svcName")}`) as HTMLInputElement | null;
+  const apiFormatSelect = doc.querySelector(`#${prefId("svcApiFormat")}`) as HTMLSelectElement | null;
   const urlInput = doc.querySelector(`#${prefId("svcApiUrl")}`) as HTMLInputElement | null;
   const keyInput = doc.querySelector(`#${prefId("svcApiKey")}`) as HTMLInputElement | null;
   const modelInput = doc.querySelector(`#${prefId("svcModel")}`) as HTMLInputElement | null;
 
   if (
     !listContainer || !addBtn || !removeBtn || !defaultBtn ||
-    !saveBtn || !testBtn || !nameInput || !urlInput || !keyInput || !modelInput
+    !saveBtn || !testBtn || !providerSelect || !nameInput ||
+    !apiFormatSelect || !urlInput || !keyInput || !modelInput
   ) {
     return;
   }
+
+  while (providerSelect.firstChild) providerSelect.firstChild.remove();
+  for (const preset of PROVIDER_PRESETS) {
+    const opt = doc.createElementNS("http://www.w3.org/1999/xhtml", "option") as HTMLOptionElement;
+    opt.value = preset.key;
+    opt.textContent = preset.label;
+    providerSelect.appendChild(opt);
+  }
+
+  providerSelect.addEventListener("change", () => {
+    const key = providerSelect.value as ProviderKey;
+    const preset = getPreset(key);
+    if (preset && key !== "custom") {
+      nameInput.value = preset.label;
+      urlInput.value = preset.apiUrl;
+      modelInput.value = preset.defaultModel;
+      apiFormatSelect.value = preset.apiFormat;
+    }
+  });
 
   const renderList = () => {
     while (listContainer.firstChild) {
@@ -99,7 +122,9 @@ function bindServiceManager(doc: Document) {
       row.appendChild(label);
       row.addEventListener("click", () => {
         selectedServiceId = svc.id;
+        providerSelect.value = svc.provider || "custom";
         nameInput.value = svc.name;
+        apiFormatSelect.value = svc.apiFormat || "chat-completions";
         urlInput.value = svc.apiUrl;
         keyInput.value = svc.apiKey;
         modelInput.value = svc.model;
@@ -119,12 +144,16 @@ function bindServiceManager(doc: Document) {
   addBtn.addEventListener("command", () => {
     const services = loadServices();
     const id = `svc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const selectedProvider = providerSelect.value as ProviderKey;
+    const preset = getPreset(selectedProvider);
     const newSvc: ServiceProvider = {
       id,
-      name: "New Service",
-      apiUrl: "https://api.openai.com/v1/chat/completions",
+      name: preset?.label || "New Service",
+      provider: selectedProvider,
+      apiFormat: preset?.apiFormat || (apiFormatSelect.value as ApiFormat) || "chat-completions",
+      apiUrl: preset?.apiUrl || "",
       apiKey: "",
-      model: "gpt-4o-mini",
+      model: preset?.defaultModel || "",
     };
     services.push(newSvc);
     saveServices(services);
@@ -132,7 +161,9 @@ function bindServiceManager(doc: Document) {
       setActiveServiceId(id);
     }
     selectedServiceId = id;
+    providerSelect.value = newSvc.provider;
     nameInput.value = newSvc.name;
+    apiFormatSelect.value = newSvc.apiFormat;
     urlInput.value = newSvc.apiUrl;
     keyInput.value = newSvc.apiKey;
     modelInput.value = newSvc.model;
@@ -150,12 +181,16 @@ function bindServiceManager(doc: Document) {
     selectedServiceId = services[0]?.id || "";
     const svc = services[0];
     if (svc) {
+      providerSelect.value = svc.provider || "custom";
       nameInput.value = svc.name;
+      apiFormatSelect.value = svc.apiFormat || "chat-completions";
       urlInput.value = svc.apiUrl;
       keyInput.value = svc.apiKey;
       modelInput.value = svc.model;
     } else {
+      providerSelect.value = "openai";
       nameInput.value = "";
+      apiFormatSelect.value = "chat-completions";
       urlInput.value = "";
       keyInput.value = "";
       modelInput.value = "";
@@ -182,6 +217,8 @@ function bindServiceManager(doc: Document) {
     const svc = services.find((s) => s.id === selectedServiceId);
     if (!svc) return;
     svc.name = nameInput.value.trim() || "Untitled";
+    svc.provider = (providerSelect.value as ProviderKey) || "custom";
+    svc.apiFormat = (apiFormatSelect.value as ApiFormat) || "chat-completions";
     svc.apiUrl = urlInput.value.trim();
     svc.apiKey = keyInput.value.trim();
     svc.model = modelInput.value.trim();
@@ -227,7 +264,9 @@ function bindServiceManager(doc: Document) {
   selectedServiceId = getActiveServiceId() || services[0]?.id || "";
   const activeSvc = services.find((s) => s.id === selectedServiceId);
   if (activeSvc) {
+    providerSelect.value = activeSvc.provider || "custom";
     nameInput.value = activeSvc.name;
+    apiFormatSelect.value = activeSvc.apiFormat || "chat-completions";
     urlInput.value = activeSvc.apiUrl;
     keyInput.value = activeSvc.apiKey;
     modelInput.value = activeSvc.model;

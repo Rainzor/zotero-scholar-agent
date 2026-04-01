@@ -20,9 +20,27 @@ export type ChatSession = {
   createdAt: number;
   updatedAt: number;
 };
+export type ProviderKey =
+  | "openai"
+  | "azure"
+  | "azureAnthropic"
+  | "anthropic"
+  | "deepseek"
+  | "kimi"
+  | "gemini"
+  | "glm"
+  | "minimax"
+  | "qwen"
+  | "custom";
+
+export type ApiFormat = "chat-completions" | "responses" | "anthropic";
+export type AuthType = "bearer" | "api-key" | "x-api-key";
+
 export type ServiceProvider = {
   id: string;
   name: string;
+  provider: ProviderKey;
+  apiFormat: ApiFormat;
   apiUrl: string;
   apiKey: string;
   model: string;
