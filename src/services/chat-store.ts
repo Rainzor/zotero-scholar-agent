@@ -1,0 +1,444 @@
+import type { ChatMessage, ChatSession, ContextMode } from "../addon";
+
+type PersistedSession = {
+  sessionId: string;
+  title: string;
+  contextMode: ContextMode;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+type PersistedItemStateV2 = {
+  version: 2;
+  itemId?: number;
+  itemKey: string;
+  paperTitle: string;
+  activeSessionId?: string;
+  sessions: PersistedSession[];
+};
+
+type ItemSessionState = {
+  itemId: number;
+  itemKey: string;
+  paperTitle: string;
+  activeSessionId: string | null;
+  sessions: ChatSession[];
+};
+
+export type ChatSessionSummary = {
+  sessionId: string;
+  title: string;
+  updatedAt: number;
+  messageCount: number;
+};
+
+const MAX_MESSAGES = 36;
+const MAX_TOKENS_APPROX = 6000;
+const SUMMARY_MARKER = "[Session Summary]";
+
+class ChatStore {
+  private readonly cacheByItemId = new Map<number, ItemSessionState>();
+  private readonly diskByItemKey = new Map<string, PersistedItemStateV2>();
+  private readonly dirtyItemIds = new Set<number>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private initialized = false;
+
+  async init() {
+    if (this.initialized) return;
+    this.initialized = true;
+    try {
+      const ioUtils = (globalThis as any).IOUtils;
+      if (!ioUtils) return;
+      await this.ensureStorageDir();
+      const children: string[] = await ioUtils.getChildren(this.getStorageDir());
+      for (const filePath of children) {
+        if (!String(filePath).endsWith(".json")) continue;
+        const raw = await ioUtils.readUTF8(filePath);
+        const parsed = JSON.parse(raw) as Partial<PersistedItemStateV2>;
+        if (!parsed || parsed.version !== 2 || !parsed.itemKey || !Array.isArray(parsed.sessions)) {
+          continue;
+        }
+        const migrated = this.normalizePersisted(parsed);
+        this.diskByItemKey.set(migrated.itemKey, migrated);
+      }
+    } catch (e) {
+      ztoolkit.log("[Agent] ChatStore init error:", e);
+    }
+  }
+
+  listRecentSessions(limit = 12): ChatSessionSummary[] {
+    const summaries: ChatSessionSummary[] = [];
+    for (const state of this.diskByItemKey.values()) {
+      for (const s of state.sessions) {
+        summaries.push({
+          sessionId: s.sessionId,
+          title: s.title,
+          updatedAt: s.updatedAt,
+          messageCount: s.messages.length,
+        });
+      }
+    }
+    for (const state of this.cacheByItemId.values()) {
+      for (const s of state.sessions) {
+        summaries.push({
+          sessionId: s.sessionId,
+          title: s.title,
+          updatedAt: s.updatedAt,
+          messageCount: s.messages.length,
+        });
+      }
+    }
+    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, Math.max(1, limit));
+  }
+
+  listSessions(itemId: number): ChatSessionSummary[] {
+    const state = this.getItemState(itemId);
+    if (!state) return [];
+    return state.sessions
+      .map((s) => ({
+        sessionId: s.sessionId,
+        title: s.title,
+        updatedAt: s.updatedAt,
+        messageCount: s.messages.length,
+      }))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  createSession(itemId: number, title?: string, contextMode: ContextMode = "currentPage"): ChatSession | null {
+    if (itemId <= 0) return null;
+    const state = this.getOrCreateItemState(itemId);
+    const now = Date.now();
+    const index = state.sessions.length + 1;
+    const session: ChatSession = {
+      sessionId: this.newSessionId(),
+      itemId,
+      itemKey: state.itemKey,
+      title: title?.trim() || this.buildDefaultSessionTitle(index),
+      messages: [],
+      contextMode,
+      createdAt: now,
+      updatedAt: now,
+    };
+    state.sessions.unshift(session);
+    state.activeSessionId = session.sessionId;
+    this.markDirty(itemId);
+    return session;
+  }
+
+  setActiveSession(itemId: number, sessionId: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const exists = state.sessions.some((s) => s.sessionId === sessionId);
+    if (!exists) return;
+    state.activeSessionId = sessionId;
+    this.markDirty(itemId);
+  }
+
+  getActiveSessionId(itemId: number): string {
+    const state = this.getItemState(itemId);
+    return state?.activeSessionId || "";
+  }
+
+  getSession(itemId: number): ChatSession | null {
+    const state = this.getItemState(itemId);
+    if (!state) return null;
+    if (!state.activeSessionId && state.sessions.length > 0) {
+      state.activeSessionId = state.sessions[0].sessionId;
+    }
+    if (!state.activeSessionId) return null;
+    return state.sessions.find((s) => s.sessionId === state.activeSessionId) || null;
+  }
+
+  getMessages(itemId: number): ChatMessage[] {
+    const session = this.getSession(itemId);
+    return session ? session.messages : [];
+  }
+
+  addMessage(itemId: number, message: ChatMessage, contextMode: ContextMode) {
+    if (itemId <= 0) return;
+    let session = this.getSession(itemId);
+    if (!session) {
+      session = this.createSession(itemId, undefined, contextMode);
+      if (!session) return;
+    }
+    if (!message.timestamp) message.timestamp = Date.now();
+    session.messages.push(message);
+    this.maybeAutoTitleSession(session, message);
+    session.contextMode = contextMode;
+    session.updatedAt = Date.now();
+    this.applyCompaction(session);
+    this.markDirty(itemId);
+  }
+
+  clearSession(itemId: number) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    session.messages = [];
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  renameSession(itemId: number, title: string, sessionId?: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const session = state.sessions.find((s) => s.sessionId === targetId);
+    if (!session) return;
+    session.title = trimmed;
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  async deleteSession(itemId: number, sessionId?: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const idx = state.sessions.findIndex((s) => s.sessionId === targetId);
+    if (idx < 0) return;
+    state.sessions.splice(idx, 1);
+    state.activeSessionId = state.sessions[0]?.sessionId || null;
+    if (state.sessions.length === 0) {
+      this.cacheByItemId.set(itemId, state);
+    }
+    this.markDirty(itemId);
+  }
+
+  updateContextMode(itemId: number, contextMode: ContextMode) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    session.contextMode = contextMode;
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  touchSession(itemId: number, contextMode?: ContextMode) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    if (contextMode) session.contextMode = contextMode;
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  async flushAll() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.flushDirty();
+  }
+
+  private getItemState(itemId: number): ItemSessionState | null {
+    if (itemId <= 0) return null;
+    const cached = this.cacheByItemId.get(itemId);
+    if (cached) return cached;
+    const meta = this.getItemMeta(itemId);
+    const persisted = this.diskByItemKey.get(meta.itemKey);
+    if (!persisted) return null;
+    const state: ItemSessionState = {
+      itemId,
+      itemKey: persisted.itemKey,
+      paperTitle: persisted.paperTitle || meta.title,
+      activeSessionId: persisted.activeSessionId || persisted.sessions[0]?.sessionId || null,
+      sessions: persisted.sessions.map((s) => ({
+        sessionId: s.sessionId,
+        itemId,
+        itemKey: persisted.itemKey,
+        title: s.title,
+        messages: s.messages.map((m) => ({ ...m })),
+        contextMode: s.contextMode,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      })),
+    };
+    this.cacheByItemId.set(itemId, state);
+    return state;
+  }
+
+  private getOrCreateItemState(itemId: number): ItemSessionState {
+    const existing = this.getItemState(itemId);
+    if (existing) return existing;
+    const meta = this.getItemMeta(itemId);
+    const state: ItemSessionState = {
+      itemId,
+      itemKey: meta.itemKey,
+      paperTitle: meta.title,
+      activeSessionId: null,
+      sessions: [],
+    };
+    this.cacheByItemId.set(itemId, state);
+    return state;
+  }
+
+  private normalizePersisted(parsed: Partial<PersistedItemStateV2>): PersistedItemStateV2 {
+    return {
+      version: 2,
+      itemId: Number(parsed.itemId) || undefined,
+      itemKey: String(parsed.itemKey || ""),
+      paperTitle: String(parsed.paperTitle || "Untitled"),
+      activeSessionId: String(parsed.activeSessionId || parsed.sessions?.[0]?.sessionId || ""),
+      sessions: (parsed.sessions || []).map((s: any) => ({
+        sessionId: String(s?.sessionId || this.newSessionId()),
+        title: String(s?.title || "Chat"),
+        contextMode: (s?.contextMode as ContextMode) || "currentPage",
+        messages: Array.isArray(s?.messages) ? s.messages : [],
+        createdAt: Number(s?.createdAt) || Date.now(),
+        updatedAt: Number(s?.updatedAt) || Date.now(),
+      })),
+    };
+  }
+
+  private applyCompaction(session: ChatSession) {
+    const overMessageLimit = session.messages.length > MAX_MESSAGES;
+    const overTokenLimit = this.approxTokens(session.messages) > MAX_TOKENS_APPROX;
+    if (!overMessageLimit && !overTokenLimit) return;
+    const keepTailCount = 20;
+    const tail = session.messages.slice(-keepTailCount);
+    const head = session.messages.slice(0, Math.max(0, session.messages.length - keepTailCount));
+    if (head.length === 0) return;
+    const previousSummary = session.messages.find(
+      (m) => m.role === "assistant" && m.content.startsWith(SUMMARY_MARKER),
+    )?.content;
+    const summaryMessage: ChatMessage = {
+      role: "assistant",
+      content: this.buildSummary(head, previousSummary),
+      timestamp: Date.now(),
+    };
+    session.messages = [summaryMessage, ...tail];
+    while (session.messages.length > 10 && this.approxTokens(session.messages) > MAX_TOKENS_APPROX) {
+      session.messages.splice(1, 2);
+    }
+  }
+
+  private approxTokens(messages: ChatMessage[]): number {
+    const chars = messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning?.length || 0), 0);
+    return Math.ceil(chars / 4);
+  }
+
+  private buildSummary(messages: ChatMessage[], previousSummary?: string): string {
+    const lines: string[] = [];
+    if (previousSummary) {
+      lines.push(previousSummary.replace(/\s+$/g, ""));
+      lines.push("");
+      lines.push("Latest condensed history:");
+    } else {
+      lines.push(`${SUMMARY_MARKER} Earlier conversation has been compacted.`);
+    }
+    for (const msg of messages) {
+      const role = msg.role === "user" ? "User" : "Assistant";
+      const content = (msg.content || "").replace(/\s+/g, " ").trim();
+      if (!content) continue;
+      lines.push(`- ${role}: ${content.length > 180 ? `${content.slice(0, 180)}...` : content}`);
+    }
+    return lines.join("\n");
+  }
+
+  private markDirty(itemId: number) {
+    this.dirtyItemIds.add(itemId);
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flushDirty();
+    }, 500);
+  }
+
+  private async flushDirty() {
+    if (this.dirtyItemIds.size === 0) return;
+    const ioUtils = (globalThis as any).IOUtils;
+    if (!ioUtils) return;
+    try {
+      await this.ensureStorageDir();
+      const pending = Array.from(this.dirtyItemIds);
+      this.dirtyItemIds.clear();
+      for (const itemId of pending) {
+        const state = this.cacheByItemId.get(itemId);
+        if (!state) continue;
+        const persisted: PersistedItemStateV2 = {
+          version: 2,
+          itemId: state.itemId,
+          itemKey: state.itemKey,
+          paperTitle: state.paperTitle,
+          activeSessionId: state.activeSessionId || undefined,
+          sessions: state.sessions.map((s) => ({
+            sessionId: s.sessionId,
+            title: s.title,
+            contextMode: s.contextMode,
+            messages: s.messages.map((m) => ({ ...m })),
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+          })),
+        };
+        this.diskByItemKey.set(persisted.itemKey, persisted);
+        await ioUtils.writeUTF8(
+          this.getStorageFilePath(persisted.itemKey),
+          JSON.stringify(persisted, null, 2),
+        );
+      }
+    } catch (e) {
+      ztoolkit.log("[Agent] ChatStore flush error:", e);
+    }
+  }
+
+  private newSessionId(): string {
+    return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private buildDefaultSessionTitle(index: number): string {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    return `新会话 ${index} · ${hh}:${mm}`;
+  }
+
+  private isAutoGeneratedTitle(title: string): boolean {
+    return /^新会话\s+\d+\s+·\s+\d{2}:\d{2}$/.test(title) || /^Chat \d+$/.test(title);
+  }
+
+  private maybeAutoTitleSession(session: ChatSession, message: ChatMessage) {
+    if (message.role !== "user") return;
+    if (!this.isAutoGeneratedTitle(session.title)) return;
+    const userCount = session.messages.filter((m) => m.role === "user").length;
+    if (userCount !== 1) return;
+    const cleaned = (message.content || "")
+      .replace(/^Selected Text:[\s\S]*?\n\n/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) return;
+    const maxLen = 28;
+    session.title = cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+  }
+
+  private getItemMeta(itemId: number): { itemKey: string; title: string } {
+    try {
+      const item = Zotero.Items.get(itemId) as any;
+      return {
+        itemKey: String(item?.key || itemId),
+        title: String(item?.getField?.("title") || item?.getDisplayTitle?.() || `Item ${itemId}`),
+      };
+    } catch (_e) {
+      return { itemKey: String(itemId), title: `Item ${itemId}` };
+    }
+  }
+
+  private getStorageDir(): string {
+    const pathUtils = (globalThis as any).PathUtils;
+    if (pathUtils?.join) return pathUtils.join(Zotero.DataDirectory.dir, "zoteroagent", "chats");
+    return `${Zotero.DataDirectory.dir}/zoteroagent/chats`;
+  }
+
+  private getStorageFilePath(itemKey: string): string {
+    const pathUtils = (globalThis as any).PathUtils;
+    if (pathUtils?.join) return pathUtils.join(this.getStorageDir(), `${itemKey}.json`);
+    return `${this.getStorageDir()}/${itemKey}.json`;
+  }
+
+  private async ensureStorageDir() {
+    const ioUtils = (globalThis as any).IOUtils;
+    if (!ioUtils) return;
+    await ioUtils.makeDirectory(this.getStorageDir(), { createAncestors: true, ignoreExisting: true });
+  }
+}
+
+export const chatStore = new ChatStore();

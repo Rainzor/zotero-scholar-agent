@@ -1,6 +1,5 @@
 import { config, homepage } from "../../package.json";
 import { getString } from "../utils/locale";
-import { getPref, setPref } from "../utils/prefs";
 import {
   loadServices,
   saveServices,
@@ -48,18 +47,6 @@ export function registerPrefsScripts(win: Window) {
 let selectedServiceId = "";
 
 function bindEvents(doc: Document) {
-  const contextMode = doc.querySelector(
-    `#${prefId("defaultContextMode")}`,
-  ) as XUL.MenuList | undefined;
-  contextMode?.addEventListener("command", () => {
-    const value = contextMode.getAttribute("value") || "currentPage";
-    setPref("defaultContextMode", value);
-    addon.data.chat.contextMode = value as any;
-  });
-
-  addon.data.chat.contextMode =
-    (getPref("defaultContextMode") as any) || "currentPage";
-
   bindServiceManager(doc);
 }
 

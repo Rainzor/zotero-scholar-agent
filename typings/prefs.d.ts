@@ -9,10 +9,6 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "services": string;
       "activeServiceId": string;
-      "temperature": string;
-      "targetLanguage": string;
-      "autoTranslateSelection": boolean;
-      "defaultContextMode": string;
     };
   }
 }

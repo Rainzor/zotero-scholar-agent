@@ -14,16 +14,6 @@ pref-svc-defaultSet = Default service updated.
 pref-testApi-running = Testing API connectivity...
 pref-testApi-success = API test succeeded.
 pref-testApi-fail = API test failed
-pref-api-temperature = Temperature
-
-pref-behavior-title = Behavior
-pref-behavior-autoTranslateSelection = Auto-translate when selecting text
-pref-behavior-targetLanguage = Target Language
-pref-behavior-defaultContext = Default Ask Context
-context-none = No context
-context-currentPage = Current page
-context-selectedText = Selected text
-context-fullPdf = Full PDF
 
 pref-about-title = About
 pref-about-version = { $name } { $version } (build: { $time })

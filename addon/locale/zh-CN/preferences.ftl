@@ -14,16 +14,6 @@ pref-svc-defaultSet = 默认服务已更新。
 pref-testApi-running = 正在测试 API 连通性...
 pref-testApi-success = API 测试成功。
 pref-testApi-fail = API 测试失败
-pref-api-temperature = 温度
-
-pref-behavior-title = 行为设置
-pref-behavior-autoTranslateSelection = 选中文本时自动翻译
-pref-behavior-targetLanguage = 目标语言
-pref-behavior-defaultContext = 默认提问上下文
-context-none = 无参考
-context-currentPage = 当前页
-context-selectedText = 选中文本
-context-fullPdf = 全文
 
 pref-about-title = 关于
 pref-about-version = { $name } { $version }（构建时间：{ $time }）

@@ -3,19 +3,10 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
-  | 'context-currentPage'
-  | 'context-fullPdf'
-  | 'context-none'
-  | 'context-selectedText'
   | 'itemPaneSection-header'
   | 'itemPaneSection-sidenav'
   | 'pref-about-title'
   | 'pref-about-version'
-  | 'pref-api-temperature'
-  | 'pref-behavior-autoTranslateSelection'
-  | 'pref-behavior-defaultContext'
-  | 'pref-behavior-targetLanguage'
-  | 'pref-behavior-title'
   | 'pref-services-title'
   | 'pref-svc-add'
   | 'pref-svc-apiKey'

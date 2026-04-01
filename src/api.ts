@@ -1,5 +1,6 @@
-import { ContextMode } from "./addon";
+import type { ContextMode } from "./addon";
 import { showAgentPanel, updateSidebarPanels } from "./modules/sidebar";
+import { chatStore } from "./services/chat-store";
 
 function refreshPanels() {
   updateSidebarPanels();
@@ -13,21 +14,63 @@ function setPrefillInput(text: string, mode?: ContextMode) {
   showAgentPanel();
 }
 
+function setReferenceText(text: string) {
+  addon.data.chat.referenceText = text;
+  showAgentPanel();
+}
+
+function clearReferenceText() {
+  addon.data.chat.referenceText = "";
+  updateSidebarPanels();
+}
+
 function getMessages(itemId: number) {
-  if (!addon.data.chat.sessions[itemId]) {
-    addon.data.chat.sessions[itemId] = [];
-  }
-  return addon.data.chat.sessions[itemId];
+  return chatStore.getMessages(itemId);
+}
+
+function getSession(itemId: number) {
+  return chatStore.getSession(itemId);
+}
+
+function listSessions(itemId: number) {
+  return chatStore.listSessions(itemId);
+}
+
+function createSession(itemId: number, title?: string, mode?: ContextMode) {
+  return chatStore.createSession(itemId, title, mode || addon.data.chat.contextMode);
+}
+
+function setActiveSession(itemId: number, sessionId: string) {
+  chatStore.setActiveSession(itemId, sessionId);
+  refreshPanels();
+}
+
+function renameSession(itemId: number, title: string, sessionId?: string) {
+  chatStore.renameSession(itemId, title, sessionId);
+  refreshPanels();
+}
+
+async function deleteSession(itemId: number, sessionId?: string) {
+  await chatStore.deleteSession(itemId, sessionId);
+  refreshPanels();
 }
 
 function resetMessages(itemId: number) {
-  addon.data.chat.sessions[itemId] = [];
+  chatStore.clearSession(itemId);
   refreshPanels();
 }
 
 export default {
   refreshPanels,
   setPrefillInput,
+  setReferenceText,
+  clearReferenceText,
   getMessages,
+  getSession,
+  listSessions,
+  createSession,
+  setActiveSession,
+  renameSession,
+  deleteSession,
   resetMessages,
 };

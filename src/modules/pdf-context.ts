@@ -1,24 +1,7 @@
 import { config } from "../../package.json";
 
 function getZToolkit(): any {
-  // @ts-ignore - Access ztoolkit through Zotero global (works in both sandbox & window contexts)
-  return Zotero[config.addonInstance]?.data?.ztoolkit;
-}
-
-export async function getSelectedText(
-  reader?: _ZoteroTypes.ReaderInstance | null,
-): Promise<string> {
-  try {
-    const tk = getZToolkit();
-    const targetReader =
-      reader || (await tk?.Reader?.getReader()) || undefined;
-    if (!targetReader) {
-      return "";
-    }
-    return tk.Reader.getSelectedText(targetReader) || "";
-  } catch {
-    return "";
-  }
+  return (Zotero as any)[config.addonInstance]?.data?.ztoolkit;
 }
 
 export async function getFullText(itemId: number): Promise<string> {
@@ -36,49 +19,155 @@ export async function getCurrentPageText(
   try {
     const tk = getZToolkit();
     const targetReader = reader || ((await tk?.Reader?.getReader()) as any);
-    if (!targetReader?._iframeWindow) {
-      return "";
+    if (!targetReader?._iframeWindow) return "";
+
+    const iframeWin = targetReader._iframeWindow as any;
+    const wrapped = iframeWin.wrappedJSObject;
+    const pdfApp = wrapped?.PDFViewerApplication;
+    if (!pdfApp?.pdfViewer) return "";
+
+    const currentPage = pdfApp.pdfViewer.currentPageNumber;
+    if (!currentPage) return "";
+
+    // Strategy 1: Read from rendered text layer DOM (sync, avoids cross-sandbox)
+    const textFromDOM = readTextLayerDOM(iframeWin, currentPage);
+    if (textFromDOM) return textFromDOM;
+
+    // Strategy 2: Execute extraction inside the iframe context
+    try {
+      const resultPromise = iframeWin.wrappedJSObject.eval(
+        `(async function(){` +
+        `  try {` +
+        `    var p = await PDFViewerApplication.pdfDocument.getPage(${currentPage});` +
+        `    var tc = await p.getTextContent();` +
+        `    var lines = []; var lastY = null; var cur = "";` +
+        `    for (var i = 0; i < tc.items.length; i++) {` +
+        `      var it = tc.items[i];` +
+        `      var y = it.transform ? it.transform[5] : null;` +
+        `      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {` +
+        `        if (cur.trim()) lines.push(cur.trim()); cur = "";` +
+        `      }` +
+        `      cur += it.str || "";` +
+        `      if (y !== null) lastY = y;` +
+        `    }` +
+        `    if (cur.trim()) lines.push(cur.trim());` +
+        `    return lines.join("\\n");` +
+        `  } catch(e) { return ""; }` +
+        `})()`
+      );
+      const text = await resultPromise;
+      if (text) return String(text);
+    } catch (_e) {
+      /* fall through */
     }
-    const wrapped = (targetReader._iframeWindow as any).wrappedJSObject;
-    const pageIndex = wrapped?.PDFViewerApplication?.pdfViewer?.currentPageNumber;
-    const itemId = targetReader.itemID;
-    if (!itemId || !pageIndex) {
-      return "";
+
+    return "";
+  } catch (e) {
+    ztoolkit.log("[Agent] getCurrentPageText error:", e);
+    return "";
+  }
+}
+
+function readTextLayerDOM(iframeWin: any, pageNum: number): string {
+  try {
+    const iframeDoc = iframeWin.document;
+    if (!iframeDoc) return "";
+
+    const pageEl =
+      iframeDoc.querySelector(`[data-page-number="${pageNum}"]`) ||
+      iframeDoc.querySelector(`.page[data-page-number="${pageNum}"]`);
+    if (!pageEl) return "";
+
+    const textLayer =
+      pageEl.querySelector(".textLayer") ||
+      pageEl.querySelector('[class*="textLayer"]');
+    if (!textLayer) return "";
+
+    const spans = textLayer.querySelectorAll("span");
+    if (!spans || spans.length === 0) {
+      const raw = textLayer.textContent?.trim();
+      return raw || "";
     }
-    const fullText = await Zotero.PDFWorker.getFullText(itemId, null);
-    const lines = ((fullText?.text as string) || "").split("\n");
-    const windowSize = 180;
-    const start = Math.max(0, (pageIndex - 1) * windowSize);
-    return lines.slice(start, start + windowSize).join("\n");
+
+    const lines: string[] = [];
+    let lastRect: DOMRect | null = null;
+    let currentLine = "";
+
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i] as HTMLElement;
+      const text = span.textContent || "";
+      if (!text) continue;
+
+      try {
+        const rect = span.getBoundingClientRect();
+        if (lastRect && Math.abs(rect.top - lastRect.top) > 4) {
+          if (currentLine.trim()) lines.push(currentLine.trim());
+          currentLine = "";
+        }
+        currentLine += text;
+        lastRect = rect;
+      } catch {
+        currentLine += text;
+      }
+    }
+    if (currentLine.trim()) lines.push(currentLine.trim());
+    return lines.join("\n");
   } catch {
     return "";
   }
 }
 
+export async function getCurrentPageNumber(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): Promise<number> {
+  try {
+    const tk = getZToolkit();
+    const targetReader = reader || ((await tk?.Reader?.getReader()) as any);
+    if (!targetReader?._iframeWindow) return 0;
+    const wrapped = (targetReader._iframeWindow as any).wrappedJSObject;
+    return wrapped?.PDFViewerApplication?.pdfViewer?.currentPageNumber || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export type ContextResult = {
+  text: string;
+  source: "none" | "currentPage" | "fullPdf";
+  pageNumber?: number;
+};
+
 export async function getContextByMode(options: {
-  mode: "none" | "currentPage" | "selectedText" | "fullPdf";
+  mode: "none" | "currentPage" | "fullPdf";
   reader?: _ZoteroTypes.ReaderInstance | null;
   itemId?: number;
-  selectedText?: string;
-}) {
-  const { mode, reader, selectedText } = options;
+}): Promise<ContextResult> {
+  const { mode, reader } = options;
+
   if (mode === "none") {
-    return "";
+    return { text: "", source: "none" };
   }
-  if (mode === "selectedText") {
-    return selectedText || (await getSelectedText(reader));
-  }
+
   if (mode === "fullPdf") {
     const itemId = options.itemId || reader?.itemID;
-    return itemId ? await getFullText(itemId) : "";
+    const text = itemId ? await getFullText(itemId) : "";
+    return { text, source: "fullPdf" };
   }
-  return getCurrentPageText(reader);
+
+  const pageNumber = await getCurrentPageNumber(reader);
+  let text = await getCurrentPageText(reader);
+  if (text) return { text, source: "currentPage", pageNumber };
+
+  const itemId = options.itemId || reader?.itemID;
+  if (itemId) {
+    text = await getFullText(itemId);
+    if (text) return { text, source: "fullPdf" };
+  }
+  return { text: "", source: "currentPage", pageNumber };
 }
 
 function trimReferences(content: string) {
-  if (!content) {
-    return "";
-  }
+  if (!content) return "";
   const lines = content.split(/\r?\n/);
   const index = lines.findIndex((line) =>
     /^(references|bibliography|参考文献|acknowledgements?)$/i.test(line.trim()),
