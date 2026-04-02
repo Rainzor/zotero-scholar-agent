@@ -361,6 +361,10 @@
   color: #1a1a1a;
 }
 
+.zoteroagent-message.assistant .zoteroagent-message-content:empty {
+  display: none;
+}
+
 /* ---- User Quote Block ---- */
 .zoteroagent-user-quote {
   margin: 0 0 8px;
@@ -830,8 +834,7 @@
   flex-shrink: 0;
 }
 
-/* ---- Selects (context & service) ---- */
-.zoteroagent-context-select,
+/* ---- Service Select ---- */
 .zoteroagent-service-select {
   height: 32px;
   border-radius: 8px;
@@ -848,12 +851,10 @@
   text-overflow: ellipsis;
 }
 
-.zoteroagent-context-select:hover,
 .zoteroagent-service-select:hover {
   border-color: var(--color-accent, #2563eb);
 }
 
-.zoteroagent-context-select:focus,
 .zoteroagent-service-select:focus {
   outline: none;
   border-color: var(--color-accent, #2563eb);
@@ -897,29 +898,67 @@
   50% { opacity: 0.7; }
 }
 
-/* ---- Status Bar ---- */
-.zoteroagent-status-bar {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+/* ---- Inline Agent Status (inside chat message) ---- */
+.zoteroagent-agent-status {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  padding: 0 4px;
-  min-height: 16px;
-}
-
-.zoteroagent-status-text {
-  font-size: 11px;
-  color: var(--fill-tertiary, #9ca3af);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: #6b7280;
+  padding: 6px 12px;
+  margin: 2px 0 4px;
   line-height: 1;
   user-select: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8f9fb 0%, #f1f3f8 100%);
+  border: 1px solid #e8ecf1;
+  position: relative;
+  overflow: hidden;
+  animation: zoteroagent-status-fadein 0.22s ease-out;
 }
 
-.zoteroagent-status-text.ready {
-  color: var(--color-accent, #2563eb);
+.zoteroagent-agent-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #3b82f6;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.45);
+  animation: zoteroagent-status-ping 1.2s ease-in-out infinite;
 }
 
-.zoteroagent-status-text.sending {
-  color: #f59e0b;
+.zoteroagent-agent-status::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(59, 130, 246, 0.06) 40%,
+    rgba(59, 130, 246, 0.10) 50%,
+    rgba(59, 130, 246, 0.06) 60%,
+    transparent 100%
+  );
+  animation: zoteroagent-status-shimmer 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes zoteroagent-status-ping {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes zoteroagent-status-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes zoteroagent-status-fadein {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ===== Markdown Rendered Content ===== */

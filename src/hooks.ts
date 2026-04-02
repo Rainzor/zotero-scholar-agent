@@ -22,7 +22,6 @@ async function onStartup() {
     "default",
     `chrome://${config.addonRef}/content/icons/favicon.svg`,
   );
-  addon.data.chat.contextMode = "currentPage";
   registerPrefsWindow();
   registerReaderInitializer();
   await chatStore.init();

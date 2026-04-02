@@ -113,7 +113,7 @@ class ChatStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  createSession(itemId: number, title?: string, contextMode: ContextMode = "none"): ChatSession | null {
+  createSession(itemId: number, title?: string, contextMode: ContextMode = "agent"): ChatSession | null {
     if (itemId <= 0) return null;
     const state = this.getOrCreateItemState(itemId);
     const now = Date.now();
@@ -127,7 +127,7 @@ class ChatStore {
       summaryText: "",
       summaryUpToIndex: 0,
       summaryUpdatedAt: 0,
-      contextMode,
+      contextMode: this.normalizeContextMode(contextMode),
       createdAt: now,
       updatedAt: now,
     };
@@ -167,7 +167,7 @@ class ChatStore {
   }
 
 
-  addMessage(itemId: number, message: ChatMessage, contextMode: ContextMode) {
+  addMessage(itemId: number, message: ChatMessage, contextMode: ContextMode = "agent") {
     if (itemId <= 0) return;
     let session = this.getSession(itemId);
     if (!session) {
@@ -177,7 +177,7 @@ class ChatStore {
     if (!message.timestamp) message.timestamp = Date.now();
     session.messages.push(message);
     this.maybeAutoTitleSession(session, message);
-    session.contextMode = contextMode;
+    session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.applyCompaction(session);
     this.markDirty(itemId);
@@ -247,7 +247,7 @@ class ChatStore {
   updateContextMode(itemId: number, contextMode: ContextMode) {
     const session = this.getSession(itemId);
     if (!session) return;
-    session.contextMode = contextMode;
+    session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -255,7 +255,7 @@ class ChatStore {
   touchSession(itemId: number, contextMode?: ContextMode) {
     const session = this.getSession(itemId);
     if (!session) return;
-    if (contextMode) session.contextMode = contextMode;
+    if (contextMode) session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -496,9 +496,10 @@ class ChatStore {
   }
 
   private normalizeContextMode(raw: any): ContextMode {
-    if (raw === "currentPage") return "currentPage";
-    if (raw === "fullPdf") return "currentPage";
-    return "none";
+    if (raw === "agent") return "agent";
+    // Backward compatibility for old chat/current-page sessions.
+    if (raw === "currentPage" || raw === "none" || raw === "fullPdf") return "agent";
+    return "agent";
   }
 
   private getStorageDir(): string {

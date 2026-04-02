@@ -3,19 +3,18 @@ import { getLocaleID } from "../utils/locale";
 import { renderMarkdown } from "../utils/markdown";
 import { AIService } from "../services/ai-service";
 import {
-  askPrompt,
   initPaperPrompt,
   paperSummaryPrompt,
   sessionTitlePrompt,
   summarizeHistoryPrompt,
 } from "../services/prompts";
-import { getContextByMode, getFullText } from "./pdf-context";
-import type { ContextInfo } from "../services/prompts";
+import { getFullText } from "./pdf-context";
 import { loadServices, getActiveServiceId, setActiveServiceId, getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
-import { buildContextMessages, truncateDocContext } from "../services/context-builder";
+import { truncateDocContext } from "../services/context-builder";
 import type { ChatMessage, ChatSession, ContextMode } from "../addon";
 import { chatStore } from "../services/chat-store";
+import { executeAgent } from "../services/agent-executor";
 import {
   buildSlashCommands,
   consumeSlashToken,
@@ -50,6 +49,7 @@ const slashStateByPane = new Map<
     activeIndex: number;
   }
 >();
+const AGENT_CONTEXT_MODE: ContextMode = "agent";
 
 // ===================== Section Data Loading =====================
 
@@ -69,15 +69,19 @@ function applySectionData(
   addon.data.chat.pendingImages = [];
   body.dataset.itemID = String(itemId);
   addon.data.popup.currentReader = reader;
-  const session = chatStore.getSession(itemId);
-  if (session) {
-    addon.data.chat.contextMode = session.contextMode;
+  chatStore.getSession(itemId);
+  const steps: Array<() => void> = [
+    () => renderMessages(body, itemId),
+    () => syncServiceSelector(body),
+    () => syncLayoutState(body, itemId),
+    () => syncPrefill(body),
+    () => refreshPendingImagesPreview(body),
+  ];
+  for (const step of steps) {
+    try { step(); } catch (e) {
+      ztoolkit.log("[Agent] applySectionData step error:", e);
+    }
   }
-  renderMessages(body, itemId);
-  syncContextSelector(body, itemId);
-  syncLayoutState(body, itemId);
-  syncPrefill(body);
-  refreshPendingImagesPreview(body);
 }
 
 // ===================== Item Resolution =====================
@@ -223,8 +227,33 @@ export function updateSidebarPanels() {
   }
 }
 
+export function syncReferenceCardDirect() {
+  try {
+    if (!activeBody) return;
+    syncReferenceCard(activeBody);
+    const inputArea = activeBody.querySelector("#zoteroagent-input-area") as HTMLElement | null;
+    if (inputArea && addon.data.chat.referenceText) {
+      inputArea.style.display = "flex";
+      activeBody.dataset.chatMode = "chat";
+      const itemId = Number(activeBody.dataset.itemID);
+      if (itemId > 0) syncLayoutState(activeBody, itemId);
+      (activeBody.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null)?.focus();
+    }
+  } catch (_e) {
+    ztoolkit.log("[Agent] syncReferenceCardDirect error:", _e);
+  }
+}
+
 export function showAgentPanel() {
   updateSidebarPanels();
+  try {
+    if (activeBody && sectionPaneID) {
+      const details = activeBody.closest("item-details");
+      (details as any)?.scrollToPane?.(sectionPaneID);
+    }
+  } catch (_e) {
+    // ignore scroll errors
+  }
 }
 
 // ===================== Chat UI =====================
@@ -379,25 +408,6 @@ function ensureChatUI(body: HTMLElement) {
   uploadInput.multiple = true;
   uploadInput.style.display = "none";
 
-  const contextSelect = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "select",
-  ) as HTMLSelectElement;
-  contextSelect.id = "zoteroagent-context-mode";
-  contextSelect.className = "zoteroagent-context-select";
-  for (const [val, text] of [
-    ["none", "Chat"],
-    ["currentPage", "Current page"],
-  ]) {
-    const opt = doc.createElementNS(
-      "http://www.w3.org/1999/xhtml",
-      "option",
-    ) as HTMLOptionElement;
-    opt.value = val;
-    opt.textContent = text;
-    contextSelect.appendChild(opt);
-  }
-
   const serviceSelect = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "select",
@@ -415,7 +425,6 @@ function ensureChatUI(body: HTMLElement) {
   sendBtn.textContent = "Send";
 
   actionsLeft.appendChild(uploadBtn);
-  actionsLeft.appendChild(contextSelect);
   actionsLeft.appendChild(serviceSelect);
   actionsRight.appendChild(sendBtn);
   actionsRow.appendChild(actionsLeft);
@@ -431,19 +440,9 @@ function ensureChatUI(body: HTMLElement) {
   composeArea.appendChild(actionsRow);
   composeArea.appendChild(uploadInput);
 
-  const statusBar = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  statusBar.id = "zoteroagent-status-bar";
-  statusBar.className = "zoteroagent-status-bar";
-  const statusText = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
-  statusText.id = "zoteroagent-status-text";
-  statusText.className = "zoteroagent-status-text ready";
-  statusText.textContent = "Ready";
-  statusBar.appendChild(statusText);
-
   inputArea.appendChild(refCard);
   inputArea.appendChild(slashMenu);
   inputArea.appendChild(composeArea);
-  inputArea.appendChild(statusBar);
 
   const headerWrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   headerWrap.className = "zoteroagent-header-wrap";
@@ -544,20 +543,19 @@ function bindChatEvents(body: HTMLElement) {
     if (itemId > 0 && sessionId) {
       chatStore.setActiveSession(itemId, sessionId);
       renderMessages(body, itemId);
-      syncContextSelector(body, itemId);
+      syncServiceSelector(body);
       syncLayoutState(body, itemId);
     }
   });
   body.querySelector("#zoteroagent-session-new")?.addEventListener("click", () => {
     const itemId = Number(body.dataset.itemID);
     if (itemId <= 0) return;
-    const session = chatStore.createSession(itemId, undefined, addon.data.chat.contextMode);
+    const session = chatStore.createSession(itemId, undefined, AGENT_CONTEXT_MODE);
     if (!session) return;
-    addon.data.chat.contextMode = session.contextMode;
     body.dataset.chatMode = "chat";
     syncSessionSelector(body, itemId);
     renderMessages(body, itemId);
-    syncContextSelector(body, itemId);
+    syncServiceSelector(body);
     syncLayoutState(body, itemId);
     (body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null)?.focus();
   });
@@ -582,7 +580,7 @@ function bindChatEvents(body: HTMLElement) {
     void chatStore.deleteSession(itemId, active.sessionId).then(() => {
       renderMessages(body, itemId);
       syncSessionSelector(body, itemId);
-      syncContextSelector(body, itemId);
+      syncServiceSelector(body);
       syncLayoutState(body, itemId);
     });
   });
@@ -605,14 +603,6 @@ function bindChatEvents(body: HTMLElement) {
   body.querySelector(".zoteroagent-reference-body")?.addEventListener("click", () => {
     const card = body.querySelector("#zoteroagent-reference-card");
     card?.classList.toggle("is-expanded");
-  });
-  body.querySelector("#zoteroagent-context-mode")?.addEventListener("change", (event) => {
-    const mode = (event.target as HTMLSelectElement).value as ContextMode;
-    addon.data.chat.contextMode = mode;
-    const itemId = Number(body.dataset.itemID);
-    if (itemId > 0) {
-      chatStore.updateContextMode(itemId, mode);
-    }
   });
   body.querySelector("#zoteroagent-service-select")?.addEventListener("change", (event) => {
     const id = (event.target as HTMLSelectElement).value;
@@ -858,7 +848,6 @@ async function executeSlashCommandByIndex(body: HTMLElement, index: number) {
 function setGenerating(body: HTMLElement, generating: boolean) {
   isGenerating = generating;
   const sendBtn = body.querySelector("#zoteroagent-chat-send") as HTMLElement | null;
-  const statusText = body.querySelector("#zoteroagent-status-text") as HTMLElement | null;
   if (sendBtn) {
     if (generating) {
       sendBtn.classList.add("is-stop");
@@ -871,12 +860,45 @@ function setGenerating(body: HTMLElement, generating: boolean) {
       activeXHR = null;
     }
   }
-  if (statusText) {
-    statusText.className = generating
-      ? "zoteroagent-status-text sending"
-      : "zoteroagent-status-text ready";
-    statusText.textContent = generating ? "Generating..." : "Ready";
+  if (!generating) {
+    hideAgentStatus(body);
   }
+}
+
+function showAgentStatus(body: HTMLElement, text: string) {
+  const container = body.querySelector("#zoteroagent-chat-messages") as HTMLElement | null;
+  if (!container) return;
+
+  const msgWrapper = container.querySelector(
+    ".zoteroagent-message.assistant:last-child",
+  ) as HTMLElement | null;
+  if (!msgWrapper) return;
+
+  let statusEl = msgWrapper.querySelector(".zoteroagent-agent-status") as HTMLElement | null;
+  if (!statusEl) {
+    const doc = body.ownerDocument;
+    statusEl = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
+    statusEl.className = "zoteroagent-agent-status";
+    const insertRef =
+      msgWrapper.querySelector(".zoteroagent-thinking") ||
+      msgWrapper.querySelector(".zoteroagent-message-content");
+    if (insertRef) {
+      msgWrapper.insertBefore(statusEl, insertRef);
+    } else {
+      msgWrapper.appendChild(statusEl);
+    }
+  }
+  statusEl.textContent = text || "Generating...";
+
+  if (isNearBottom(container)) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function hideAgentStatus(body: HTMLElement) {
+  const container = body.querySelector("#zoteroagent-chat-messages") as HTMLElement | null;
+  if (!container) return;
+  container.querySelectorAll(".zoteroagent-agent-status").forEach((el) => el.remove());
 }
 
 function abortGeneration(body: HTMLElement) {
@@ -963,7 +985,7 @@ function addAssistantMessage(body: HTMLElement, itemId: number, content: string)
   chatStore.addMessage(
     itemId,
     { role: "assistant", content, model: getModelLabel() },
-    addon.data.chat.contextMode,
+    AGENT_CONTEXT_MODE,
   );
   renderMessages(body, itemId);
   syncLayoutState(body, itemId);
@@ -973,7 +995,7 @@ function addUserCommandMessage(body: HTMLElement, itemId: number, commandLabel: 
   chatStore.addMessage(
     itemId,
     { role: "user", content: commandLabel },
-    addon.data.chat.contextMode,
+    AGENT_CONTEXT_MODE,
   );
   renderMessages(body, itemId);
   syncLayoutState(body, itemId);
@@ -1030,30 +1052,30 @@ function bindAgentsMdLink(container: HTMLElement, body: HTMLElement, itemId: num
 }
 
 async function runInitCommand(body: HTMLElement, itemId: number) {
-  addAssistantMessage(
-    body,
-    itemId,
-    "Generating [AGENTS.md](zoteroagent://agents-md) overview for this paper...",
-  );
+  const assistant: ChatMessage = { role: "assistant", content: "", model: getModelLabel() };
+  chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
+  renderMessages(body, itemId);
+  setGenerating(body, true);
+  showAgentStatus(body, "Reading PDF full text...");
+
   const reader = getActiveReader();
   const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
   if (pdfItemId <= 0) {
-    addAssistantMessage(
-      body,
-      itemId,
-      "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.",
-    );
+    assistant.content =
+      "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.";
+    setGenerating(body, false);
+    renderMessages(body, itemId);
     return;
   }
   const fullText = await getFullText(pdfItemId);
   if (!fullText.trim()) {
-    addAssistantMessage(
-      body,
-      itemId,
-      "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.",
-    );
+    assistant.content =
+      "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.";
+    setGenerating(body, false);
+    renderMessages(body, itemId);
     return;
   }
+  showAgentStatus(body, "Generating AGENTS.md overview...");
   const maxCtx = getActiveMaxContextTokens();
   const clipped = truncateDocContext(fullText, Math.floor(maxCtx * 0.8));
   try {
@@ -1065,18 +1087,20 @@ async function runInitCommand(body: HTMLElement, itemId: number) {
     });
     const overview = (result.content || "").trim();
     if (!overview) {
-      addAssistantMessage(body, itemId, "/init failed: the model did not return valid content.");
+      assistant.content = "/init failed: the model did not return valid content.";
+      setGenerating(body, false);
+      renderMessages(body, itemId);
       return;
     }
     await savePaperOverview(getItemKey(itemId), overview);
-    addAssistantMessage(
-      body,
-      itemId,
-      "Paper overview generated. I now have context about this paper. Open [AGENTS.md](zoteroagent://agents-md).",
-    );
+    assistant.content =
+      "Paper overview generated. I now have context about this paper. Open [AGENTS.md](zoteroagent://agents-md).";
   } catch (e: any) {
-    addAssistantMessage(body, itemId, `[Error] /init failed: ${e?.message || String(e)}`);
+    assistant.content = `[Error] /init failed: ${e?.message || String(e)}`;
   }
+  chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
+  setGenerating(body, false);
+  renderMessages(body, itemId);
 }
 
 async function runSummaryCommand(body: HTMLElement, itemId: number) {
@@ -1099,9 +1123,10 @@ async function runSummaryCommand(body: HTMLElement, itemId: number) {
     reasoning: "",
     model: getModelLabel(),
   };
-  chatStore.addMessage(itemId, assistant, addon.data.chat.contextMode);
+  chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
   renderMessages(body, itemId);
   setGenerating(body, true);
+  showAgentStatus(body, "Generating summary...");
   try {
     const prompts = paperSummaryPrompt(clipped, paperOverview || "");
     let lastRefresh = 0;
@@ -1125,7 +1150,7 @@ async function runSummaryCommand(body: HTMLElement, itemId: number) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
     }
   }
-  chatStore.touchSession(itemId, addon.data.chat.contextMode);
+  chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
   setGenerating(body, false);
   renderMessages(body, itemId);
 }
@@ -1137,6 +1162,11 @@ async function runCompactCommand(body: HTMLElement, itemId: number) {
     addAssistantMessage(body, itemId, "Nothing to compact.");
     return;
   }
+  const assistant: ChatMessage = { role: "assistant", content: "", model: getModelLabel() };
+  chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
+  renderMessages(body, itemId);
+  setGenerating(body, true);
+  showAgentStatus(body, "Compacting conversation...");
   try {
     const prompts = summarizeHistoryPrompt("", history as any);
     const result = await AIService.chat(prompts as any, {
@@ -1146,7 +1176,9 @@ async function runCompactCommand(body: HTMLElement, itemId: number) {
     });
     const summaryText = (result.content || "").trim();
     if (!summaryText) {
-      addAssistantMessage(body, itemId, "/compact failed: no summary was generated.");
+      assistant.content = "/compact failed: no summary was generated.";
+      setGenerating(body, false);
+      renderMessages(body, itemId);
       return;
     }
     const active = chatStore.getSession(itemId);
@@ -1161,12 +1193,14 @@ async function runCompactCommand(body: HTMLElement, itemId: number) {
       };
       active.messages = [summaryMsg, ...tail];
       chatStore.updateSessionSummary(itemId, summaryText, summarizedUpTo);
-      chatStore.touchSession(itemId, addon.data.chat.contextMode);
+      chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
     }
-    addAssistantMessage(body, itemId, "Context compacted. Earlier conversation summarized.");
+    assistant.content = "Context compacted. Earlier conversation summarized.";
   } catch (e: any) {
-    addAssistantMessage(body, itemId, `[Error] /compact failed: ${e?.message || String(e)}`);
+    assistant.content = `[Error] /compact failed: ${e?.message || String(e)}`;
   }
+  setGenerating(body, false);
+  renderMessages(body, itemId);
 }
 
 function getActiveReader(): _ZoteroTypes.ReaderInstance | null {
@@ -1211,11 +1245,7 @@ async function submitQuestion(body: HTMLElement) {
     ? `Selected Text: ${refText}\n\n${question}`
     : question;
 
-  chatStore.addMessage(
-    itemId,
-    { role: "user", content: displayContent, images: pendingImages },
-    addon.data.chat.contextMode,
-  );
+  chatStore.addMessage(itemId, { role: "user", content: displayContent, images: pendingImages }, AGENT_CONTEXT_MODE);
   input.value = "";
   addon.data.chat.referenceText = "";
   addon.data.chat.pendingImages = [];
@@ -1225,65 +1255,54 @@ async function submitQuestion(body: HTMLElement) {
   syncLayoutState(body, itemId);
 
   const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "", model: getModelLabel() };
-  chatStore.addMessage(itemId, assistant, addon.data.chat.contextMode);
+  chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
   const sessions = chatStore.getMessages(itemId);
   renderMessages(body, itemId);
   setGenerating(body, true);
+  showAgentStatus(body, "Preparing agent...");
 
   const reader = addon.data.popup.currentReader;
-  const mode = addon.data.chat.contextMode;
   const maxCtx = getActiveMaxContextTokens();
-  ztoolkit.log(`[Agent] submitQuestion: mode=${mode}`);
-  const ctxResult = await getContextByMode({ mode, reader, itemId });
-  ztoolkit.log(`[Agent] ctxResult: source=${ctxResult.source}, text.len=${ctxResult.text?.length}, page=${ctxResult.pageNumber}`);
-  const safeCtxText =
-    ctxResult.source === "none"
-      ? ""
-      : truncateDocContext(ctxResult.text, Math.floor(maxCtx * 0.5));
-
-  const ctxInfo: ContextInfo = {
-    text: safeCtxText,
-    source: ctxResult.source,
-    pageNumber: ctxResult.pageNumber,
-  };
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+  if (pdfItemId <= 0) {
+    assistant.content =
+      "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.";
+    setGenerating(body, false);
+    renderMessages(body, itemId);
+    return;
+  }
   const paperOverview = await loadPaperOverview(getItemKey(itemId));
 
   const aiQuestion = refText
     ? `> ${refText.replace(/\n/g, "\n> ")}\n\n${question}`
     : question;
-  const promptMsgs = askPrompt(aiQuestion, ctxInfo, paperOverview || "");
-  if (pendingImages.length > 0) {
-    promptMsgs[0].content +=
-      "\nThe user has attached images. Analyze image content together with the paper context and the user question.";
-  }
   const fullHistory = sessions.slice(0, -2);
   await ensureAiSessionSummary(itemId, fullHistory);
   const session = chatStore.getSession(itemId);
   const history = buildHistoryForRequest(fullHistory, session)
-    .map((m: ChatMessage) => ({ role: m.role, content: m.content }));
-  const messages = buildContextMessages({
-    systemMessage: promptMsgs[0] as any,
-    currentMessage: promptMsgs[1] as any,
-    history: history as any,
-    maxContextTokens: maxCtx,
-  }) as any;
-  if (pendingImages.length > 0 && messages.length > 0) {
-    const lastIndex = messages.length - 1;
-    messages[lastIndex] = {
-      ...messages[lastIndex],
-      content: AIService.buildMultimodalUserContent(
-        String(messages[lastIndex]?.content || ""),
-        pendingImages,
-      ),
-    };
-  }
-  ztoolkit.log(`[Agent] final messages count=${messages.length}, system=${promptMsgs[0].content.substring(0, 80)}...`);
+    .map((m: ChatMessage) => ({ role: m.role, content: m.content })) as Array<{
+      role: "user" | "assistant" | "system";
+      content: string;
+    }>;
 
   try {
     let lastRefresh = 0;
-    await AIService.chat(messages, {
-      stream: true,
-      onRequest: (xhr) => { activeXHR = xhr; },
+    const result = await executeAgent({
+      itemId,
+      itemKey: getItemKey(itemId),
+      pdfItemId,
+      question: aiQuestion,
+      reader,
+      history,
+      maxContextTokens: maxCtx,
+      paperOverview: paperOverview || "",
+      miniModel: getMiniModel(),
+      pendingImages,
+      historySummary: (session?.summaryText || "").trim(),
+      onStatus: (_stage, text) => showAgentStatus(body, text),
+      onRequest: (xhr) => {
+        activeXHR = xhr;
+      },
       onChunk: (state) => {
         assistant.content = state.content;
         assistant.reasoning = state.reasoning;
@@ -1294,12 +1313,17 @@ async function submitQuestion(body: HTMLElement) {
         }
       },
     });
+    assistant.content = result.answer.content || assistant.content;
+    assistant.reasoning = result.answer.reasoning || assistant.reasoning;
+    ztoolkit.log(
+      `[Agent] planned pages: ${result.plan.pages.join(",") || "none"}; loaded pages: ${result.usedPages.map((p) => p.pageNumber).join(",") || "none"}`,
+    );
   } catch (e: any) {
     if (!assistant.content && !assistant.reasoning) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
     }
   }
-  chatStore.touchSession(itemId, mode);
+  chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
   setGenerating(body, false);
   renderMessages(body, itemId);
   void maybeGenerateSessionTitle(body, itemId);
@@ -1759,15 +1783,7 @@ function syncReferenceCard(body: HTMLElement) {
   }
 }
 
-function syncContextSelector(body: HTMLElement, itemId?: number) {
-  if (itemId && itemId > 0) {
-    const session = chatStore.getSession(itemId);
-    if (session) {
-      addon.data.chat.contextMode = session.contextMode;
-    }
-  }
-  const sel = body.querySelector("#zoteroagent-context-mode") as HTMLSelectElement | null;
-  if (sel) sel.value = addon.data.chat.contextMode;
+function syncServiceSelector(body: HTMLElement) {
   const svcSel = body.querySelector("#zoteroagent-service-select") as HTMLSelectElement | null;
   if (svcSel) {
     populateServiceOptions(svcSel);
@@ -1859,7 +1875,7 @@ function renderHistoryPanel(body: HTMLElement, itemId: number) {
       panel.style.display = "none";
       renderMessages(body, itemId);
       syncSessionSelector(body, itemId);
-      syncContextSelector(body, itemId);
+      syncServiceSelector(body);
       syncLayoutState(body, itemId);
     });
 

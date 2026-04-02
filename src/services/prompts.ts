@@ -1,3 +1,5 @@
+import { estimateTokens } from "../utils/token-estimate";
+
 type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
 export function explainPrompt(text: string, context?: string): ChatMessage[] {
@@ -34,41 +36,87 @@ export function translatePrompt(
   ];
 }
 
-export type ContextInfo = {
+export type RetrievedPage = {
+  pageNumber: number;
   text: string;
-  source: "none" | "currentPage";
-  pageNumber?: number;
 };
 
 export function askPrompt(
   question: string,
-  ctx: ContextInfo,
+  retrievedPages: RetrievedPage[],
   paperOverview?: string,
 ): ChatMessage[] {
   let systemMsg =
     "You are an academic PDF reading assistant that helps users understand paper content. Respond in the same language the user uses.\n" +
-    "The user's message may contain quoted paragraphs starting with >, which are excerpts selected from the PDF. Use these quotes to inform your answers.";
-  const overview = (paperOverview || "").trim();
+    "The user's message may contain quoted paragraphs starting with >, which are excerpts selected from the PDF. " +
+    "A quote may also begin with a structured marker like [Quote|page=12]. Treat that marker as page evidence for retrieval and grounding. " +
+    "Use these quotes to inform your answers.";
+  const overview = compactOverviewForPrompt((paperOverview || "").trim(), 2200);
   if (overview) {
     systemMsg +=
-      "\nBelow is the AGENTS.md structured overview for this paper. Prioritize using its section index and page tags to locate evidence; when the current page lacks sufficient information, suggest the user navigate to the relevant page based on the index.\n" +
+      "\nBelow is the AGENTS.md structured overview for this paper. Prioritize using its section index and page tags to locate evidence; when retrieved snippets are insufficient, suggest the user navigate to relevant pages based on this index.\n" +
       `\n[AGENTS.md]\n${overview}`;
   }
 
-  let userContent = "";
-
-  if (ctx.source === "none" || !ctx.text) {
-    userContent = question;
-  } else if (ctx.source === "currentPage") {
-    const pageLabel = ctx.pageNumber ? ` (page ${ctx.pageNumber})` : "";
+  const normalizedPages = (retrievedPages || [])
+    .map((p) => ({
+      pageNumber: Math.max(1, Math.floor(Number(p.pageNumber) || 0)),
+      text: String(p.text || "").trim(),
+    }))
+    .filter((p) => p.text);
+  const pageBlocks = normalizedPages
+    .map((p) => `[Page ${p.pageNumber} content]\n${p.text}`)
+    .join("\n\n");
+  if (pageBlocks) {
     systemMsg +=
-      `\nBelow is the full text of the PDF page${pageLabel} the user is currently reading. Use the page content to inform your answer.`;
-    userContent = `[Current page content${pageLabel}]\n${ctx.text}\n\n[Question]\n${question}`;
+      "\nBelow are dynamically loaded page snippets from the paper PDF. Ground your answer in these snippets when possible.";
   }
+  const userContent = pageBlocks
+    ? `${pageBlocks}\n\n[Question]\n${question}`
+    : question;
 
   return [
     { role: "system", content: systemMsg },
     { role: "user", content: userContent },
+  ];
+}
+
+export function contextPlanningPrompt(
+  question: string,
+  paperOverview: string,
+  currentPageNumber?: number,
+  historySummary?: string,
+): ChatMessage[] {
+  const overview = compactOverviewForPrompt(String(paperOverview || "").trim(), 3000);
+  const safeQuestion = String(question || "").trim();
+  const currentPage = Number(currentPageNumber || 0);
+  const memory = String(historySummary || "").trim();
+  return [
+    {
+      role: "system",
+      content:
+        "You are a context planning assistant for an academic PDF agent.\n" +
+        "Given AGENTS.md and a user question, choose the minimum relevant pages to load from the paper.\n" +
+        "The user question may include quote markers like [Quote|page=12]; treat them as high-priority page hints.\n" +
+        "Return ONLY valid JSON with this exact shape:\n" +
+        '{"pages":[1,2],"reasoning":"short explanation"}\n' +
+        "Rules:\n" +
+        "- pages must be unique positive integers sorted ascending.\n" +
+        "- choose at most 5 pages.\n" +
+        "- prefer pages explicitly hinted by AGENTS.md section index/page tags.\n" +
+        "- if uncertain, include current page if provided.\n" +
+        "- do not include markdown, prose outside JSON, or code fences.",
+    },
+    {
+      role: "user",
+      content:
+        `[Question]\n${safeQuestion || "(empty)"}` +
+        (currentPage > 0 ? `\n\n[Current page]\n${currentPage}` : "") +
+        (memory ? `\n\n[Conversation memory]\n${memory}` : "") +
+        (overview
+          ? `\n\n[AGENTS.md]\n${overview}`
+          : "\n\n[AGENTS.md]\nUnavailable. Return pages based on best guess and current page."),
+    },
   ];
 }
 
@@ -92,6 +140,7 @@ export function initPaperPrompt(text: string): ChatMessage[] {
         "Requirements:\n" +
         "- In Section Index, provide approximate page ranges and paragraph clues for each key section.\n" +
         "- Use page tags in the format [p.X-Y] or [p.X].\n" +
+        "- The paper text may be page-delimited with markers like '=== Page N ===' and heading hints like '[H2]'; preserve this page grounding in your index.\n" +
         "- If any detail is uncertain, explicitly mark it as Uncertain.\n" +
         "- Keep the output concise and directly reusable for downstream Q&A.\n\n" +
         `Full paper text:\n${text}`,
@@ -103,7 +152,7 @@ export function paperSummaryPrompt(
   text: string,
   paperOverview?: string,
 ): ChatMessage[] {
-  const overview = (paperOverview || "").trim();
+  const overview = compactOverviewForPrompt((paperOverview || "").trim(), 2600);
   return [
     {
       role: "system",
@@ -145,6 +194,34 @@ export function paperSummaryPrompt(
 
 export function summarizePrompt(text: string): ChatMessage[] {
   return paperSummaryPrompt(text);
+}
+
+function compactOverviewForPrompt(raw: string, maxTokens: number): string {
+  const text = String(raw || "").trim();
+  if (!text || maxTokens <= 0) return "";
+  if (estimateTokens(text) <= maxTokens) return text;
+
+  const marker = "\n\n[... AGENTS.md truncated for context budget ...]\n\n";
+  const markerTokens = estimateTokens(marker);
+  if (markerTokens >= maxTokens) return marker.trim();
+
+  let keepChars = Math.max(200, Math.floor(text.length * 0.6));
+  let best = "";
+  while (keepChars >= 200) {
+    const headChars = Math.max(80, Math.floor(keepChars * 0.62));
+    const tailChars = Math.max(80, keepChars - headChars);
+    const candidate = `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
+    if (estimateTokens(candidate) <= maxTokens) {
+      best = candidate;
+      break;
+    }
+    keepChars = Math.floor(keepChars * 0.85);
+  }
+
+  if (best) return best;
+  const fallbackHead = Math.max(120, Math.floor(text.length * 0.2));
+  const fallback = `${text.slice(0, fallbackHead)}${marker}`;
+  return estimateTokens(fallback) <= maxTokens ? fallback : marker.trim();
 }
 
 export function sessionTitlePrompt(

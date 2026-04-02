@@ -1,24 +1,21 @@
 import type { ContextMode } from "./addon";
-import { showAgentPanel, updateSidebarPanels } from "./modules/sidebar";
+import { showAgentPanel, syncReferenceCardDirect, updateSidebarPanels } from "./modules/sidebar";
 import { chatStore } from "./services/chat-store";
 
 function refreshPanels() {
   updateSidebarPanels();
 }
 
-function setPrefillInput(text: string, mode?: ContextMode) {
+function setPrefillInput(text: string, _mode?: ContextMode) {
   addon.data.chat.prefillInput = text;
-  if (mode) {
-    addon.data.chat.contextMode = mode;
-  }
   showAgentPanel();
   updateSidebarPanels();
 }
 
-function setReferenceText(text: string) {
-  addon.data.chat.referenceText = text;
+function setReferenceText(text: string, pageLabel?: string) {
+  addon.data.chat.referenceText = formatReferenceText(text, pageLabel);
   showAgentPanel();
-  updateSidebarPanels();
+  syncReferenceCardDirect();
 }
 
 function clearReferenceText() {
@@ -39,7 +36,7 @@ function listSessions(itemId: number) {
 }
 
 function createSession(itemId: number, title?: string, mode?: ContextMode) {
-  return chatStore.createSession(itemId, title, mode || addon.data.chat.contextMode);
+  return chatStore.createSession(itemId, title, mode || "agent");
 }
 
 function setActiveSession(itemId: number, sessionId: string) {
@@ -76,3 +73,11 @@ export default {
   deleteSession,
   resetMessages,
 };
+
+function formatReferenceText(text: string, pageLabel?: string) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return "";
+  const safePageLabel = String(pageLabel || "").trim();
+  if (!safePageLabel) return trimmed;
+  return `[Quote|page=${safePageLabel}]\n${trimmed}`;
+}

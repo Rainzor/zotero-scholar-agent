@@ -6,7 +6,9 @@ export function registerReaderInitializer() {
     "renderTextSelectionPopup",
     (event) => {
       const selectedText = event.params?.annotation?.text?.trim?.() || "";
+      const selectedPageLabel = getSelectionPageLabel(event.params?.annotation);
       addon.data.popup.selectedText = selectedText;
+      addon.data.popup.selectedPageLabel = selectedPageLabel;
       addon.data.popup.currentReader = event.reader;
       addon.hooks.onReaderPopupShow(event);
     },
@@ -20,4 +22,14 @@ export function registerReaderInitializer() {
     },
     config.addonID,
   );
+}
+
+function getSelectionPageLabel(annotation: any): string {
+  const pageLabel = String(annotation?.pageLabel || "").trim();
+  if (pageLabel) return pageLabel;
+  const pageIndex = Number(annotation?.position?.pageIndex);
+  if (Number.isFinite(pageIndex) && pageIndex >= 0) {
+    return String(pageIndex + 1);
+  }
+  return "";
 }

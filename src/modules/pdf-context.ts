@@ -1,4 +1,6 @@
 import { config } from "../../package.json";
+import { loadPageCache } from "../services/page-cache";
+import { getPdfDocumentFromReader, parsePageStructured, toPlainText } from "../services/pdf-parser";
 
 function getZToolkit(): any {
   return (Zotero as any)[config.addonInstance]?.data?.ztoolkit;
@@ -6,6 +8,19 @@ function getZToolkit(): any {
 
 export async function getFullText(itemId: number): Promise<string> {
   try {
+    const activeReader = await getTargetReader(null);
+    const activeItemId = Number((activeReader as any)?.itemID || 0);
+    const itemKey = resolveItemKey(activeReader);
+    if (activeItemId && activeItemId === itemId && itemKey) {
+      const cache = await loadPageCache(itemKey);
+      if (cache?.pages?.length) {
+        const joined = cache.pages
+          .map((p) => String(p?.plainText || "").trim())
+          .filter(Boolean)
+          .join("\n");
+        if (joined) return trimReferences(joined);
+      }
+    }
     const fullText = await Zotero.PDFWorker.getFullText(itemId, null);
     return trimReferences((fullText?.text as string) || "");
   } catch {
@@ -17,55 +32,84 @@ export async function getCurrentPageText(
   reader?: _ZoteroTypes.ReaderInstance | null,
 ): Promise<string> {
   try {
-    const tk = getZToolkit();
-    const targetReader = reader || ((await tk?.Reader?.getReader()) as any);
-    if (!targetReader?._iframeWindow) return "";
-
-    const iframeWin = targetReader._iframeWindow as any;
-    const wrapped = iframeWin.wrappedJSObject;
-    const pdfApp = wrapped?.PDFViewerApplication;
-    if (!pdfApp?.pdfViewer) return "";
-
-    const currentPage = pdfApp.pdfViewer.currentPageNumber;
+    const targetReader = await getTargetReader(reader);
+    if (!targetReader) return "";
+    const currentPage = await getCurrentPageNumber(targetReader);
     if (!currentPage) return "";
-
-    // Strategy 1: Read from rendered text layer DOM (sync, avoids cross-sandbox)
-    const textFromDOM = readTextLayerDOM(iframeWin, currentPage);
-    if (textFromDOM) return textFromDOM;
-
-    // Strategy 2: Execute extraction inside the iframe context
-    try {
-      const resultPromise = iframeWin.wrappedJSObject.eval(
-        `(async function(){` +
-        `  try {` +
-        `    var p = await PDFViewerApplication.pdfDocument.getPage(${currentPage});` +
-        `    var tc = await p.getTextContent();` +
-        `    var lines = []; var lastY = null; var cur = "";` +
-        `    for (var i = 0; i < tc.items.length; i++) {` +
-        `      var it = tc.items[i];` +
-        `      var y = it.transform ? it.transform[5] : null;` +
-        `      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {` +
-        `        if (cur.trim()) lines.push(cur.trim()); cur = "";` +
-        `      }` +
-        `      cur += it.str || "";` +
-        `      if (y !== null) lastY = y;` +
-        `    }` +
-        `    if (cur.trim()) lines.push(cur.trim());` +
-        `    return lines.join("\\n");` +
-        `  } catch(e) { return ""; }` +
-        `})()`
-      );
-      const text = await resultPromise;
-      if (text) return String(text);
-    } catch (_e) {
-      /* fall through */
-    }
-
-    return "";
+    return getPageText(targetReader, currentPage);
   } catch (e) {
     ztoolkit.log("[Agent] getCurrentPageText error:", e);
     return "";
   }
+}
+
+export async function getPageText(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+  pageNumber?: number,
+): Promise<string> {
+  const cached = await getCachedPageText(reader, pageNumber);
+  if (cached) return cached;
+  return getPageTextFromReader(reader, pageNumber);
+}
+
+async function getPageTextFromReader(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+  pageNumber?: number,
+): Promise<string> {
+  try {
+    const targetReader = await getTargetReader(reader);
+    if (!targetReader) return "";
+    const iframeWin = targetReader._iframeWindow as any;
+    const wrapped = iframeWin?.wrappedJSObject;
+    const pdfApp = wrapped?.PDFViewerApplication;
+    if (!pdfApp?.pdfViewer || !pdfApp?.pdfDocument) return "";
+
+    const targetPage = normalizePageNumber(pageNumber, pdfApp.pdfViewer.currentPageNumber);
+    if (!targetPage) return "";
+
+    const textFromDOM = readTextLayerDOM(iframeWin, targetPage);
+    if (textFromDOM) return textFromDOM;
+
+    try {
+      const pdfDocument = getPdfDocumentFromReader(targetReader);
+      if (!pdfDocument) return "";
+      const page = await parsePageStructured(pdfDocument, targetPage);
+      return toPlainText(page);
+    } catch {
+      return "";
+    }
+  } catch {
+    return "";
+  }
+}
+
+export async function getMultiPageText(
+  reader: _ZoteroTypes.ReaderInstance | null | undefined,
+  pageNumbers: number[],
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  const uniquePages = Array.from(
+    new Set((pageNumbers || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)),
+  );
+  const cache = await loadReaderPageCache(reader);
+  if (cache?.pages?.length) {
+    const index = new Map<number, string>();
+    for (const page of cache.pages) {
+      const n = Math.max(1, Math.floor(Number(page.pageNumber) || 0));
+      const text = String(page.plainText || "").trim();
+      if (n > 0 && text) index.set(n, text);
+    }
+    for (const page of uniquePages) {
+      const text = index.get(page);
+      if (text) result.set(page, text);
+    }
+  }
+  for (const page of uniquePages) {
+    if (result.has(page)) continue;
+    const text = await getPageText(reader, page);
+    if (text) result.set(page, text);
+  }
+  return result;
 }
 
 function readTextLayerDOM(iframeWin: any, pageNum: number): string {
@@ -121,11 +165,23 @@ export async function getCurrentPageNumber(
   reader?: _ZoteroTypes.ReaderInstance | null,
 ): Promise<number> {
   try {
-    const tk = getZToolkit();
-    const targetReader = reader || ((await tk?.Reader?.getReader()) as any);
+    const targetReader = await getTargetReader(reader);
     if (!targetReader?._iframeWindow) return 0;
     const wrapped = (targetReader._iframeWindow as any).wrappedJSObject;
     return wrapped?.PDFViewerApplication?.pdfViewer?.currentPageNumber || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getTotalPages(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): Promise<number> {
+  try {
+    const targetReader = await getTargetReader(reader);
+    if (!targetReader?._iframeWindow) return 0;
+    const wrapped = (targetReader._iframeWindow as any).wrappedJSObject;
+    return wrapped?.PDFViewerApplication?.pdfViewer?.pagesCount || 0;
   } catch {
     return 0;
   }
@@ -167,4 +223,50 @@ function trimReferences(content: string) {
     /^(references|bibliography|参考文献|acknowledgements?)$/i.test(line.trim()),
   );
   return (index >= 0 ? lines.slice(0, index) : lines).join("\n").trim();
+}
+
+async function getTargetReader(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): Promise<_ZoteroTypes.ReaderInstance | null> {
+  if (reader) return reader;
+  const tk = getZToolkit();
+  return ((await tk?.Reader?.getReader()) as any) || null;
+}
+
+function normalizePageNumber(pageNumber: number | undefined, fallback: number): number {
+  const n = Number(pageNumber);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  const f = Number(fallback);
+  if (Number.isFinite(f) && f > 0) return Math.floor(f);
+  return 0;
+}
+
+async function getCachedPageText(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+  pageNumber?: number,
+): Promise<string> {
+  const targetPage = Math.max(1, Math.floor(Number(pageNumber) || 0));
+  if (!targetPage) return "";
+  const cache = await loadReaderPageCache(reader);
+  if (!cache?.pages?.length) return "";
+  const page = cache.pages.find((p) => Number(p.pageNumber) === targetPage);
+  return String(page?.plainText || "").trim();
+}
+
+async function loadReaderPageCache(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): Promise<Awaited<ReturnType<typeof loadPageCache>> | null> {
+  const targetReader = await getTargetReader(reader);
+  const itemKey = resolveItemKey(targetReader);
+  if (!itemKey) return null;
+  return loadPageCache(itemKey);
+}
+
+function resolveItemKey(reader?: _ZoteroTypes.ReaderInstance | null): string {
+  const candidate =
+    (reader as any)?.itemKey ||
+    (reader as any)?._item?.key ||
+    (reader as any)?._itemKey ||
+    "";
+  return String(candidate || "").trim();
 }

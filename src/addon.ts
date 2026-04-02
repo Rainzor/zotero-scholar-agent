@@ -3,7 +3,7 @@ import { createZToolkit } from "./utils/ztoolkit";
 import hooks from "./hooks";
 import api from "./api";
 
-export type ContextMode = "none" | "currentPage";
+export type ContextMode = "agent" | "none" | "currentPage";
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -67,6 +67,7 @@ class Addon {
     popup: {
       currentPopup: HTMLDivElement | null;
       selectedText: string;
+      selectedPageLabel: string;
       currentReader: _ZoteroTypes.ReaderInstance | null;
     };
     panel: {
@@ -76,7 +77,6 @@ class Addon {
     chat: {
       prefillInput: string;
       referenceText: string;
-      contextMode: ContextMode;
       pendingImages: string[];
     };
   };
@@ -91,12 +91,11 @@ class Addon {
       ztoolkit: createZToolkit(),
       locale: {},
       prefs: { window: null },
-      popup: { currentPopup: null, selectedText: "", currentReader: null },
+      popup: { currentPopup: null, selectedText: "", selectedPageLabel: "", currentReader: null },
       panel: { activePanels: {}, standaloneWindow: null },
       chat: {
         prefillInput: "",
         referenceText: "",
-        contextMode: "none",
         pendingImages: [],
       },
     };

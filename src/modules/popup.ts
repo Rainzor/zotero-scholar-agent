@@ -68,8 +68,9 @@ export function buildReaderPopup(
                 innerText: "Ask",
                 onclick: () => {
                   const text = addon.data.popup.selectedText;
+                  const pageLabel = addon.data.popup.selectedPageLabel;
                   if (text) {
-                    addon.api.setReferenceText(text);
+                    addon.api.setReferenceText(text, pageLabel);
                   }
                 },
               },
