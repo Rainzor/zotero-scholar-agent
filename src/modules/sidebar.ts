@@ -2,371 +2,191 @@ import { config } from "../../package.json";
 import { getLocaleID } from "../utils/locale";
 import { renderMarkdown } from "../utils/markdown";
 import { AIService } from "../services/ai-service";
-import { askPrompt, summarizePrompt } from "../services/prompts";
-import { getContextByMode, getFullText } from "./pdf-context";
+import { askPrompt, summarizeHistoryPrompt } from "../services/prompts";
+import { getContextByMode } from "./pdf-context";
 import type { ContextInfo } from "../services/prompts";
 import { loadServices, getActiveServiceId, setActiveServiceId, getActiveService } from "../utils/services";
-import type { ChatMessage, ContextMode } from "../addon";
+import { getPreset } from "../utils/provider-presets";
+import { buildContextMessages, truncateDocContext } from "../services/context-builder";
+import type { ChatMessage, ChatSession, ContextMode } from "../addon";
 import { chatStore } from "../services/chat-store";
 
-let agentPanel: Element | null = null;
-let agentRoot: HTMLElement | null = null;
-let injectedButtons: Element[] = [];
-let notifierID: string | null = null;
+let sectionPaneID: string | null = null;
+let activeBody: HTMLElement | null = null;
 let activeXHR: XMLHttpRequest | null = null;
 let isGenerating = false;
 
-export function injectAgentPanel(win: Window) {
-  try {
-    const doc = win.document;
+// ===================== Section Data Loading =====================
 
-    injectDeckPanel(doc);
-    injectAllSidenavButtons(doc);
-
-    notifierID = Zotero.Notifier.registerObserver(
-      {
-        notify: (action: string, type: string, _ids: string[] | number[]) => {
-          try {
-            if (type === "tab" && ["select", "load"].includes(action)) {
-              const deckEl = resolveContextDeck(
-                win.document,
-                win.document.querySelector("item-pane-sidenav"),
-              );
-              ensureDeckPanel(win.document, deckEl);
-              injectAllSidenavButtons(win.document);
-              updateAgentEntryVisibility();
-              onTabSelect();
-            }
-          } catch (_e) {
-            // ignore
-          }
-        },
-      },
-      ["tab"],
-      "agentPanel",
-    );
-  } catch (e) {
-    ztoolkit.log("[Agent] injectAgentPanel error:", e);
+function loadSectionData(body: HTMLElement, item: any) {
+  const reader = getActiveReader();
+  const itemId = resolveAttachmentItemId(reader, item);
+  if (itemId > 0) {
+    applySectionData(body, reader, itemId);
   }
 }
 
-export function removeAgentPanel(_win: Window) {
+function applySectionData(
+  body: HTMLElement,
+  reader: _ZoteroTypes.ReaderInstance | null,
+  itemId: number,
+) {
+  body.dataset.itemID = String(itemId);
+  addon.data.popup.currentReader = reader;
+  const session = chatStore.getSession(itemId);
+  if (session) {
+    addon.data.chat.contextMode = session.contextMode;
+  }
+  renderMessages(body, itemId);
+  syncContextSelector(body, itemId);
+  syncLayoutState(body, itemId);
+  syncPrefill(body);
+}
+
+// ===================== Item Resolution =====================
+
+function resolveAttachmentItemId(
+  reader: _ZoteroTypes.ReaderInstance | null,
+  item: any,
+): number {
+  if (reader?._item?.id) return reader._item.id;
+  if (!item) return 0;
+  const id = Number(item.id) || 0;
+  if (id <= 0) return 0;
+
   try {
-    if (notifierID) {
-      Zotero.Notifier.unregisterObserver(notifierID);
-      notifierID = null;
+    if (typeof item.isAttachment === "function" && item.isAttachment()) {
+      return id;
     }
-    agentPanel?.remove();
-    agentPanel = null;
-    agentRoot = null;
-    for (const el of injectedButtons) {
-      el.remove();
+  } catch (_e) { /* ignore */ }
+
+  return 0;
+}
+
+// ===================== Registration =====================
+
+export function registerAgentSection() {
+  try {
+    const result = (Zotero.ItemPaneManager as any).registerSection({
+      paneID: "zoteroagent-chat",
+      pluginID: config.addonID,
+      header: {
+        l10nID: getLocaleID("itemPaneSection-header"),
+        icon: `chrome://${config.addonRef}/content/icons/section-16.svg`,
+      },
+      sidenav: {
+        l10nID: getLocaleID("itemPaneSection-sidenav"),
+        icon: `chrome://${config.addonRef}/content/icons/section-20.svg`,
+        // @ts-ignore
+        orderable: false,
+      },
+      onInit: ({ body, setEnabled }: { body: HTMLElement; setEnabled: (v: boolean) => void }) => {
+        setEnabled(true);
+        const paneUID = Zotero.Utilities.randomString(8);
+        body.dataset.paneUid = paneUID;
+      },
+      onDestroy: ({ body }: { body: HTMLElement }) => {
+        delete body.dataset.paneUid;
+      },
+      onItemChange: ({
+        setEnabled,
+        tabType,
+        item,
+        body,
+      }: {
+        setEnabled: (v: boolean) => void;
+        tabType: string;
+        item: any;
+        body: HTMLElement;
+      }) => {
+        setEnabled(tabType === "reader");
+        if (item) {
+          body.dataset.itemID = String(item.id);
+        }
+        return true;
+      },
+      onRender: ({ body, item }: { body: HTMLElement; item: any }) => {
+        activeBody = body;
+        body.style.display = "flex";
+        body.style.flexDirection = "column";
+        body.style.overflow = "hidden";
+        body.style.minWidth = "0";
+        body.style.width = "100%";
+        body.style.maxWidth = "100%";
+        body.style.boxSizing = "border-box";
+
+        ensureChatUI(body);
+        loadSectionData(body, item);
+        onUpdateHeight({ body });
+      },
+      sectionButtons: [
+        {
+          type: "fullHeight",
+          icon: `chrome://${config.addonRef}/content/icons/full-16.svg`,
+          l10nID: getLocaleID("itemPaneSection-fullHeight"),
+          onClick: ({ body }: { body: HTMLElement }) => {
+            const details = body.closest("item-details");
+            onUpdateHeight({ body });
+            // @ts-ignore item-details is a Zotero custom element
+            details?.scrollToPane?.(sectionPaneID);
+          },
+        },
+      ],
+    });
+    if (result && typeof result === "string") {
+      sectionPaneID = result;
     }
-    injectedButtons = [];
+  } catch (e) {
+    ztoolkit.log("[Agent] registerAgentSection error:", e);
+  }
+}
+
+function onUpdateHeight({ body }: { body: HTMLElement }) {
+  try {
+    const details = body.closest("item-details");
+    const head = body
+      .closest("item-pane-custom-section")
+      ?.querySelector(".head");
+    if (!details || !head) return;
+    const viewItem = details.querySelector(".zotero-view-item");
+    if (!viewItem) return;
+    const height = viewItem.clientHeight - head.clientHeight - 8;
+    if (height > 0) {
+      body.style.height = `${height}px`;
+      body.style.setProperty("--details-height", `${height}px`);
+    }
   } catch (_e) {
     // ignore
   }
 }
 
-function resolveContextDeck(doc: Document, contextEl?: Element | null): Element | null {
-  const paneContainer = contextEl?.closest("[class*='context-pane']") as Element | null;
-  const scopedDeck = paneContainer?.querySelector("#zotero-context-pane-deck");
-  if (scopedDeck) return scopedDeck as Element;
-  return doc.getElementById("zotero-context-pane-deck");
-}
-
-function injectDeckPanel(doc: Document, targetDeck?: Element | null) {
-  const deck = targetDeck || resolveContextDeck(doc);
-  if (!deck) return;
-  if (agentPanel && agentPanel.isConnected && agentPanel.parentElement === deck) return;
-  if (agentPanel && agentPanel.parentElement && agentPanel.parentElement !== deck) {
-    agentPanel.remove();
+export function unregisterAgentSection() {
+  try {
+    if (sectionPaneID) {
+      Zotero.ItemPaneManager.unregisterSection(sectionPaneID);
+      sectionPaneID = null;
+    }
+  } catch (_e) {
+    // ignore
   }
-  agentPanel = null;
-  agentRoot = null;
-
-  agentPanel = doc.createXULElement("vbox");
-  agentPanel.id = "zoteroagent-context-panel";
-  agentPanel.setAttribute("flex", "1");
-  (agentPanel as any).style.cssText = "position:relative;";
-  deck.appendChild(agentPanel);
-
-  agentRoot = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "div",
-  ) as HTMLElement;
-  agentRoot.id = "zoteroagent-context-root";
-  agentRoot.style.cssText = "position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;";
-  agentPanel.appendChild(agentRoot);
-
-  ensureChatUI(agentRoot);
-}
-
-function ensureDeckPanel(doc: Document, targetDeck?: Element | null) {
-  const deck = targetDeck || resolveContextDeck(doc);
-  if (!deck) return;
-  if (!agentPanel || !agentPanel.isConnected || agentPanel.parentElement !== deck) {
-    injectDeckPanel(doc, deck);
-  }
-}
-
-function injectAllSidenavButtons(doc: Document) {
-  const allSidenavs = doc.querySelectorAll("item-pane-sidenav");
-  for (let i = 0; i < allSidenavs.length; i++) {
-    const sn = allSidenavs[i] as Element;
-    if (sn.querySelector("#zoteroagent-sidenav-btn")) continue;
-    const container = sn.closest("[class*='context-pane']") || sn.parentElement;
-    if (container && container.id === "zotero-item-pane-sidenav-container") continue;
-    injectSidenavButton(doc, sn);
-    interceptSidenavClicks(sn);
-  }
-  updateAgentEntryVisibility();
+  activeBody = null;
 }
 
 export function updateSidebarPanels() {
   try {
-    updateAgentEntryVisibility();
-    if (agentRoot && isAgentPanelVisible()) {
-      refreshAgentContent();
-      syncPrefill(agentRoot);
-    }
+    if (!activeBody) return;
+    const reader = getActiveReader();
+    const itemId = reader?._item?.id || Number(activeBody.dataset.itemID) || 0;
+    if (itemId <= 0) return;
+    applySectionData(activeBody, reader, itemId);
+    onUpdateHeight({ body: activeBody });
   } catch (_e) {
     // ignore
   }
 }
 
-export function showAgentPanel(contextEl?: Element | null) {
-  try {
-    updateAgentEntryVisibility();
-    const win = Zotero.getMainWindow();
-    const deckEl = win
-      ? resolveContextDeck(win.document, contextEl || win.document.querySelector("item-pane-sidenav"))
-      : null;
-    if (win) ensureDeckPanel(win.document, deckEl);
-    if (!agentPanel || !agentRoot) return;
-    const deck = (deckEl || agentPanel.parentElement) as any;
-    if (!deck) return;
-    deck.selectedPanel = agentPanel;
-    updateSidenavHighlight(true);
-    refreshAgentContent();
-    syncPrefill(agentRoot);
-  } catch (_e) {
-    // ignore
-  }
-}
-
-function injectSidenavButton(doc: Document, sidenav: Element) {
-  const iconUrl = `chrome://${config.addonRef}/content/icons/section-20.svg`;
-
-  const wrapper = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
-  wrapper.id = "zoteroagent-sidenav-wrapper";
-  wrapper.style.cssText =
-    "display:flex;align-items:center;justify-content:center;padding:4px 0;pointer-events:all;";
-
-  const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
-  btn.id = "zoteroagent-sidenav-btn";
-  btn.title = "Agent Chat";
-  btn.setAttribute("role", "button");
-  btn.setAttribute("tabindex", "0");
-  btn.style.cssText = `
-    width:28px; height:28px;
-    background-image: url('${iconUrl}');
-    background-size: 20px 20px;
-    background-repeat: no-repeat;
-    background-position: center;
-    cursor: pointer;
-    border-radius: 4px;
-    box-sizing: border-box;
-    pointer-events: all;
-    opacity: 0.75;
-    transition: opacity 120ms, background-color 120ms;
-  `;
-
-  wrapper.appendChild(btn);
-
-  const divider = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
-  divider.id = "zoteroagent-sidenav-divider";
-  divider.style.cssText =
-    "height:1px;margin:4px 6px;background:var(--fill-quinary, rgba(0,0,0,0.08));";
-
-  injectedButtons.push(wrapper, divider);
-
-  const togglePaneBtn = sidenav.querySelector('[data-action="toggle-pane"]');
-  if (togglePaneBtn?.parentElement) {
-    togglePaneBtn.parentElement.before(divider, wrapper);
-  } else {
-    sidenav.appendChild(divider);
-    sidenav.appendChild(wrapper);
-  }
-
-  const handleToggle = (e: Event) => {
-    try {
-      e.stopPropagation();
-      e.preventDefault();
-
-      const win = Zotero.getMainWindow();
-      if (!win) return;
-      const deckEl = resolveContextDeck(win.document, sidenav);
-      ensureDeckPanel(win.document, deckEl);
-
-      const deck = (deckEl || agentPanel?.parentElement) as any;
-      if (!deck || !agentPanel) return;
-
-      if (deck.selectedPanel === agentPanel) {
-        switchBackToItemDetails(deck);
-        updateSidenavHighlight(false);
-      } else {
-        showAgentPanel();
-      }
-    } catch (_e) {
-      ztoolkit.log("[Agent] sidenav btn toggle error:", _e);
-    }
-  };
-
-  btn.addEventListener("click", handleToggle);
-  wrapper.addEventListener("click", handleToggle);
-
-  btn.addEventListener("mouseenter", () => {
-    btn.style.opacity = "1";
-    btn.style.backgroundColor = "var(--fill-quinary, rgba(0,0,0,0.06))";
-  });
-  btn.addEventListener("mouseleave", () => {
-    const isActive = agentPanel?.parentElement &&
-      (agentPanel.parentElement as any).selectedPanel === agentPanel;
-    btn.style.opacity = isActive ? "1" : "0.75";
-    btn.style.backgroundColor = isActive
-      ? "var(--fill-quinary, rgba(0,0,0,0.06))" : "transparent";
-  });
-}
-
-function interceptSidenavClicks(sidenav: Element) {
-  sidenav.addEventListener(
-    "mousedown",
-    (e: Event) => {
-      try {
-        const target = e.target as HTMLElement;
-        if (!target) return;
-        if (target.id === "zoteroagent-sidenav-btn" ||
-            target.id === "zoteroagent-sidenav-wrapper") return;
-        const doc = sidenav.ownerDocument;
-        const deck = resolveContextDeck(doc, sidenav) as any;
-        if (deck?.selectedPanel === agentPanel) {
-          switchBackToItemDetails(deck);
-        }
-        updateSidenavHighlight(false);
-      } catch (_e) {
-        // ignore
-      }
-    },
-    true,
-  );
-}
-
-function switchBackToItemDetails(deck: any) {
-  const itemDeck = deck.querySelector("#zotero-context-pane-item-deck");
-  if (!itemDeck) return;
-  const parent = Array.from(deck.children as HTMLCollection).find(
-    (child: Element) => child.contains(itemDeck),
-  );
-  if (parent) {
-    (deck as any).selectedPanel = parent;
-  }
-}
-
-function updateSidenavHighlight(active: boolean) {
-  const allBtns = Zotero.getMainWindow()?.document.querySelectorAll("#zoteroagent-sidenav-btn");
-  if (!allBtns) return;
-  for (const btn of Array.from(allBtns)) {
-    const el = btn as HTMLElement;
-    el.style.opacity = active ? "1" : "0.75";
-    el.style.backgroundColor = active
-      ? "var(--fill-quinary, rgba(0,0,0,0.06))" : "transparent";
-  }
-}
-
-function shouldShowAgentEntry(): boolean {
-  try {
-    const tabId =
-      (typeof Zotero_Tabs !== "undefined"
-        ? (Zotero_Tabs as any).selectedID
-        : "") ||
-      (Zotero as any).getActiveZoteroPane?.()?.getSelectedTabID?.() ||
-      "";
-    if (!tabId) return false;
-    const reader = Zotero.Reader?.getByTabID?.(tabId);
-    return Boolean(reader?._item?.id);
-  } catch (_e) {
-    // ignore
-  }
-  return false;
-}
-
-function updateAgentEntryVisibility() {
-  const doc = Zotero.getMainWindow()?.document;
-  if (!doc) return;
-  const show = shouldShowAgentEntry();
-  const els = doc.querySelectorAll("#zoteroagent-sidenav-wrapper, #zoteroagent-sidenav-divider");
-  for (const el of Array.from(els)) {
-    (el as HTMLElement).style.display = show ? "" : "none";
-  }
-  if (!show) {
-    const deck = agentPanel?.parentElement as any;
-    if (deck?.selectedPanel === agentPanel) {
-      switchBackToItemDetails(deck);
-      updateSidenavHighlight(false);
-    }
-  }
-}
-
-function isAgentPanelVisible(): boolean {
-  if (!agentPanel) return false;
-  const deck = agentPanel.parentElement as any;
-  return deck?.selectedPanel === agentPanel;
-}
-
-function onTabSelect() {
-  if (!agentRoot || !isAgentPanelVisible()) return;
-  refreshAgentContent();
-}
-
-function getActiveReader(): _ZoteroTypes.ReaderInstance | null {
-  const tabId =
-    (typeof Zotero_Tabs !== "undefined"
-      ? (Zotero_Tabs as any).selectedID
-      : "") ||
-    (Zotero as any).getActiveZoteroPane?.()?.getSelectedTabID?.() ||
-    "";
-  if (tabId) {
-    const r = Zotero.Reader?.getByTabID?.(tabId);
-    if (r) return r;
-  }
-  if (addon.data.popup.currentReader) {
-    return addon.data.popup.currentReader;
-  }
-  const readers = (Zotero.Reader as any)?._readers;
-  if (Array.isArray(readers) && readers.length > 0) {
-    return readers[readers.length - 1];
-  }
-  return null;
-}
-
-function refreshAgentContent() {
-  if (!agentRoot) return;
-  const reader = getActiveReader();
-  const itemId = reader?._item?.id || 0;
-
-  if (itemId > 0) {
-    agentRoot.dataset.itemID = String(itemId);
-    addon.data.popup.currentReader = reader;
-    const session = chatStore.getSession(itemId);
-    if (session) {
-      addon.data.chat.contextMode = session.contextMode;
-    }
-    syncSessionSelector(agentRoot, itemId);
-    renderMessages(agentRoot, itemId);
-    syncContextSelector(agentRoot, itemId);
-    syncLayoutState(agentRoot, itemId);
-  }
+export function showAgentPanel() {
+  updateSidebarPanels();
 }
 
 // ===================== Chat UI =====================
@@ -378,38 +198,7 @@ function ensureChatUI(body: HTMLElement) {
   const container = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   container.id = "zoteroagent-chat-panel";
   container.className = "zoteroagent-chat-panel";
-  body.dataset.chatMode = "welcome";
-
-  const welcome = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  welcome.id = "zoteroagent-chat-welcome";
-  welcome.className = "zoteroagent-chat-welcome";
-
-  const welcomeTitle = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  welcomeTitle.className = "zoteroagent-welcome-title";
-  welcomeTitle.textContent = "Agent Chat";
-
-  const welcomeDesc = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  welcomeDesc.className = "zoteroagent-welcome-desc";
-  welcomeDesc.textContent = "Choose a mode to start";
-
-  const modeButtons = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  modeButtons.className = "zoteroagent-mode-buttons";
-
-  const analyzeBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-  analyzeBtn.id = "zoteroagent-mode-analyze";
-  analyzeBtn.className = "zoteroagent-mode-button";
-  analyzeBtn.textContent = "分析文献";
-
-  const chatModeBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-  chatModeBtn.id = "zoteroagent-mode-chat";
-  chatModeBtn.className = "zoteroagent-mode-button";
-  chatModeBtn.textContent = "对话提问";
-
-  modeButtons.appendChild(analyzeBtn);
-  modeButtons.appendChild(chatModeBtn);
-  welcome.appendChild(welcomeTitle);
-  welcome.appendChild(welcomeDesc);
-  welcome.appendChild(modeButtons);
+  body.dataset.chatMode = "chat";
 
   const messagesDiv = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   messagesDiv.id = "zoteroagent-chat-messages";
@@ -425,24 +214,54 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLSelectElement;
   sessionSelect.id = "zoteroagent-session-select";
   sessionSelect.className = "zoteroagent-session-select";
+  sessionSelect.style.display = "none";
 
-  const renameSessionBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-  renameSessionBtn.id = "zoteroagent-session-rename";
-  renameSessionBtn.className = "zoteroagent-session-action";
-  renameSessionBtn.textContent = "Rename";
+  const sessionTitle = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
+  sessionTitle.id = "zoteroagent-session-title";
+  sessionTitle.className = "zoteroagent-session-title";
+  sessionTitle.textContent = "New chat";
 
-  const newSessionBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  const newSessionBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
   newSessionBtn.id = "zoteroagent-session-new";
-  newSessionBtn.className = "zoteroagent-session-action";
-  newSessionBtn.textContent = "New";
+  newSessionBtn.className = "zoteroagent-session-action icon-only";
+  setIconButton(newSessionBtn, "new", "新建会话");
 
-  const deleteSessionBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  const historyBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  historyBtn.id = "zoteroagent-session-history";
+  historyBtn.className = "zoteroagent-session-action icon-only";
+  setIconButton(historyBtn, "history", "历史对话");
+
+  const renameSessionBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  renameSessionBtn.id = "zoteroagent-session-rename";
+  renameSessionBtn.className = "zoteroagent-session-action icon-only";
+  setIconButton(renameSessionBtn, "rename", "重命名会话");
+
+  const deleteSessionBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
   deleteSessionBtn.id = "zoteroagent-session-delete";
-  deleteSessionBtn.className = "zoteroagent-session-action danger";
-  deleteSessionBtn.textContent = "Delete";
+  deleteSessionBtn.className = "zoteroagent-session-action danger icon-only";
+  setIconButton(deleteSessionBtn, "delete", "删除会话");
 
+  const historyPanel = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  historyPanel.id = "zoteroagent-history-panel";
+  historyPanel.className = "zoteroagent-history-panel";
+  historyPanel.style.display = "none";
+
+  sessionRow.appendChild(sessionTitle);
   sessionRow.appendChild(sessionSelect);
   sessionRow.appendChild(newSessionBtn);
+  sessionRow.appendChild(historyBtn);
   sessionRow.appendChild(renameSessionBtn);
   sessionRow.appendChild(deleteSessionBtn);
 
@@ -523,10 +342,13 @@ function ensureChatUI(body: HTMLElement) {
     contextSelect.appendChild(opt);
   }
 
-  const clearBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  const clearBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
   clearBtn.id = "zoteroagent-chat-clear";
   clearBtn.className = "zoteroagent-clear-button";
-  clearBtn.textContent = "Clear";
+  setIconButton(clearBtn, "clear", "清空会话");
 
   const serviceSelect = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -543,8 +365,12 @@ function ensureChatUI(body: HTMLElement) {
   inputArea.appendChild(inputRow);
   inputArea.appendChild(controlsRow);
 
-  container.appendChild(welcome);
-  container.appendChild(sessionRow);
+  const headerWrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  headerWrap.className = "zoteroagent-header-wrap";
+  headerWrap.appendChild(sessionRow);
+  headerWrap.appendChild(historyPanel);
+
+  container.appendChild(headerWrap);
   container.appendChild(messagesDiv);
   container.appendChild(inputArea);
   body.appendChild(container);
@@ -553,26 +379,6 @@ function ensureChatUI(body: HTMLElement) {
 }
 
 function bindChatEvents(body: HTMLElement) {
-  body.querySelector("#zoteroagent-mode-analyze")?.addEventListener("click", () => {
-    refreshAgentContent();
-    body.dataset.chatMode = "chat";
-    const itemId = Number(body.dataset.itemID);
-    if (itemId > 0) {
-      syncLayoutState(body, itemId);
-      void analyzePaper(body, itemId);
-    }
-  });
-  body.querySelector("#zoteroagent-mode-chat")?.addEventListener("click", () => {
-    refreshAgentContent();
-    body.dataset.chatMode = "chat";
-    const itemId = Number(body.dataset.itemID);
-    if (itemId > 0) {
-      syncLayoutState(body, itemId);
-    }
-    (
-      body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null
-    )?.focus();
-  });
   body.querySelector("#zoteroagent-chat-send")?.addEventListener("click", () => {
     void submitQuestion(body);
   });
@@ -638,6 +444,18 @@ function bindChatEvents(body: HTMLElement) {
       syncLayoutState(body, itemId);
     });
   });
+  body.querySelector("#zoteroagent-session-history")?.addEventListener("click", () => {
+    const panel = body.querySelector("#zoteroagent-history-panel") as HTMLElement | null;
+    if (!panel) return;
+    const isOpen = panel.style.display !== "none";
+    if (isOpen) {
+      panel.style.display = "none";
+      return;
+    }
+    const itemId = Number(body.dataset.itemID);
+    renderHistoryPanel(body, itemId);
+    panel.style.display = "block";
+  });
   body.querySelector(".zoteroagent-reference-dismiss")?.addEventListener("click", () => {
     addon.data.chat.referenceText = "";
     syncReferenceCard(body);
@@ -668,11 +486,11 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   if (!sendBtn) return;
   if (generating) {
     sendBtn.classList.add("is-stop");
-    sendBtn.innerHTML = "&#x25A0;";
+    sendBtn.textContent = "\u25A0";
     sendBtn.title = "停止生成";
   } else {
     sendBtn.classList.remove("is-stop");
-    sendBtn.innerHTML = "&#x27A4;";
+    sendBtn.textContent = "\u27A4";
     sendBtn.title = "发送";
     activeXHR = null;
   }
@@ -690,45 +508,25 @@ function abortGeneration(body: HTMLElement) {
 
 // ===================== AI Logic =====================
 
-async function analyzePaper(body: HTMLElement, itemId: number) {
-  if (isGenerating) return;
-  const mode = addon.data.chat.contextMode;
-  chatStore.addMessage(itemId, { role: "user", content: "分析这篇论文的核心内容、方法和局限性。" }, mode);
-  const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "" };
-  chatStore.addMessage(itemId, assistant, mode);
-  renderMessages(body, itemId);
-  syncLayoutState(body, itemId);
-  setGenerating(body, true);
-  try {
-    const fullText = await getFullText(itemId);
-    if (!fullText) {
-      assistant.content = "未读取到全文内容，请确认当前附件是可读的 PDF。";
-      renderMessages(body, itemId);
-      setGenerating(body, false);
-      return;
-    }
-    let lastRefresh = 0;
-    await AIService.chat(summarizePrompt(fullText) as any, {
-      stream: true,
-      onRequest: (xhr) => { activeXHR = xhr; },
-      onChunk: (state) => {
-        assistant.content = state.content;
-        assistant.reasoning = state.reasoning;
-        const now = Date.now();
-        if (now - lastRefresh > 150) {
-          lastRefresh = now;
-          updateStreamingMessage(body, state);
-        }
-      },
-    });
-  } catch (e: any) {
-    if (!assistant.content && !assistant.reasoning) {
-      assistant.content = `[Error] ${e?.message || String(e)}`;
-    }
+function getActiveReader(): _ZoteroTypes.ReaderInstance | null {
+  const tabId =
+    (typeof Zotero_Tabs !== "undefined"
+      ? (Zotero_Tabs as any).selectedID
+      : "") ||
+    (Zotero as any).getActiveZoteroPane?.()?.getSelectedTabID?.() ||
+    "";
+  if (tabId) {
+    const r = Zotero.Reader?.getByTabID?.(tabId);
+    if (r) return r;
   }
-  chatStore.touchSession(itemId, mode);
-  setGenerating(body, false);
-  renderMessages(body, itemId);
+  if (addon.data.popup.currentReader) {
+    return addon.data.popup.currentReader;
+  }
+  const readers = (Zotero.Reader as any)?._readers;
+  if (Array.isArray(readers) && readers.length > 0) {
+    return readers[readers.length - 1];
+  }
+  return null;
 }
 
 async function submitQuestion(body: HTMLElement) {
@@ -757,7 +555,7 @@ async function submitQuestion(body: HTMLElement) {
   body.dataset.chatMode = "chat";
   syncLayoutState(body, itemId);
 
-  const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "" };
+  const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "", model: getModelLabel() };
   chatStore.addMessage(itemId, assistant, addon.data.chat.contextMode);
   const sessions = chatStore.getMessages(itemId);
   renderMessages(body, itemId);
@@ -765,12 +563,17 @@ async function submitQuestion(body: HTMLElement) {
 
   const reader = addon.data.popup.currentReader;
   const mode = addon.data.chat.contextMode;
+  const maxCtx = getActiveMaxContextTokens();
   ztoolkit.log(`[Agent] submitQuestion: mode=${mode}`);
   const ctxResult = await getContextByMode({ mode, reader, itemId });
   ztoolkit.log(`[Agent] ctxResult: source=${ctxResult.source}, text.len=${ctxResult.text?.length}, page=${ctxResult.pageNumber}`);
+  const safeCtxText =
+    ctxResult.source === "none"
+      ? ""
+      : truncateDocContext(ctxResult.text, Math.floor(maxCtx * 0.5));
 
   const ctxInfo: ContextInfo = {
-    text: ctxResult.text,
+    text: safeCtxText,
     source: ctxResult.source,
     pageNumber: ctxResult.pageNumber,
   };
@@ -779,14 +582,17 @@ async function submitQuestion(body: HTMLElement) {
     ? `> ${refText.replace(/\n/g, "\n> ")}\n\n${question}`
     : question;
   const promptMsgs = askPrompt(aiQuestion, ctxInfo);
-  const history = sessions
-    .slice(0, -2)
+  const fullHistory = sessions.slice(0, -2);
+  await ensureAiSessionSummary(itemId, fullHistory);
+  const session = chatStore.getSession(itemId);
+  const history = buildHistoryForRequest(fullHistory, session)
     .map((m: ChatMessage) => ({ role: m.role, content: m.content }));
-  const messages = [
-    promptMsgs[0],
-    ...history,
-    promptMsgs[1],
-  ] as any;
+  const messages = buildContextMessages({
+    systemMessage: promptMsgs[0] as any,
+    currentMessage: promptMsgs[1] as any,
+    history: history as any,
+    maxContextTokens: maxCtx,
+  }) as any;
   ztoolkit.log(`[Agent] final messages count=${messages.length}, system=${promptMsgs[0].content.substring(0, 80)}...`);
 
   try {
@@ -821,6 +627,92 @@ function getModelLabel(): string {
   return svc ? svc.model : "AI";
 }
 
+function getActiveMaxContextTokens(): number {
+  const cfg = AIService.getConfig();
+  const preset = getPreset(cfg.provider);
+  return preset?.maxContextTokens || 32000;
+}
+
+function buildHistoryForRequest(history: ChatMessage[], session: ChatSession | null): ChatMessage[] {
+  if (!session) return history;
+  const recentWindow = 8;
+  const recentStart = Math.max(0, history.length - recentWindow);
+  const recentTurns = history.slice(recentStart);
+  const summaryText = (session.summaryText || "").trim();
+  const summaryUpToIndex = Math.max(0, session.summaryUpToIndex || 0);
+  if (summaryText && summaryUpToIndex > 0 && recentStart > 0) {
+    return [
+      {
+        role: "assistant",
+        content: `[Session Summary]\n${summaryText}`,
+      },
+      ...recentTurns,
+    ];
+  }
+  return history;
+}
+
+async function ensureAiSessionSummary(itemId: number, history: ChatMessage[]) {
+  const session = chatStore.getSession(itemId);
+  if (!session) return;
+  const recentWindow = 8;
+  const minDeltaMessages = 6;
+  const minIntervalMs = 30_000;
+
+  const summarizeUpToIndex = Math.max(0, history.length - recentWindow);
+  if (summarizeUpToIndex <= 0) return;
+
+  const prevUpToIndex = Math.max(0, session.summaryUpToIndex || 0);
+  if (summarizeUpToIndex <= prevUpToIndex) return;
+  if (summarizeUpToIndex - prevUpToIndex < minDeltaMessages) return;
+  if (Date.now() - (session.summaryUpdatedAt || 0) < minIntervalMs) return;
+
+  const deltaMessages = history.slice(prevUpToIndex, summarizeUpToIndex);
+  if (deltaMessages.length === 0) return;
+
+  try {
+    const prompts = summarizeHistoryPrompt(session.summaryText || "", deltaMessages as any);
+    const result = await AIService.chat(prompts as any, {
+      stream: false,
+      disableThinking: true,
+    });
+    const nextSummary = (result.content || "").trim();
+    if (nextSummary) {
+      chatStore.updateSessionSummary(itemId, nextSummary, summarizeUpToIndex);
+      return;
+    }
+  } catch (_e) {
+    // fall through to deterministic fallback
+  }
+
+  const fallback = buildFallbackSummary(session.summaryText || "", deltaMessages);
+  if (fallback) {
+    chatStore.updateSessionSummary(itemId, fallback, summarizeUpToIndex);
+  }
+}
+
+function buildFallbackSummary(previousSummary: string, deltaMessages: ChatMessage[]): string {
+  const lines: string[] = [];
+  if (previousSummary.trim()) {
+    lines.push(previousSummary.trim());
+    lines.push("");
+    lines.push("Latest updates:");
+  } else {
+    lines.push("会话摘要：");
+  }
+
+  const tail = deltaMessages.slice(-10);
+  for (const m of tail) {
+    const role = m.role === "user" ? "User" : "Assistant";
+    const text = (m.content || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    lines.push(`- ${role}: ${text.length > 180 ? `${text.slice(0, 180)}...` : text}`);
+  }
+
+  const merged = lines.join("\n").trim();
+  return merged.length > 3000 ? `${merged.slice(0, 3000)}...` : merged;
+}
+
 async function copyTextToClipboard(doc: Document, text: string): Promise<boolean> {
   if (!text) return false;
   try {
@@ -847,23 +739,95 @@ async function copyTextToClipboard(doc: Document, text: string): Promise<boolean
   }
 }
 
+function getIconSvg(
+  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history",
+): string {
+  switch (icon) {
+    case "history":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4.5l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    case "copy":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="4" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="4" y="7" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+    case "delete":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 6v-1.1c0-.9.7-1.6 1.6-1.6h1.8c.9 0 1.6.7 1.6 1.6V6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 6l.7 9.2c.1.8.7 1.5 1.5 1.5h2.6c.8 0 1.5-.7 1.5-1.5l.7-9.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 8.4v5.8M11 8.4v5.8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+    case "new":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    case "rename":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 13.6l-.4 2.8 2.8-.4 7.8-7.8-2.4-2.4-7.8 7.8z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.9 5.5l2.4 2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.8 16.4h12.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+    case "clear":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.2 5.2l9.6 9.6M14.8 5.2l-9.6 9.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    case "check":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.4 3.4 7.6-7.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    case "error":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
+    default:
+      return "";
+  }
+}
+
+function setIconButton(
+  btn: HTMLButtonElement,
+  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history",
+  label: string,
+) {
+  btn.classList.add("zoteroagent-icon-button");
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+  insertSvgMarkup(btn, getIconSvg(icon));
+}
+
+function insertSvgMarkup(el: HTMLElement, svgMarkup: string) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+  if (!svgMarkup) return;
+  try {
+    const win = el.ownerDocument.defaultView;
+    if (!win) throw new Error("no window");
+    const svgDoc = new win.DOMParser().parseFromString(svgMarkup, "image/svg+xml");
+    if (!svgDoc.querySelector("parsererror")) {
+      el.appendChild(el.ownerDocument.adoptNode(svgDoc.documentElement));
+      return;
+    }
+  } catch (_e) { /* fallback */ }
+  el.textContent = el.getAttribute("aria-label")?.charAt(0) || "?";
+}
+
 function createAssistantCopyButton(doc: Document): HTMLButtonElement {
   const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button") as HTMLButtonElement;
   btn.className = "zoteroagent-copy-button";
-  btn.textContent = "Copy";
-  btn.title = "Copy assistant reply";
+  setIconButton(btn, "copy", "复制回答");
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const wrapper = (btn.closest(".zoteroagent-message.assistant") || null) as HTMLElement | null;
     const raw = wrapper?.dataset.rawContent || "";
     void copyTextToClipboard(doc, raw).then((ok) => {
-      const original = btn.textContent || "Copy";
-      btn.textContent = ok ? "Copied" : "Failed";
+      insertSvgMarkup(btn, getIconSvg(ok ? "check" : "error"));
+      btn.title = ok ? "已复制" : "复制失败";
+      btn.classList.toggle("is-success", ok);
+      btn.classList.toggle("is-error", !ok);
       setTimeout(() => {
-        btn.textContent = original;
+        insertSvgMarkup(btn, getIconSvg("copy"));
+        btn.title = "复制回答";
+        btn.classList.remove("is-success", "is-error");
       }, 1200);
     });
+  });
+  return btn;
+}
+
+function createMessageDeleteButton(doc: Document, body: HTMLElement, itemId: number): HTMLButtonElement {
+  const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button") as HTMLButtonElement;
+  btn.className = "zoteroagent-delete-button";
+  setIconButton(btn, "delete", "删除此消息");
+  btn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const wrapper = btn.closest(".zoteroagent-message") as HTMLElement | null;
+    if (!wrapper) return;
+    const idx = Number(wrapper.dataset.msgIndex);
+    if (Number.isNaN(idx) || idx < 0) return;
+    chatStore.deleteMessage(itemId, idx);
+    renderMessages(body, itemId);
+    syncLayoutState(body, itemId);
   });
   return btn;
 }
@@ -946,10 +910,16 @@ function updateStreamingMessage(
     }
     msgWrapper.dataset.rawContent = state.content || "";
 
-    container.scrollTop = container.scrollHeight;
+    if (isNearBottom(container)) {
+      container.scrollTop = container.scrollHeight;
+    }
   } catch (e) {
     ztoolkit.log("[Agent] updateStreamingMessage error:", e);
   }
+}
+
+function isNearBottom(el: HTMLElement, threshold = 60): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
 
 function renderMessages(body: HTMLElement, itemId: number) {
@@ -963,9 +933,11 @@ function renderMessages(body: HTMLElement, itemId: number) {
     }
 
     const doc = body.ownerDocument;
-    for (const msg of sessions) {
-      const wrapper = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    for (let i = 0; i < sessions.length; i++) {
+      const msg = sessions[i];
+      const wrapper = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
       wrapper.className = `zoteroagent-message ${msg.role === "user" ? "user" : "assistant"}`;
+      wrapper.dataset.msgIndex = String(i);
 
       const roleRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       roleRow.className = "zoteroagent-role-row";
@@ -973,7 +945,7 @@ function renderMessages(body: HTMLElement, itemId: number) {
       dot.className = `zoteroagent-role-dot ${msg.role === "user" ? "user" : "assistant"}`;
       const roleLabel = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
       roleLabel.className = "zoteroagent-role-label";
-      roleLabel.textContent = msg.role === "user" ? "You" : getModelLabel();
+      roleLabel.textContent = msg.role === "user" ? "You" : (msg.model || getModelLabel());
       roleRow.appendChild(dot);
       roleRow.appendChild(roleLabel);
 
@@ -1005,21 +977,22 @@ function renderMessages(body: HTMLElement, itemId: number) {
         renderUserMessage(inner, msg.content);
       }
 
+      wrapper.appendChild(inner);
+      const actions = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      actions.className = "zoteroagent-message-actions";
       if (msg.role === "assistant") {
         (wrapper as HTMLElement).dataset.rawContent = msg.content || "";
-        wrapper.appendChild(inner);
-        const actions = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-        actions.className = "zoteroagent-message-actions";
         actions.appendChild(createAssistantCopyButton(doc));
-        wrapper.appendChild(actions);
-      } else {
-        wrapper.appendChild(inner);
       }
+      actions.appendChild(createMessageDeleteButton(doc, body, itemId));
+      wrapper.appendChild(actions);
       container.appendChild(wrapper);
     }
 
     syncSessionSelector(body, itemId);
-    container.scrollTop = container.scrollHeight;
+    if (isNearBottom(container)) {
+      container.scrollTop = container.scrollHeight;
+    }
   } catch (e) {
     ztoolkit.log("[Agent] renderMessages error:", e);
   }
@@ -1114,6 +1087,61 @@ function syncSessionSelector(body: HTMLElement, itemId: number) {
     select.appendChild(fallback);
   }
   select.value = chatStore.getActiveSessionId(itemId);
+
+  const titleEl = body.querySelector("#zoteroagent-session-title") as HTMLElement | null;
+  if (titleEl) {
+    const activeSession = chatStore.getSession(itemId);
+    titleEl.textContent = activeSession?.title || "New chat";
+  }
+}
+
+function renderHistoryPanel(body: HTMLElement, itemId: number) {
+  const panel = body.querySelector("#zoteroagent-history-panel") as HTMLElement | null;
+  if (!panel) return;
+  const doc = body.ownerDocument;
+  while (panel.firstChild) panel.firstChild.remove();
+
+  const sessionList = chatStore.listSessions(itemId);
+  if (sessionList.length === 0) {
+    const empty = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    empty.className = "zoteroagent-history-empty";
+    empty.textContent = "No chat history";
+    panel.appendChild(empty);
+    return;
+  }
+
+  for (const s of sessionList) {
+    const row = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLElement;
+    row.className = "zoteroagent-history-item";
+    if (chatStore.getActiveSessionId(itemId) === s.sessionId) {
+      row.classList.add("active");
+    }
+    row.dataset.sessionId = s.sessionId;
+
+    const title = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    title.className = "zoteroagent-history-item-title";
+    title.textContent = s.title;
+
+    const meta = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    meta.className = "zoteroagent-history-item-meta";
+    const msgCount = s.messageCount;
+    const dateStr = new Date(s.updatedAt).toLocaleDateString();
+    meta.textContent = `${msgCount} messages · ${dateStr}`;
+
+    row.appendChild(title);
+    row.appendChild(meta);
+
+    row.addEventListener("click", () => {
+      chatStore.setActiveSession(itemId, s.sessionId);
+      panel.style.display = "none";
+      renderMessages(body, itemId);
+      syncSessionSelector(body, itemId);
+      syncContextSelector(body, itemId);
+      syncLayoutState(body, itemId);
+    });
+
+    panel.appendChild(row);
+  }
 }
 
 function populateServiceOptions(select: HTMLSelectElement) {
@@ -1142,28 +1170,15 @@ function populateServiceOptions(select: HTMLSelectElement) {
   select.value = activeId || services[0]?.id || "";
 }
 
-function syncLayoutState(body: HTMLElement, itemId: number) {
-  const sessions = chatStore.getMessages(itemId);
-  const mode = body.dataset.chatMode || "welcome";
-  const hasMessages = sessions.length > 0;
-  const welcome = body.querySelector("#zoteroagent-chat-welcome") as HTMLElement | null;
+function syncLayoutState(body: HTMLElement, _itemId: number) {
   const sessionRow = body.querySelector("#zoteroagent-session-row") as HTMLElement | null;
   const messages = body.querySelector("#zoteroagent-chat-messages") as HTMLElement | null;
   const inputArea = body.querySelector("#zoteroagent-input-area") as HTMLElement | null;
-  if (!welcome || !messages || !inputArea || !sessionRow) return;
-
-  if (mode === "chat" || hasMessages) {
-    welcome.style.display = "none";
-    sessionRow.style.display = "flex";
-    messages.style.display = "flex";
-    messages.style.flexDirection = "column";
-    inputArea.style.display = "flex";
-  } else {
-    welcome.style.display = "flex";
-    sessionRow.style.display = "none";
-    messages.style.display = "none";
-    inputArea.style.display = "none";
-  }
+  if (!messages || !inputArea || !sessionRow) return;
+  sessionRow.style.display = "flex";
+  messages.style.display = "flex";
+  messages.style.flexDirection = "column";
+  inputArea.style.display = "flex";
 }
 
 function renderUserMessage(container: HTMLElement, content: string) {

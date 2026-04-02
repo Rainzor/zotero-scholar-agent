@@ -21,7 +21,6 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
     addon.data.env === "development";
   // @ts-ignore Plugin instance is not typed
   Zotero[config.addonInstance] = addon;
-  addon.hooks.onStartup();
 }
 
 function defineGlobal(name: Parameters<BasicTool["getGlobal"]>[0]): void;

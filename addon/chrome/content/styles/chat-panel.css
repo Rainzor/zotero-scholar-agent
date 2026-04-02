@@ -1,75 +1,33 @@
 /* ===== Panel Shell ===== */
 .zoteroagent-chat-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 0;
+  height: var(--details-height, 100%);
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
   padding: 0;
   box-sizing: border-box;
-  background: #ffffff;
+  background: var(--material-sidepane, #ffffff);
   overflow: hidden;
+  overflow-anchor: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  color: #1a1a1a;
-}
-
-/* ===== Welcome Screen ===== */
-.zoteroagent-chat-welcome {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 32px 20px;
-}
-
-.zoteroagent-welcome-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.zoteroagent-welcome-desc {
-  font-size: 12.5px;
-  color: #999;
-}
-
-.zoteroagent-mode-buttons {
-  width: 100%;
-  max-width: 280px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.zoteroagent-mode-button {
-  height: 42px;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  background: #fafafa;
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.zoteroagent-mode-button:hover {
-  background: #f0f0f0;
-  border-color: #d0d0d0;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  color: var(--fill-primary, #1a1a1a);
 }
 
 /* ===== Messages Area ===== */
 .zoteroagent-chat-messages {
-  display: none;
-  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 16px 14px 8px;
   gap: 0;
+  -moz-user-select: text;
+  user-select: text;
 }
 
 .zoteroagent-chat-messages::-webkit-scrollbar {
@@ -80,9 +38,17 @@
   border-radius: 999px;
 }
 
+/* ===== Header Wrapper (session row + history dropdown) ===== */
+.zoteroagent-header-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
 /* ===== Session Row ===== */
 .zoteroagent-session-row {
   display: none;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
   padding: 8px 12px 6px;
@@ -113,6 +79,15 @@
   cursor: pointer;
 }
 
+.zoteroagent-session-action.icon-only {
+  width: 26px;
+  min-width: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .zoteroagent-session-action:hover {
   border-color: #d0d0d0;
 }
@@ -120,6 +95,74 @@
 .zoteroagent-session-action.danger:hover {
   color: #ff4d4f;
   border-color: #ffccc7;
+}
+
+.zoteroagent-session-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+
+/* ===== History Panel ===== */
+.zoteroagent-history-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  border-bottom: 1px solid #e8e8e8;
+  background: #fff;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 0 0 8px 8px;
+}
+
+.zoteroagent-history-empty {
+  padding: 20px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+}
+
+.zoteroagent-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.zoteroagent-history-item:hover {
+  background: #f5f5f5;
+}
+
+.zoteroagent-history-item.active {
+  border-left-color: #4361ee;
+  background: #f0f4ff;
+}
+
+.zoteroagent-history-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-history-item-meta {
+  font-size: 11px;
+  color: #999;
 }
 
 /* ===== Message Bubble ===== */
@@ -165,19 +208,16 @@
 
 .zoteroagent-copy-button {
   margin-left: auto;
-  height: 20px;
-  border-radius: 5px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
-  padding: 0 6px;
-  font-size: 10.5px;
-  color: #777;
-  cursor: pointer;
 }
 
-.zoteroagent-copy-button:hover {
-  border-color: #cfcfcf;
-  color: #333;
+.zoteroagent-delete-button {
+  color: #9ca3af;
+}
+
+.zoteroagent-delete-button:hover {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fff5f5;
 }
 
 .zoteroagent-message-actions {
@@ -185,7 +225,54 @@
   width: 100%;
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   margin-top: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.zoteroagent-message:hover .zoteroagent-message-actions {
+  opacity: 1;
+}
+
+.zoteroagent-icon-button {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.zoteroagent-icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.zoteroagent-icon-button:hover {
+  color: #1f2937;
+  border-color: #d1d5db;
+  background: #f9fafb;
+  transform: translateY(-1px);
+}
+
+.zoteroagent-icon-button.is-success {
+  color: #16a34a;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.zoteroagent-icon-button.is-error {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 /* ---- Thinking Block ---- */
@@ -237,6 +324,9 @@
   border-top: 1px solid #fde2e2;
   max-height: 200px;
   overflow-y: auto;
+  -moz-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 
 .zoteroagent-thinking-content::-webkit-scrollbar {
@@ -255,6 +345,9 @@
   line-height: 1.65;
   font-size: 13px;
   word-break: break-word;
+  -moz-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 
 .zoteroagent-message.user .zoteroagent-message-content {
@@ -436,6 +529,7 @@
 /* ===== Input Area ===== */
 .zoteroagent-input-area {
   display: none;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 0;
   border-top: 1px solid #f0f0f0;
@@ -543,20 +637,30 @@
 }
 
 .zoteroagent-clear-button {
+  width: 24px;
+  min-width: 24px;
   height: 24px;
   border-radius: 6px;
   border: 1px solid #e0e0e0;
   background: #fff;
-  padding: 0 8px;
-  font-size: 11px;
-  color: #999;
+  padding: 0;
+  color: #9ca3af;
   cursor: pointer;
-  transition: color 120ms;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 120ms, border-color 120ms, background-color 120ms;
 }
 
 .zoteroagent-clear-button:hover {
-  color: #ff4d4f;
-  border-color: #ffccc7;
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fff5f5;
+}
+
+.zoteroagent-clear-button svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* ===== Markdown Rendered Content ===== */

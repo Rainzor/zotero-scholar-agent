@@ -1,7 +1,7 @@
 {
   "name": "zotero-agent",
   "version": "0.1.0",
-  "description": "Zotero Agent plugin for explain, translate, and ask workflows in Zotero 7.",
+  "description": "Zotero Agent plugin for explain, translate, and ask workflows in Zotero 7/8.",
   "config": {
     "addonName": "Zotero Agent",
     "addonID": "zotero-agent@runzewang.dev",
@@ -32,7 +32,7 @@
     "katex": "^0.16.44",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0",
-    "zotero-plugin-toolkit": "^5.1.0-beta.8"
+    "zotero-plugin-toolkit": "^5.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -42,7 +42,7 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.1",
-    "zotero-plugin-scaffold": "^0.8.2",
-    "zotero-types": "^4.1.0-beta.3"
+    "zotero-plugin-scaffold": "^0.8.5",
+    "zotero-types": "^4.1.2"
   }
 }

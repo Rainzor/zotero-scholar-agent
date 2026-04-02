@@ -1,4 +1,5 @@
 import { config } from "../../package.json";
+import { updateSidebarPanels } from "./sidebar";
 
 export function registerReaderInitializer() {
   Zotero.Reader.registerEventListener(
@@ -8,6 +9,14 @@ export function registerReaderInitializer() {
       addon.data.popup.selectedText = selectedText;
       addon.data.popup.currentReader = event.reader;
       addon.hooks.onReaderPopupShow(event);
+    },
+    config.addonID,
+  );
+
+  Zotero.Reader.registerEventListener(
+    "renderToolbar",
+    (_event) => {
+      updateSidebarPanels();
     },
     config.addonID,
   );

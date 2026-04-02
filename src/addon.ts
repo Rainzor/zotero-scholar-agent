@@ -9,6 +9,7 @@ export type ChatMessage = {
   content: string;
   reasoning?: string;
   timestamp?: number;
+  model?: string;
 };
 export type ChatSession = {
   sessionId: string;
@@ -16,6 +17,9 @@ export type ChatSession = {
   itemKey: string;
   title: string;
   messages: ChatMessage[];
+  summaryText?: string;
+  summaryUpToIndex?: number;
+  summaryUpdatedAt?: number;
   contextMode: ContextMode;
   createdAt: number;
   updatedAt: number;

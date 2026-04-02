@@ -79,3 +79,30 @@ export function summarizePrompt(text: string): ChatMessage[] {
     },
   ];
 }
+
+export function summarizeHistoryPrompt(
+  previousSummary: string,
+  deltaMessages: ChatMessage[],
+): ChatMessage[] {
+  const deltaText = deltaMessages
+    .map((m) => `- ${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
+  const base = previousSummary?.trim()
+    ? `已有会话摘要：\n${previousSummary}\n\n`
+    : "";
+  return [
+    {
+      role: "system",
+      content:
+        "你是会话记忆压缩器。请把多轮对话压缩成稳定、简洁、可复用的记忆，不要臆测。输出使用以下小节：\n" +
+        "1) 用户目标\n2) 已确认事实\n3) 已做决策\n4) 未解决问题\n5) 约束与偏好\n" +
+        "每个小节 1-5 条，优先保留论文术语和关键结论。",
+    },
+    {
+      role: "user",
+      content:
+        `${base}新增对话片段：\n${deltaText}\n\n` +
+        "请生成新的完整会话摘要（覆盖旧摘要并纳入新增片段）。",
+    },
+  ];
+}

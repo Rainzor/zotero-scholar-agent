@@ -1,10 +1,14 @@
 import type { ChatMessage, ChatSession, ContextMode } from "../addon";
+import { estimateTokens } from "../utils/token-estimate";
 
 type PersistedSession = {
   sessionId: string;
   title: string;
   contextMode: ContextMode;
   messages: ChatMessage[];
+  summaryText?: string;
+  summaryUpToIndex?: number;
+  summaryUpdatedAt?: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -33,13 +37,14 @@ export type ChatSessionSummary = {
   messageCount: number;
 };
 
-const MAX_MESSAGES = 36;
-const MAX_TOKENS_APPROX = 6000;
+const MAX_MESSAGES = 100;
+const MAX_TOKENS_APPROX = 50000;
 const SUMMARY_MARKER = "[Session Summary]";
 
 class ChatStore {
   private readonly cacheByItemId = new Map<number, ItemSessionState>();
   private readonly diskByItemKey = new Map<string, PersistedItemStateV2>();
+  private readonly diskItemIdToKey = new Map<number, string>();
   private readonly dirtyItemIds = new Set<number>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
@@ -61,6 +66,9 @@ class ChatStore {
         }
         const migrated = this.normalizePersisted(parsed);
         this.diskByItemKey.set(migrated.itemKey, migrated);
+        if (migrated.itemId && migrated.itemId > 0) {
+          this.diskItemIdToKey.set(migrated.itemId, migrated.itemKey);
+        }
       }
     } catch (e) {
       ztoolkit.log("[Agent] ChatStore init error:", e);
@@ -116,6 +124,9 @@ class ChatStore {
       itemKey: state.itemKey,
       title: title?.trim() || this.buildDefaultSessionTitle(index),
       messages: [],
+      summaryText: "",
+      summaryUpToIndex: 0,
+      summaryUpdatedAt: 0,
       contextMode,
       createdAt: now,
       updatedAt: now,
@@ -155,6 +166,7 @@ class ChatStore {
     return session ? session.messages : [];
   }
 
+
   addMessage(itemId: number, message: ChatMessage, contextMode: ContextMode) {
     if (itemId <= 0) return;
     let session = this.getSession(itemId);
@@ -175,6 +187,9 @@ class ChatStore {
     const session = this.getSession(itemId);
     if (!session) return;
     session.messages = [];
+    session.summaryText = "";
+    session.summaryUpToIndex = 0;
+    session.summaryUpdatedAt = Date.now();
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -203,6 +218,29 @@ class ChatStore {
     if (state.sessions.length === 0) {
       this.cacheByItemId.set(itemId, state);
     }
+    this.markDirty(itemId);
+  }
+
+  deleteMessage(itemId: number, msgIndex: number) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    if (msgIndex < 0 || msgIndex >= session.messages.length) return;
+    session.messages.splice(msgIndex, 1);
+    // Deleting a turn can invalidate summary index coverage.
+    session.summaryText = "";
+    session.summaryUpToIndex = 0;
+    session.summaryUpdatedAt = Date.now();
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  updateSessionSummary(itemId: number, summaryText: string, upToIndex: number) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    session.summaryText = summaryText;
+    session.summaryUpToIndex = Math.max(0, upToIndex);
+    session.summaryUpdatedAt = Date.now();
+    session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
 
@@ -235,7 +273,13 @@ class ChatStore {
     const cached = this.cacheByItemId.get(itemId);
     if (cached) return cached;
     const meta = this.getItemMeta(itemId);
-    const persisted = this.diskByItemKey.get(meta.itemKey);
+    let persisted = this.diskByItemKey.get(meta.itemKey);
+    if (!persisted) {
+      const knownKey = this.diskItemIdToKey.get(itemId);
+      if (knownKey) {
+        persisted = this.diskByItemKey.get(knownKey);
+      }
+    }
     if (!persisted) return null;
     const state: ItemSessionState = {
       itemId,
@@ -248,6 +292,9 @@ class ChatStore {
         itemKey: persisted.itemKey,
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
+        summaryText: s.summaryText || "",
+        summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
+        summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
         contextMode: s.contextMode,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
@@ -284,6 +331,9 @@ class ChatStore {
         title: String(s?.title || "Chat"),
         contextMode: (s?.contextMode as ContextMode) || "currentPage",
         messages: Array.isArray(s?.messages) ? s.messages : [],
+        summaryText: String(s?.summaryText || ""),
+        summaryUpToIndex: Math.max(0, Number(s?.summaryUpToIndex) || 0),
+        summaryUpdatedAt: Number(s?.summaryUpdatedAt) || 0,
         createdAt: Number(s?.createdAt) || Date.now(),
         updatedAt: Number(s?.updatedAt) || Date.now(),
       })),
@@ -313,8 +363,9 @@ class ChatStore {
   }
 
   private approxTokens(messages: ChatMessage[]): number {
-    const chars = messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning?.length || 0), 0);
-    return Math.ceil(chars / 4);
+    return messages.reduce((sum, m) => {
+      return sum + estimateTokens(m.content || "") + estimateTokens(m.reasoning || "");
+    }, 0);
   }
 
   private buildSummary(messages: ChatMessage[], previousSummary?: string): string {
@@ -366,11 +417,17 @@ class ChatStore {
             title: s.title,
             contextMode: s.contextMode,
             messages: s.messages.map((m) => ({ ...m })),
+            summaryText: s.summaryText || "",
+            summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
+            summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
             createdAt: s.createdAt,
             updatedAt: s.updatedAt,
           })),
         };
         this.diskByItemKey.set(persisted.itemKey, persisted);
+        if (persisted.itemId && persisted.itemId > 0) {
+          this.diskItemIdToKey.set(persisted.itemId, persisted.itemKey);
+        }
         await ioUtils.writeUTF8(
           this.getStorageFilePath(persisted.itemKey),
           JSON.stringify(persisted, null, 2),

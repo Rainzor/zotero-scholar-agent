@@ -12,11 +12,13 @@ function setPrefillInput(text: string, mode?: ContextMode) {
     addon.data.chat.contextMode = mode;
   }
   showAgentPanel();
+  updateSidebarPanels();
 }
 
 function setReferenceText(text: string) {
   addon.data.chat.referenceText = text;
   showAgentPanel();
+  updateSidebarPanels();
 }
 
 function clearReferenceText() {

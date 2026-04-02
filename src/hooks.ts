@@ -2,9 +2,15 @@ import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { registerPrefsWindow, registerPrefsScripts } from "./modules/preferences";
 import { registerReaderInitializer } from "./modules/reader";
-import { injectAgentPanel, removeAgentPanel, updateSidebarPanels } from "./modules/sidebar";
+import {
+  registerAgentSection,
+  unregisterAgentSection,
+  updateSidebarPanels,
+} from "./modules/sidebar";
 import { buildReaderPopup, updateReaderPopup } from "./modules/popup";
 import { chatStore } from "./services/chat-store";
+let tabNotifierID: string | null = null;
+
 async function onStartup() {
   await Promise.all([
     Zotero.initializationPromise,
@@ -20,6 +26,20 @@ async function onStartup() {
   registerPrefsWindow();
   registerReaderInitializer();
   await chatStore.init();
+  registerAgentSection();
+
+  try {
+    tabNotifierID = Zotero.Notifier.registerObserver(
+      {
+        notify: (_event: string, _type: string) => {
+          setTimeout(() => updateSidebarPanels(), 300);
+        },
+      },
+      ["tab"],
+      config.addonID,
+    );
+  } catch (_e) { /* tab notifier may not be available */ }
+
   await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 }
 
@@ -50,18 +70,21 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     );
     win.document.documentElement.appendChild(katexLink);
   }
-  injectAgentPanel(win);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-  removeAgentPanel(win);
   win.document.querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)?.remove();
   win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
   win.document.querySelector(`#${config.addonRef}-katex-style`)?.remove();
 }
 
-function onShutdown() {
-  void chatStore.flushAll();
+async function onShutdown() {
+  await chatStore.flushAll();
+  if (tabNotifierID) {
+    try { Zotero.Notifier.unregisterObserver(tabNotifierID); } catch (_e) { /* ignore */ }
+    tabNotifierID = null;
+  }
+  unregisterAgentSection();
   ztoolkit.unregisterAll();
   try {
     addon.data.panel.standaloneWindow?.close();
