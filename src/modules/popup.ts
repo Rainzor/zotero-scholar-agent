@@ -1,6 +1,8 @@
 import { config } from "../../package.json";
 import { AIService } from "../services/ai-service";
 import { translatePrompt } from "../services/prompts";
+import { getPreset } from "../utils/provider-presets";
+import { getActiveService } from "../utils/services";
 const DEFAULT_TRANSLATE_TARGET_LANG = "zh-CN";
 
 export function buildReaderPopup(
@@ -126,9 +128,12 @@ async function runTranslate(
   try {
     const targetLanguage = DEFAULT_TRANSLATE_TARGET_LANG;
     const messages = translatePrompt(selectedText, targetLanguage);
+    const svc = getActiveService();
+    const miniModel = svc?.miniModel || getPreset(svc?.provider || "custom")?.miniModel;
     await AIService.chat(messages as any, {
       stream: true,
       disableThinking: true,
+      model: miniModel,
       onChunk: (state) => {
         textarea.value = state.content;
         resizePopup(popup, textarea);

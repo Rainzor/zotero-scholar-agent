@@ -60,7 +60,7 @@ export function truncateDocContext(text: string, maxTokens: number): string {
   if (!text || maxTokens <= 0) return "";
   if (estimateTokens(text) <= maxTokens) return text;
 
-  const suffix = "\n\n[... 文档内容已截断以适应模型上下文窗口 ...]";
+  const suffix = "\n\n[... Document content truncated to fit model context window ...]";
   let left = 0;
   let right = text.length;
   let best = "";

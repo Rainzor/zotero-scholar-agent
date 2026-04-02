@@ -1,8 +1,16 @@
  import { getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
 import type { ProviderKey, ApiFormat, AuthType } from "../addon";
+import { getImageMimeType, stripDataUrlPrefix } from "../utils/image-utils";
 
-type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: string } };
+
+type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string | ContentPart[];
+};
 
 type StreamState = {
   content: string;
@@ -14,6 +22,9 @@ type ChatOptions = {
   onChunk?: (state: StreamState) => void;
   onRequest?: (xhr: XMLHttpRequest) => void;
   disableThinking?: boolean;
+  timeoutMs?: number;
+  model?: string;
+  maxTokens?: number;
 };
 
 type ServiceConfig = {
@@ -26,6 +37,18 @@ type ServiceConfig = {
 };
 
 export class AIService {
+  static buildMultimodalUserContent(text: string, images: string[]): string | ContentPart[] {
+    const imageUrls = (images || []).map((v) => String(v || "").trim()).filter(Boolean);
+    if (imageUrls.length === 0) return text;
+    return [
+      { type: "text", text: text || "" },
+      ...imageUrls.map<ContentPart>((url) => ({
+        type: "image_url",
+        image_url: { url, detail: "high" },
+      })),
+    ];
+  }
+
   static getConfig(): ServiceConfig {
     const svc = getActiveService();
     const preset = getPreset(svc?.provider || "custom");
@@ -63,16 +86,23 @@ export class AIService {
     stream: boolean,
     canThink: boolean,
     disableThinking: boolean,
+    modelOverride?: string,
+    maxTokensOverride?: number,
   ): string {
+    const model = modelOverride || cfg.model;
     if (cfg.apiFormat === "anthropic") {
       const systemParts = messages.filter((m) => m.role === "system");
       const nonSystem = messages.filter((m) => m.role !== "system");
-      const systemText = systemParts.map((m) => m.content).join("\n");
+      const systemText = systemParts.map((m) => AIService.toPlainText(m.content)).join("\n");
+      const anthropicMessages = nonSystem.map((m) => ({
+        role: m.role,
+        content: AIService.toAnthropicContent(m.content),
+      }));
       return JSON.stringify({
-        model: cfg.model,
+        model,
         ...(systemText ? { system: systemText } : {}),
-        messages: nonSystem,
-        max_tokens: 16384,
+        messages: anthropicMessages,
+        max_tokens: maxTokensOverride || 16384,
         stream,
         ...(canThink
           ? {
@@ -90,19 +120,79 @@ export class AIService {
             ? { effort: "none" }
             : { effort: "medium", summary: "auto" })
           : undefined;
+      const input = messages.map((m) => ({
+        role: m.role,
+        content: AIService.toResponsesContent(m.role, m.content),
+      }));
       return JSON.stringify({
-        model: cfg.model,
-        input: messages,
+        model,
+        input,
         stream,
+        ...(maxTokensOverride ? { max_output_tokens: maxTokensOverride } : {}),
         ...(reasoning ? { reasoning } : {}),
       });
     }
     return JSON.stringify({
-      model: cfg.model,
+      model,
       messages,
       stream,
+      ...(maxTokensOverride ? { max_tokens: maxTokensOverride } : {}),
       ...(canThink && disableThinking ? { thinking: { type: "disabled" } } : {}),
     });
+  }
+
+  private static toPlainText(content: string | ContentPart[]): string {
+    if (typeof content === "string") return content;
+    return content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text || "")
+      .join("\n");
+  }
+
+  private static toAnthropicContent(content: string | ContentPart[]): any[] {
+    if (typeof content === "string") {
+      return [{ type: "text", text: content }];
+    }
+    const blocks: any[] = [];
+    for (const part of content) {
+      if (part.type === "text") {
+        blocks.push({ type: "text", text: part.text || "" });
+        continue;
+      }
+      const url = part.image_url?.url || "";
+      if (!url.startsWith("data:image/")) continue;
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: getImageMimeType(url),
+          data: stripDataUrlPrefix(url),
+        },
+      });
+    }
+    return blocks.length ? blocks : [{ type: "text", text: "" }];
+  }
+
+  private static toResponsesContent(
+    role: "user" | "assistant" | "system",
+    content: string | ContentPart[],
+  ): any[] {
+    const textType = role === "assistant" ? "output_text" : "input_text";
+    if (typeof content === "string") {
+      return [{ type: textType, text: content }];
+    }
+    const parts: any[] = [];
+    for (const part of content) {
+      if (part.type === "text") {
+        parts.push({ type: textType, text: part.text || "" });
+      } else {
+        const url = part.image_url?.url || "";
+        if (!url) continue;
+        if (role === "assistant") continue;
+        parts.push({ type: "input_image", image_url: url });
+      }
+    }
+    return parts.length ? parts : [{ type: textType, text: "" }];
   }
 
   private static parseChatCompletionsSSE(
@@ -227,7 +317,15 @@ export class AIService {
   }
 
   static async chat(messages: ChatMessage[], options: ChatOptions = {}): Promise<StreamState> {
-    const { stream = true, onChunk, onRequest, disableThinking = false } = options;
+    const {
+      stream = true,
+      onChunk,
+      onRequest,
+      disableThinking = false,
+      timeoutMs,
+      model: modelOverride,
+      maxTokens,
+    } = options;
     const cfg = AIService.getConfig();
     if (!cfg.apiUrl || !cfg.apiKey) {
       throw new Error("API URL or API Key is not configured. Add a service in preferences.");
@@ -235,9 +333,14 @@ export class AIService {
 
     const canThink = AIService.supportsThinking(cfg.provider);
     const headers = AIService.buildHeaders(cfg);
-    const body = AIService.buildBody(cfg, messages, stream, canThink, disableThinking);
+    const body = AIService.buildBody(cfg, messages, stream, canThink, disableThinking, modelOverride, maxTokens);
     const fmt = cfg.apiFormat;
     const state: StreamState = { content: "", reasoning: "" };
+
+    const requestTimeout =
+      typeof timeoutMs === "number" && timeoutMs > 0
+        ? timeoutMs
+        : (disableThinking ? 60000 : 300000);
 
     if (stream) {
       let prevContent = "";
@@ -262,7 +365,7 @@ export class AIService {
           headers,
           body,
           responseType: "text",
-          timeout: disableThinking ? 60000 : 300000,
+          timeout: requestTimeout,
           requestObserver: (xmlhttp: XMLHttpRequest) => {
             onRequest?.(xmlhttp);
             xmlhttp.onprogress = () => {
@@ -295,7 +398,7 @@ export class AIService {
         headers,
         body,
         responseType: "json",
-        timeout: disableThinking ? 60000 : 300000,
+        timeout: requestTimeout,
       });
       const resp = response.response;
       const parsed =

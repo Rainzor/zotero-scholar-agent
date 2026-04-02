@@ -67,11 +67,12 @@ function bindServiceManager(doc: Document) {
   const urlInput = doc.querySelector(`#${prefId("svcApiUrl")}`) as HTMLInputElement | null;
   const keyInput = doc.querySelector(`#${prefId("svcApiKey")}`) as HTMLInputElement | null;
   const modelInput = doc.querySelector(`#${prefId("svcModel")}`) as HTMLInputElement | null;
+  const miniModelInput = doc.querySelector(`#${prefId("svcMiniModel")}`) as HTMLInputElement | null;
 
   if (
     !listContainer || !addBtn || !removeBtn || !defaultBtn ||
     !saveBtn || !testBtn || !providerSelect || !nameInput ||
-    !apiFormatSelect || !urlInput || !keyInput || !modelInput
+    !apiFormatSelect || !urlInput || !keyInput || !modelInput || !miniModelInput
   ) {
     return;
   }
@@ -91,6 +92,7 @@ function bindServiceManager(doc: Document) {
       nameInput.value = preset.label;
       urlInput.value = preset.apiUrl;
       modelInput.value = preset.defaultModel;
+      miniModelInput.value = preset.miniModel || "";
       apiFormatSelect.value = preset.apiFormat;
     }
   });
@@ -128,6 +130,7 @@ function bindServiceManager(doc: Document) {
         urlInput.value = svc.apiUrl;
         keyInput.value = svc.apiKey;
         modelInput.value = svc.model;
+        miniModelInput.value = svc.miniModel || "";
         renderList();
       });
       listContainer.appendChild(row);
@@ -154,6 +157,7 @@ function bindServiceManager(doc: Document) {
       apiUrl: preset?.apiUrl || "",
       apiKey: "",
       model: preset?.defaultModel || "",
+      miniModel: preset?.miniModel || "",
     };
     services.push(newSvc);
     saveServices(services);
@@ -167,6 +171,7 @@ function bindServiceManager(doc: Document) {
     urlInput.value = newSvc.apiUrl;
     keyInput.value = newSvc.apiKey;
     modelInput.value = newSvc.model;
+    miniModelInput.value = newSvc.miniModel || "";
     renderList();
   });
 
@@ -187,6 +192,7 @@ function bindServiceManager(doc: Document) {
       urlInput.value = svc.apiUrl;
       keyInput.value = svc.apiKey;
       modelInput.value = svc.model;
+      miniModelInput.value = svc.miniModel || "";
     } else {
       providerSelect.value = "openai";
       nameInput.value = "";
@@ -194,6 +200,7 @@ function bindServiceManager(doc: Document) {
       urlInput.value = "";
       keyInput.value = "";
       modelInput.value = "";
+      miniModelInput.value = "";
     }
     renderList();
   });
@@ -222,6 +229,7 @@ function bindServiceManager(doc: Document) {
     svc.apiUrl = urlInput.value.trim();
     svc.apiKey = keyInput.value.trim();
     svc.model = modelInput.value.trim();
+    svc.miniModel = miniModelInput.value.trim() || undefined;
     saveServices(services);
     renderList();
     const progress = new ztoolkit.ProgressWindow(config.addonName, {
@@ -270,6 +278,7 @@ function bindServiceManager(doc: Document) {
     urlInput.value = activeSvc.apiUrl;
     keyInput.value = activeSvc.apiKey;
     modelInput.value = activeSvc.model;
+    miniModelInput.value = activeSvc.miniModel || "";
   }
   renderList();
 }

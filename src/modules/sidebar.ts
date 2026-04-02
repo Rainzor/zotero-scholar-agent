@@ -2,19 +2,54 @@ import { config } from "../../package.json";
 import { getLocaleID } from "../utils/locale";
 import { renderMarkdown } from "../utils/markdown";
 import { AIService } from "../services/ai-service";
-import { askPrompt, summarizeHistoryPrompt } from "../services/prompts";
-import { getContextByMode } from "./pdf-context";
+import {
+  askPrompt,
+  initPaperPrompt,
+  paperSummaryPrompt,
+  sessionTitlePrompt,
+  summarizeHistoryPrompt,
+} from "../services/prompts";
+import { getContextByMode, getFullText } from "./pdf-context";
 import type { ContextInfo } from "../services/prompts";
 import { loadServices, getActiveServiceId, setActiveServiceId, getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
 import { buildContextMessages, truncateDocContext } from "../services/context-builder";
 import type { ChatMessage, ChatSession, ContextMode } from "../addon";
 import { chatStore } from "../services/chat-store";
+import {
+  buildSlashCommands,
+  consumeSlashToken,
+  filterSlashCommands,
+  parseSlashToken,
+  type SlashCommand,
+  type SlashToken,
+} from "./slash-commands";
+import {
+  getPaperOverviewPath,
+  loadPaperOverview,
+  savePaperOverview,
+} from "../services/paper-overview";
+import {
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_PENDING_IMAGES,
+  extractImagesFromClipboard,
+  isImageFile,
+  optimizeImage,
+  readFileAsDataURL,
+} from "../utils/image-utils";
 
 let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
 let activeXHR: XMLHttpRequest | null = null;
 let isGenerating = false;
+const slashStateByPane = new Map<
+  string,
+  {
+    token: SlashToken;
+    commands: SlashCommand[];
+    activeIndex: number;
+  }
+>();
 
 // ===================== Section Data Loading =====================
 
@@ -31,6 +66,7 @@ function applySectionData(
   reader: _ZoteroTypes.ReaderInstance | null,
   itemId: number,
 ) {
+  addon.data.chat.pendingImages = [];
   body.dataset.itemID = String(itemId);
   addon.data.popup.currentReader = reader;
   const session = chatStore.getSession(itemId);
@@ -41,6 +77,7 @@ function applySectionData(
   syncContextSelector(body, itemId);
   syncLayoutState(body, itemId);
   syncPrefill(body);
+  refreshPendingImagesPreview(body);
 }
 
 // ===================== Item Resolution =====================
@@ -86,6 +123,7 @@ export function registerAgentSection() {
         body.dataset.paneUid = paneUID;
       },
       onDestroy: ({ body }: { body: HTMLElement }) => {
+        clearSlashState(body);
         delete body.dataset.paneUid;
       },
       onItemChange: ({
@@ -227,7 +265,7 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLButtonElement;
   newSessionBtn.id = "zoteroagent-session-new";
   newSessionBtn.className = "zoteroagent-session-action icon-only";
-  setIconButton(newSessionBtn, "new", "新建会话");
+  setIconButton(newSessionBtn, "new", "New session");
 
   const historyBtn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -235,7 +273,7 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLButtonElement;
   historyBtn.id = "zoteroagent-session-history";
   historyBtn.className = "zoteroagent-session-action icon-only";
-  setIconButton(historyBtn, "history", "历史对话");
+  setIconButton(historyBtn, "history", "History");
 
   const renameSessionBtn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -243,7 +281,7 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLButtonElement;
   renameSessionBtn.id = "zoteroagent-session-rename";
   renameSessionBtn.className = "zoteroagent-session-action icon-only";
-  setIconButton(renameSessionBtn, "rename", "重命名会话");
+  setIconButton(renameSessionBtn, "rename", "Rename session");
 
   const deleteSessionBtn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -251,7 +289,7 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLButtonElement;
   deleteSessionBtn.id = "zoteroagent-session-delete";
   deleteSessionBtn.className = "zoteroagent-session-action danger icon-only";
-  setIconButton(deleteSessionBtn, "delete", "删除会话");
+  setIconButton(deleteSessionBtn, "delete", "Delete session");
 
   const historyPanel = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   historyPanel.id = "zoteroagent-history-panel";
@@ -278,11 +316,11 @@ function ensureChatUI(body: HTMLElement) {
   refHeader.className = "zoteroagent-reference-header";
   const refLabel = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
   refLabel.className = "zoteroagent-reference-label";
-  refLabel.textContent = "引用文本";
+  refLabel.textContent = "Reference text";
   const refDismiss = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
   refDismiss.className = "zoteroagent-reference-dismiss";
   refDismiss.innerHTML = "&#x2715;";
-  refDismiss.title = "移除引用";
+  refDismiss.title = "Remove reference";
   refHeader.appendChild(refLabel);
   refHeader.appendChild(refDismiss);
 
@@ -298,29 +336,48 @@ function ensureChatUI(body: HTMLElement) {
   refCard.appendChild(refHeader);
   refCard.appendChild(refBody);
 
-  const inputRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  inputRow.id = "zoteroagent-chat-input-row";
-  inputRow.className = "zoteroagent-chat-input-row";
+  const slashMenu = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  slashMenu.id = "zoteroagent-slash-menu";
+  slashMenu.className = "zoteroagent-slash-menu";
+  slashMenu.style.display = "none";
+
+  const composeArea = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  composeArea.id = "zoteroagent-compose-area";
+  composeArea.className = "zoteroagent-compose-area";
 
   const textarea = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "textarea",
   ) as HTMLTextAreaElement;
   textarea.id = "zoteroagent-chat-input";
-  textarea.rows = 2;
-  textarea.placeholder = "提出问题，AI 将基于正在阅读页的文本回答";
+  textarea.rows = 3;
+  textarea.placeholder = "Ask about this paper... Type / for actions";
 
-  const sendBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-  sendBtn.id = "zoteroagent-chat-send";
-  sendBtn.className = "zoteroagent-send-button";
-  sendBtn.innerHTML = "&#x27A4;";
+  const actionsRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  actionsRow.id = "zoteroagent-actions-row";
+  actionsRow.className = "zoteroagent-actions-row";
 
-  inputRow.appendChild(textarea);
-  inputRow.appendChild(sendBtn);
+  const actionsLeft = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  actionsLeft.className = "zoteroagent-actions-left";
 
-  const controlsRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-  controlsRow.id = "zoteroagent-controls-row";
-  controlsRow.className = "zoteroagent-controls-row";
+  const uploadBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  uploadBtn.id = "zoteroagent-upload-btn";
+  uploadBtn.className = "zoteroagent-upload-btn zoteroagent-icon-button";
+  uploadBtn.type = "button";
+  setIconButton(uploadBtn as HTMLButtonElement, "attach", "Upload images");
+
+  const uploadInput = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "input",
+  ) as HTMLInputElement;
+  uploadInput.id = "zoteroagent-upload-input";
+  uploadInput.type = "file";
+  uploadInput.accept = "image/*";
+  uploadInput.multiple = true;
+  uploadInput.style.display = "none";
 
   const contextSelect = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -329,9 +386,8 @@ function ensureChatUI(body: HTMLElement) {
   contextSelect.id = "zoteroagent-context-mode";
   contextSelect.className = "zoteroagent-context-select";
   for (const [val, text] of [
-    ["none", "对话"],
-    ["currentPage", "所在页文本"],
-    ["fullPdf", "整篇PDF"],
+    ["none", "Chat"],
+    ["currentPage", "Current page"],
   ]) {
     const opt = doc.createElementNS(
       "http://www.w3.org/1999/xhtml",
@@ -342,14 +398,6 @@ function ensureChatUI(body: HTMLElement) {
     contextSelect.appendChild(opt);
   }
 
-  const clearBtn = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "button",
-  ) as HTMLButtonElement;
-  clearBtn.id = "zoteroagent-chat-clear";
-  clearBtn.className = "zoteroagent-clear-button";
-  setIconButton(clearBtn, "clear", "清空会话");
-
   const serviceSelect = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "select",
@@ -358,12 +406,44 @@ function ensureChatUI(body: HTMLElement) {
   serviceSelect.className = "zoteroagent-service-select";
   populateServiceOptions(serviceSelect);
 
-  controlsRow.appendChild(contextSelect);
-  controlsRow.appendChild(clearBtn);
-  controlsRow.appendChild(serviceSelect);
+  const actionsRight = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  actionsRight.className = "zoteroagent-actions-right";
+
+  const sendBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  sendBtn.id = "zoteroagent-chat-send";
+  sendBtn.className = "zoteroagent-send-button";
+  sendBtn.textContent = "Send";
+
+  actionsLeft.appendChild(uploadBtn);
+  actionsLeft.appendChild(contextSelect);
+  actionsLeft.appendChild(serviceSelect);
+  actionsRight.appendChild(sendBtn);
+  actionsRow.appendChild(actionsLeft);
+  actionsRow.appendChild(actionsRight);
+
+  const imagePreview = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  imagePreview.id = "zoteroagent-image-preview";
+  imagePreview.className = "zoteroagent-image-preview";
+  imagePreview.style.display = "none";
+
+  composeArea.appendChild(textarea);
+  composeArea.appendChild(imagePreview);
+  composeArea.appendChild(actionsRow);
+  composeArea.appendChild(uploadInput);
+
+  const statusBar = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  statusBar.id = "zoteroagent-status-bar";
+  statusBar.className = "zoteroagent-status-bar";
+  const statusText = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
+  statusText.id = "zoteroagent-status-text";
+  statusText.className = "zoteroagent-status-text ready";
+  statusText.textContent = "Ready";
+  statusBar.appendChild(statusText);
+
   inputArea.appendChild(refCard);
-  inputArea.appendChild(inputRow);
-  inputArea.appendChild(controlsRow);
+  inputArea.appendChild(slashMenu);
+  inputArea.appendChild(composeArea);
+  inputArea.appendChild(statusBar);
 
   const headerWrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   headerWrap.className = "zoteroagent-header-wrap";
@@ -383,19 +463,81 @@ function bindChatEvents(body: HTMLElement) {
     void submitQuestion(body);
   });
   body.querySelector("#zoteroagent-chat-input")?.addEventListener("keydown", (event) => {
-    if ((event as KeyboardEvent).key === "Enter" && !(event as KeyboardEvent).shiftKey) {
+    const ke = event as KeyboardEvent;
+    if (handleSlashMenuKeydown(body, ke)) {
+      return;
+    }
+    if (ke.key === "Enter" && !ke.shiftKey) {
       event.preventDefault();
       void submitQuestion(body);
     }
   });
-  body.querySelector("#zoteroagent-chat-clear")?.addEventListener("click", () => {
-    const itemId = Number(body.dataset.itemID);
-    if (itemId > 0) {
-      chatStore.clearSession(itemId);
-      renderMessages(body, itemId);
-      syncLayoutState(body, itemId);
-    }
+  body.querySelector("#zoteroagent-chat-input")?.addEventListener("input", () => {
+    updateSlashMenuForInput(body);
   });
+  body.querySelector("#zoteroagent-chat-input")?.addEventListener("click", () => {
+    updateSlashMenuForInput(body);
+  });
+  body.querySelector("#zoteroagent-chat-input")?.addEventListener("keyup", () => {
+    updateSlashMenuForInput(body);
+  });
+  body.querySelector("#zoteroagent-chat-input")?.addEventListener("paste", (event) => {
+    const pe = event as ClipboardEvent;
+    const files = extractImagesFromClipboard(pe);
+    if (!files.length) return;
+    pe.preventDefault();
+    pe.stopPropagation();
+    void processIncomingImages(body, files);
+  });
+  body.querySelector("#zoteroagent-upload-btn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const input = body.querySelector("#zoteroagent-upload-input") as HTMLInputElement | null;
+    input?.click();
+  });
+  body.querySelector("#zoteroagent-upload-input")?.addEventListener("change", (event) => {
+    const files = Array.from((event.target as HTMLInputElement).files || []);
+    (event.target as HTMLInputElement).value = "";
+    void processIncomingImages(body, files);
+  });
+  const dropZone = body.querySelector("#zoteroagent-input-area") as HTMLElement | null;
+  if (dropZone) {
+    let dragDepth = 0;
+    const setDragActive = (active: boolean) => {
+      dropZone.classList.toggle("is-drag-active", active);
+    };
+    dropZone.addEventListener("dragenter", (event) => {
+      const de = event as DragEvent;
+      if (!hasFileDragData(de)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      setDragActive(true);
+    });
+    dropZone.addEventListener("dragover", (event) => {
+      const de = event as DragEvent;
+      if (!hasFileDragData(de)) return;
+      event.preventDefault();
+      if (de.dataTransfer) de.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    });
+    dropZone.addEventListener("dragleave", (event) => {
+      const de = event as DragEvent;
+      if (!hasFileDragData(de)) return;
+      event.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDragActive(false);
+    });
+    dropZone.addEventListener("drop", (event) => {
+      const de = event as DragEvent;
+      if (!hasFileDragData(de)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepth = 0;
+      setDragActive(false);
+      const files = Array.from(de.dataTransfer?.files || []).filter((file) => isImageFile(file));
+      void processIncomingImages(body, files);
+    });
+  }
   body.querySelector("#zoteroagent-session-select")?.addEventListener("change", (event) => {
     const sessionId = (event.target as HTMLSelectElement).value;
     const itemId = Number(body.dataset.itemID);
@@ -476,6 +618,239 @@ function bindChatEvents(body: HTMLElement) {
     const id = (event.target as HTMLSelectElement).value;
     if (id) setActiveServiceId(id);
   });
+
+  body.addEventListener("click", (event) => {
+    const target = event.target as Element | null;
+    if (!target) return;
+    if (target.closest("#zoteroagent-slash-menu, #zoteroagent-chat-input")) return;
+    closeSlashMenu(body);
+  });
+  refreshPendingImagesPreview(body);
+}
+
+function hasFileDragData(event: DragEvent): boolean {
+  const dt = event.dataTransfer;
+  if (!dt) return false;
+  const types = Array.from(dt.types || []);
+  return types.includes("Files");
+}
+
+async function processIncomingImages(body: HTMLElement, files: File[]) {
+  if (!files.length) return;
+  const next = [...(addon.data.chat.pendingImages || [])];
+  for (const file of files) {
+    if (!isImageFile(file)) continue;
+    if (file.size > MAX_IMAGE_SIZE_BYTES) continue;
+    if (next.length >= MAX_PENDING_IMAGES) break;
+    try {
+      const raw = await readFileAsDataURL(file);
+      const optimized = await optimizeImage(raw);
+      if (optimized) next.push(optimized);
+    } catch (_e) {
+      // ignore single-file decode failures
+    }
+  }
+  addon.data.chat.pendingImages = next.slice(0, MAX_PENDING_IMAGES);
+  refreshPendingImagesPreview(body);
+}
+
+function refreshPendingImagesPreview(body: HTMLElement) {
+  const wrap = body.querySelector("#zoteroagent-image-preview") as HTMLElement | null;
+  if (!wrap) return;
+  while (wrap.firstChild) wrap.firstChild.remove();
+  const images = addon.data.chat.pendingImages || [];
+  if (!images.length) {
+    wrap.style.display = "none";
+    return;
+  }
+  const doc = body.ownerDocument;
+  images.forEach((dataUrl, index) => {
+    const item = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    item.className = "zoteroagent-image-thumb";
+    const img = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
+    img.src = dataUrl;
+    img.alt = `Image ${index + 1}`;
+    const removeBtn = doc.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "button",
+    ) as HTMLButtonElement;
+    removeBtn.className = "remove";
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Remove image";
+    removeBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const list = [...(addon.data.chat.pendingImages || [])];
+      list.splice(index, 1);
+      addon.data.chat.pendingImages = list;
+      refreshPendingImagesPreview(body);
+    });
+    item.appendChild(img);
+    item.appendChild(removeBtn);
+    wrap.appendChild(item);
+  });
+  wrap.style.display = "flex";
+}
+
+function getPaneUid(body: HTMLElement): string {
+  return body.dataset.paneUid || "default-pane";
+}
+
+function getSlashState(body: HTMLElement) {
+  return slashStateByPane.get(getPaneUid(body)) || null;
+}
+
+function setSlashState(
+  body: HTMLElement,
+  next: {
+    token: SlashToken;
+    commands: SlashCommand[];
+    activeIndex: number;
+  },
+) {
+  slashStateByPane.set(getPaneUid(body), next);
+}
+
+function clearSlashState(body: HTMLElement) {
+  slashStateByPane.delete(getPaneUid(body));
+}
+
+function getSlashCommands(body: HTMLElement): SlashCommand[] {
+  return buildSlashCommands({
+    init: (targetBody, itemId) => runInitCommand(targetBody, itemId),
+    summary: (targetBody, itemId) => runSummaryCommand(targetBody, itemId),
+    compact: (targetBody, itemId) => runCompactCommand(targetBody, itemId),
+  });
+}
+
+function closeSlashMenu(body: HTMLElement) {
+  const slashMenu = body.querySelector("#zoteroagent-slash-menu") as HTMLElement | null;
+  if (slashMenu) {
+    slashMenu.style.display = "none";
+    while (slashMenu.firstChild) slashMenu.firstChild.remove();
+  }
+  clearSlashState(body);
+}
+
+function updateSlashMenuForInput(body: HTMLElement) {
+  const input = body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null;
+  const slashMenu = body.querySelector("#zoteroagent-slash-menu") as HTMLElement | null;
+  if (!input || !slashMenu) return;
+  const caretEnd =
+    typeof input.selectionStart === "number" ? input.selectionStart : input.value.length;
+  const token = parseSlashToken(input.value, caretEnd);
+  if (!token) {
+    closeSlashMenu(body);
+    return;
+  }
+  const commands = filterSlashCommands(getSlashCommands(body), token.query);
+  if (commands.length === 0) {
+    closeSlashMenu(body);
+    return;
+  }
+  const prev = getSlashState(body);
+  const activeIndex = Math.max(
+    0,
+    Math.min(prev?.activeIndex || 0, commands.length - 1),
+  );
+  setSlashState(body, { token, commands, activeIndex });
+  renderSlashMenu(body);
+}
+
+function renderSlashMenu(body: HTMLElement) {
+  const slashMenu = body.querySelector("#zoteroagent-slash-menu") as HTMLElement | null;
+  const state = getSlashState(body);
+  if (!slashMenu || !state) return;
+  while (slashMenu.firstChild) slashMenu.firstChild.remove();
+  const doc = body.ownerDocument;
+  state.commands.forEach((command, index) => {
+    const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button") as HTMLButtonElement;
+    btn.type = "button";
+    btn.className = "zoteroagent-slash-item";
+    if (index === state.activeIndex) btn.classList.add("active");
+    btn.dataset.command = command.name;
+
+    const title = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    title.className = "zoteroagent-slash-item-title";
+    title.textContent = command.label;
+    const desc = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    desc.className = "zoteroagent-slash-item-desc";
+    desc.textContent = command.description;
+
+    btn.appendChild(title);
+    btn.appendChild(desc);
+    btn.addEventListener("mouseenter", () => {
+      const current = getSlashState(body);
+      if (!current) return;
+      setSlashState(body, { ...current, activeIndex: index });
+      renderSlashMenu(body);
+    });
+    btn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void executeSlashCommandByIndex(body, index);
+    });
+    slashMenu.appendChild(btn);
+  });
+  slashMenu.style.display = "grid";
+}
+
+function handleSlashMenuKeydown(body: HTMLElement, event: KeyboardEvent): boolean {
+  const state = getSlashState(body);
+  if (!state) return false;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setSlashState(body, {
+      ...state,
+      activeIndex: (state.activeIndex + 1) % state.commands.length,
+    });
+    renderSlashMenu(body);
+    return true;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setSlashState(body, {
+      ...state,
+      activeIndex:
+        (state.activeIndex - 1 + state.commands.length) % state.commands.length,
+    });
+    renderSlashMenu(body);
+    return true;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSlashMenu(body);
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    void executeSlashCommandByIndex(body, state.activeIndex);
+    return true;
+  }
+  return false;
+}
+
+async function executeSlashCommandByIndex(body: HTMLElement, index: number) {
+  const state = getSlashState(body);
+  const input = body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null;
+  if (!state || !input) return;
+  const command = state.commands[index];
+  if (!command) return;
+  const itemId = Number(body.dataset.itemID) || 0;
+  if (itemId <= 0) return;
+
+  const consumed = consumeSlashToken(input.value, state.token);
+  input.value = consumed.value;
+  closeSlashMenu(body);
+  input.focus();
+  try {
+    input.setSelectionRange(consumed.caret, consumed.caret);
+  } catch (_e) {
+    // ignore
+  }
+  addUserCommandMessage(body, itemId, command.label);
+  await command.execute(body, itemId);
 }
 
 // ===================== Generation State =====================
@@ -483,16 +858,24 @@ function bindChatEvents(body: HTMLElement) {
 function setGenerating(body: HTMLElement, generating: boolean) {
   isGenerating = generating;
   const sendBtn = body.querySelector("#zoteroagent-chat-send") as HTMLElement | null;
-  if (!sendBtn) return;
-  if (generating) {
-    sendBtn.classList.add("is-stop");
-    sendBtn.textContent = "\u25A0";
-    sendBtn.title = "停止生成";
-  } else {
-    sendBtn.classList.remove("is-stop");
-    sendBtn.textContent = "\u27A4";
-    sendBtn.title = "发送";
-    activeXHR = null;
+  const statusText = body.querySelector("#zoteroagent-status-text") as HTMLElement | null;
+  if (sendBtn) {
+    if (generating) {
+      sendBtn.classList.add("is-stop");
+      sendBtn.textContent = "Stop";
+      sendBtn.title = "Stop generating";
+    } else {
+      sendBtn.classList.remove("is-stop");
+      sendBtn.textContent = "Send";
+      sendBtn.title = "Send";
+      activeXHR = null;
+    }
+  }
+  if (statusText) {
+    statusText.className = generating
+      ? "zoteroagent-status-text sending"
+      : "zoteroagent-status-text ready";
+    statusText.textContent = generating ? "Generating..." : "Ready";
   }
 }
 
@@ -507,6 +890,284 @@ function abortGeneration(body: HTMLElement) {
 }
 
 // ===================== AI Logic =====================
+
+function getItemKey(itemId: number): string {
+  try {
+    const item = Zotero.Items.get(itemId) as any;
+    return String(item?.key || itemId);
+  } catch (_e) {
+    return String(itemId);
+  }
+}
+
+function resolvePdfAttachmentItemId(
+  itemId: number,
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): number {
+  const candidates = new Set<number>();
+  if (reader?._item?.id) {
+    candidates.add(Number(reader._item.id));
+  }
+  candidates.add(itemId);
+
+  try {
+    const baseItem = Zotero.Items.get(itemId) as any;
+    if (baseItem && typeof baseItem.getAttachments === "function") {
+      const ids: number[] = Array.isArray(baseItem.getAttachments())
+        ? baseItem.getAttachments()
+        : [];
+      ids.forEach((id) => candidates.add(Number(id)));
+    }
+  } catch (_e) {
+    // ignore
+  }
+
+  for (const cid of candidates) {
+    try {
+      const item = Zotero.Items.get(cid) as any;
+      if (!item) continue;
+      const isAttachment = typeof item.isAttachment === "function" && item.isAttachment();
+      const isPdf =
+        (typeof item.isPDFAttachment === "function" && item.isPDFAttachment()) ||
+        item.attachmentContentType === "application/pdf" ||
+        item.getField?.("mimeType") === "application/pdf";
+      if (isAttachment && isPdf) {
+        const p = typeof item.getFilePath === "function" ? String(item.getFilePath() || "") : "";
+        if (p) return cid;
+      }
+      if (!isAttachment && typeof item.getAttachments === "function") {
+        const attachmentIds: number[] = Array.isArray(item.getAttachments())
+          ? item.getAttachments()
+          : [];
+        for (const aid of attachmentIds) {
+          const child = Zotero.Items.get(aid) as any;
+          if (!child) continue;
+          const childIsPdf =
+            (typeof child.isPDFAttachment === "function" && child.isPDFAttachment()) ||
+            child.attachmentContentType === "application/pdf" ||
+            child.getField?.("mimeType") === "application/pdf";
+          if (!childIsPdf) continue;
+          const filePath =
+            typeof child.getFilePath === "function" ? String(child.getFilePath() || "") : "";
+          if (filePath) return aid;
+        }
+      }
+    } catch (_e) {
+      // continue to next candidate
+    }
+  }
+  return 0;
+}
+
+function addAssistantMessage(body: HTMLElement, itemId: number, content: string) {
+  chatStore.addMessage(
+    itemId,
+    { role: "assistant", content, model: getModelLabel() },
+    addon.data.chat.contextMode,
+  );
+  renderMessages(body, itemId);
+  syncLayoutState(body, itemId);
+}
+
+function addUserCommandMessage(body: HTMLElement, itemId: number, commandLabel: string) {
+  chatStore.addMessage(
+    itemId,
+    { role: "user", content: commandLabel },
+    addon.data.chat.contextMode,
+  );
+  renderMessages(body, itemId);
+  syncLayoutState(body, itemId);
+}
+
+async function openPaperOverviewFile(body: HTMLElement, itemId: number) {
+  const itemKey = getItemKey(itemId);
+  const path = getPaperOverviewPath(itemKey);
+  const ioUtils = (globalThis as any).IOUtils;
+  try {
+    if (ioUtils?.exists && !(await ioUtils.exists(path))) {
+      addAssistantMessage(body, itemId, "No AGENTS.md found for this paper. Please run /init first.");
+      return;
+    }
+    const zoteroAny = Zotero as any;
+    if (typeof zoteroAny.launchFile === "function") {
+      zoteroAny.launchFile(path);
+      return;
+    }
+    const fileObj = zoteroAny.File?.pathToFile?.(path);
+    if (fileObj?.launch) {
+      fileObj.launch();
+      return;
+    }
+    body.ownerDocument.defaultView?.open?.(`file://${path}`);
+  } catch (e) {
+    ztoolkit.log("[Agent] openPaperOverviewFile error:", e);
+    addAssistantMessage(body, itemId, "Failed to open AGENTS.md. Please try again later.");
+  }
+}
+
+function bindAgentsMdLink(container: HTMLElement, body: HTMLElement, itemId: number) {
+  if (container.dataset.agentsMdBound === "1") return;
+  container.dataset.agentsMdBound = "1";
+  container.addEventListener("click", (event) => {
+    const target = event.target as Element | null;
+    if (!target) return;
+    const anchor = target.closest("a") as HTMLAnchorElement | null;
+    const label = (
+      anchor?.textContent ||
+      target.textContent ||
+      ""
+    ).toLowerCase();
+    const href = (anchor?.getAttribute("href") || "").toLowerCase();
+    const shouldOpen =
+      label.includes("agents.md") ||
+      href.includes("agents.md") ||
+      href.startsWith("zoteroagent://agents-md");
+    if (!shouldOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void openPaperOverviewFile(body, itemId);
+  });
+}
+
+async function runInitCommand(body: HTMLElement, itemId: number) {
+  addAssistantMessage(
+    body,
+    itemId,
+    "Generating [AGENTS.md](zoteroagent://agents-md) overview for this paper...",
+  );
+  const reader = getActiveReader();
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+  if (pdfItemId <= 0) {
+    addAssistantMessage(
+      body,
+      itemId,
+      "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.",
+    );
+    return;
+  }
+  const fullText = await getFullText(pdfItemId);
+  if (!fullText.trim()) {
+    addAssistantMessage(
+      body,
+      itemId,
+      "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.",
+    );
+    return;
+  }
+  const maxCtx = getActiveMaxContextTokens();
+  const clipped = truncateDocContext(fullText, Math.floor(maxCtx * 0.8));
+  try {
+    const prompts = initPaperPrompt(clipped);
+    const result = await AIService.chat(prompts as any, {
+      stream: false,
+      disableThinking: true,
+      timeoutMs: 300000,
+    });
+    const overview = (result.content || "").trim();
+    if (!overview) {
+      addAssistantMessage(body, itemId, "/init failed: the model did not return valid content.");
+      return;
+    }
+    await savePaperOverview(getItemKey(itemId), overview);
+    addAssistantMessage(
+      body,
+      itemId,
+      "Paper overview generated. I now have context about this paper. Open [AGENTS.md](zoteroagent://agents-md).",
+    );
+  } catch (e: any) {
+    addAssistantMessage(body, itemId, `[Error] /init failed: ${e?.message || String(e)}`);
+  }
+}
+
+async function runSummaryCommand(body: HTMLElement, itemId: number) {
+  if (isGenerating) return;
+  const reader = getActiveReader();
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+  const fullText = await getFullText(pdfItemId);
+  if (!fullText.trim()) {
+    addAssistantMessage(body, itemId, "Could not extract full text from the PDF. Unable to run /summary.");
+    return;
+  }
+  const itemKey = getItemKey(itemId);
+  const paperOverview = await loadPaperOverview(itemKey);
+  const maxCtx = getActiveMaxContextTokens();
+  const clipped = truncateDocContext(fullText, Math.floor(maxCtx * 0.8));
+
+  const assistant: ChatMessage = {
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    model: getModelLabel(),
+  };
+  chatStore.addMessage(itemId, assistant, addon.data.chat.contextMode);
+  renderMessages(body, itemId);
+  setGenerating(body, true);
+  try {
+    const prompts = paperSummaryPrompt(clipped, paperOverview || "");
+    let lastRefresh = 0;
+    await AIService.chat(prompts as any, {
+      stream: true,
+      onRequest: (xhr) => {
+        activeXHR = xhr;
+      },
+      onChunk: (state) => {
+        assistant.content = state.content;
+        assistant.reasoning = state.reasoning;
+        const now = Date.now();
+        if (now - lastRefresh > 150) {
+          lastRefresh = now;
+          updateStreamingMessage(body, state);
+        }
+      },
+    });
+  } catch (e: any) {
+    if (!assistant.content && !assistant.reasoning) {
+      assistant.content = `[Error] ${e?.message || String(e)}`;
+    }
+  }
+  chatStore.touchSession(itemId, addon.data.chat.contextMode);
+  setGenerating(body, false);
+  renderMessages(body, itemId);
+}
+
+async function runCompactCommand(body: HTMLElement, itemId: number) {
+  const session = chatStore.getSession(itemId);
+  const history = session?.messages || [];
+  if (history.length < 4) {
+    addAssistantMessage(body, itemId, "Nothing to compact.");
+    return;
+  }
+  try {
+    const prompts = summarizeHistoryPrompt("", history as any);
+    const result = await AIService.chat(prompts as any, {
+      stream: false,
+      disableThinking: true,
+      model: getMiniModel(),
+    });
+    const summaryText = (result.content || "").trim();
+    if (!summaryText) {
+      addAssistantMessage(body, itemId, "/compact failed: no summary was generated.");
+      return;
+    }
+    const active = chatStore.getSession(itemId);
+    if (active) {
+      const summarizedUpTo = active.messages.length;
+      const keepTail = 12;
+      const tail = active.messages.slice(-keepTail);
+      const summaryMsg: ChatMessage = {
+        role: "assistant",
+        content: `[Session Summary]\n${summaryText}`,
+        timestamp: Date.now(),
+      };
+      active.messages = [summaryMsg, ...tail];
+      chatStore.updateSessionSummary(itemId, summaryText, summarizedUpTo);
+      chatStore.touchSession(itemId, addon.data.chat.contextMode);
+    }
+    addAssistantMessage(body, itemId, "Context compacted. Earlier conversation summarized.");
+  } catch (e: any) {
+    addAssistantMessage(body, itemId, `[Error] /compact failed: ${e?.message || String(e)}`);
+  }
+}
 
 function getActiveReader(): _ZoteroTypes.ReaderInstance | null {
   const tabId =
@@ -537,6 +1198,7 @@ async function submitQuestion(body: HTMLElement) {
 
   const input = body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null;
   if (!input) return;
+  closeSlashMenu(body);
   const question = input.value.trim();
   if (!question) return;
 
@@ -544,14 +1206,21 @@ async function submitQuestion(body: HTMLElement) {
   if (!itemId || itemId < 0) return;
 
   const refText = addon.data.chat.referenceText;
+  const pendingImages = (addon.data.chat.pendingImages || []).slice(0, MAX_PENDING_IMAGES);
   const displayContent = refText
     ? `Selected Text: ${refText}\n\n${question}`
     : question;
 
-  chatStore.addMessage(itemId, { role: "user", content: displayContent }, addon.data.chat.contextMode);
+  chatStore.addMessage(
+    itemId,
+    { role: "user", content: displayContent, images: pendingImages },
+    addon.data.chat.contextMode,
+  );
   input.value = "";
   addon.data.chat.referenceText = "";
+  addon.data.chat.pendingImages = [];
   syncReferenceCard(body);
+  refreshPendingImagesPreview(body);
   body.dataset.chatMode = "chat";
   syncLayoutState(body, itemId);
 
@@ -577,11 +1246,16 @@ async function submitQuestion(body: HTMLElement) {
     source: ctxResult.source,
     pageNumber: ctxResult.pageNumber,
   };
+  const paperOverview = await loadPaperOverview(getItemKey(itemId));
 
   const aiQuestion = refText
     ? `> ${refText.replace(/\n/g, "\n> ")}\n\n${question}`
     : question;
-  const promptMsgs = askPrompt(aiQuestion, ctxInfo);
+  const promptMsgs = askPrompt(aiQuestion, ctxInfo, paperOverview || "");
+  if (pendingImages.length > 0) {
+    promptMsgs[0].content +=
+      "\nThe user has attached images. Analyze image content together with the paper context and the user question.";
+  }
   const fullHistory = sessions.slice(0, -2);
   await ensureAiSessionSummary(itemId, fullHistory);
   const session = chatStore.getSession(itemId);
@@ -593,6 +1267,16 @@ async function submitQuestion(body: HTMLElement) {
     history: history as any,
     maxContextTokens: maxCtx,
   }) as any;
+  if (pendingImages.length > 0 && messages.length > 0) {
+    const lastIndex = messages.length - 1;
+    messages[lastIndex] = {
+      ...messages[lastIndex],
+      content: AIService.buildMultimodalUserContent(
+        String(messages[lastIndex]?.content || ""),
+        pendingImages,
+      ),
+    };
+  }
   ztoolkit.log(`[Agent] final messages count=${messages.length}, system=${promptMsgs[0].content.substring(0, 80)}...`);
 
   try {
@@ -618,6 +1302,37 @@ async function submitQuestion(body: HTMLElement) {
   chatStore.touchSession(itemId, mode);
   setGenerating(body, false);
   renderMessages(body, itemId);
+  void maybeGenerateSessionTitle(body, itemId);
+}
+
+function getMiniModel(): string | undefined {
+  const svc = getActiveService();
+  if (svc?.miniModel) return svc.miniModel;
+  const preset = getPreset(svc?.provider || "custom");
+  return preset?.miniModel;
+}
+
+async function maybeGenerateSessionTitle(body: HTMLElement, itemId: number) {
+  if (!chatStore.needsAutoTitle(itemId)) return;
+  const exchange = chatStore.getFirstExchange(itemId);
+  if (!exchange) return;
+  try {
+    const msgs = sessionTitlePrompt(exchange.userMsg, exchange.assistantMsg);
+    const result = await AIService.chat(msgs as any, {
+      stream: false,
+      disableThinking: true,
+      model: getMiniModel(),
+      maxTokens: 64,
+      timeoutMs: 15000,
+    });
+    const title = (result.content || "").trim().replace(/^["']|["']$/g, "");
+    if (title && title.length > 0) {
+      chatStore.renameSession(itemId, title);
+      syncSessionSelector(body, itemId);
+    }
+  } catch (_e) {
+    // Silently ignore title generation failures
+  }
 }
 
 // ===================== Rendering =====================
@@ -675,6 +1390,7 @@ async function ensureAiSessionSummary(itemId: number, history: ChatMessage[]) {
     const result = await AIService.chat(prompts as any, {
       stream: false,
       disableThinking: true,
+      model: getMiniModel(),
     });
     const nextSummary = (result.content || "").trim();
     if (nextSummary) {
@@ -698,7 +1414,7 @@ function buildFallbackSummary(previousSummary: string, deltaMessages: ChatMessag
     lines.push("");
     lines.push("Latest updates:");
   } else {
-    lines.push("会话摘要：");
+    lines.push("Session summary:");
   }
 
   const tail = deltaMessages.slice(-10);
@@ -740,9 +1456,11 @@ async function copyTextToClipboard(doc: Document, text: string): Promise<boolean
 }
 
 function getIconSvg(
-  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history",
+  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history" | "attach",
 ): string {
   switch (icon) {
+    case "attach":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.2 10.9l4.7-4.7a2.5 2.5 0 113.5 3.5l-5.8 5.8a4 4 0 11-5.7-5.7l5.8-5.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "history":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4.5l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "copy":
@@ -766,7 +1484,7 @@ function getIconSvg(
 
 function setIconButton(
   btn: HTMLButtonElement,
-  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history",
+  icon: "copy" | "delete" | "new" | "rename" | "clear" | "check" | "error" | "history" | "attach",
   label: string,
 ) {
   btn.classList.add("zoteroagent-icon-button");
@@ -793,7 +1511,7 @@ function insertSvgMarkup(el: HTMLElement, svgMarkup: string) {
 function createAssistantCopyButton(doc: Document): HTMLButtonElement {
   const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button") as HTMLButtonElement;
   btn.className = "zoteroagent-copy-button";
-  setIconButton(btn, "copy", "复制回答");
+  setIconButton(btn, "copy", "Copy response");
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -801,12 +1519,12 @@ function createAssistantCopyButton(doc: Document): HTMLButtonElement {
     const raw = wrapper?.dataset.rawContent || "";
     void copyTextToClipboard(doc, raw).then((ok) => {
       insertSvgMarkup(btn, getIconSvg(ok ? "check" : "error"));
-      btn.title = ok ? "已复制" : "复制失败";
+      btn.title = ok ? "Copied" : "Copy failed";
       btn.classList.toggle("is-success", ok);
       btn.classList.toggle("is-error", !ok);
       setTimeout(() => {
         insertSvgMarkup(btn, getIconSvg("copy"));
-        btn.title = "复制回答";
+        btn.title = "Copy response";
         btn.classList.remove("is-success", "is-error");
       }, 1200);
     });
@@ -817,7 +1535,7 @@ function createAssistantCopyButton(doc: Document): HTMLButtonElement {
 function createMessageDeleteButton(doc: Document, body: HTMLElement, itemId: number): HTMLButtonElement {
   const btn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button") as HTMLButtonElement;
   btn.className = "zoteroagent-delete-button";
-  setIconButton(btn, "delete", "删除此消息");
+  setIconButton(btn, "delete", "Delete message");
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -907,6 +1625,10 @@ function updateStreamingMessage(
       } catch (_e) {
         contentEl.textContent = state.content;
       }
+      const itemId = Number(body.dataset.itemID) || 0;
+      if (itemId > 0) {
+        bindAgentsMdLink(contentEl, body, itemId);
+      }
     }
     msgWrapper.dataset.rawContent = state.content || "";
 
@@ -973,8 +1695,9 @@ function renderMessages(body: HTMLElement, itemId: number) {
         } catch (_e) {
           inner.textContent = msg.content;
         }
+        bindAgentsMdLink(inner, body, itemId);
       } else {
-        renderUserMessage(inner, msg.content);
+        renderUserMessage(inner, msg.content, msg.images || []);
       }
 
       wrapper.appendChild(inner);
@@ -1181,8 +1904,9 @@ function syncLayoutState(body: HTMLElement, _itemId: number) {
   inputArea.style.display = "flex";
 }
 
-function renderUserMessage(container: HTMLElement, content: string) {
+function renderUserMessage(container: HTMLElement, content: string, images: string[]) {
   const doc = container.ownerDocument;
+  renderUserImages(container, images || []);
 
   const selectedPrefix = "Selected Text: ";
   if (content.startsWith(selectedPrefix)) {
@@ -1197,7 +1921,7 @@ function renderUserMessage(container: HTMLElement, content: string) {
 
       const refLabel = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
       refLabel.className = "zoteroagent-msg-ref-label";
-      refLabel.textContent = "引用文本";
+      refLabel.textContent = "Reference text";
 
       const refTextEl = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       refTextEl.className = "zoteroagent-msg-ref-text";
@@ -1248,4 +1972,34 @@ function renderUserMessage(container: HTMLElement, content: string) {
     text.textContent = bodyText;
     container.appendChild(text);
   }
+}
+
+function renderUserImages(container: HTMLElement, images: string[]) {
+  if (!images || images.length === 0) return;
+  const doc = container.ownerDocument;
+  const wrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  wrap.className = "zoteroagent-msg-images";
+  images.forEach((dataUrl, index) => {
+    const thumb = doc.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "button",
+    ) as HTMLButtonElement;
+    thumb.className = "zoteroagent-msg-image-thumb";
+    thumb.type = "button";
+    thumb.title = `Attached image ${index + 1}`;
+    const img = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
+    img.src = dataUrl;
+    img.alt = `Attached image ${index + 1}`;
+    thumb.appendChild(img);
+    thumb.addEventListener("click", () => {
+      wrap.classList.toggle("is-expanded");
+      thumb.classList.add("active");
+      for (const el of Array.from(wrap.querySelectorAll(".zoteroagent-msg-image-thumb"))) {
+        const btn = el as HTMLElement;
+        if (btn !== thumb) btn.classList.remove("active");
+      }
+    });
+    wrap.appendChild(thumb);
+  });
+  container.appendChild(wrap);
 }

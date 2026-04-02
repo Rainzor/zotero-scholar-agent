@@ -3,13 +3,14 @@ import { createZToolkit } from "./utils/ztoolkit";
 import hooks from "./hooks";
 import api from "./api";
 
-export type ContextMode = "none" | "currentPage" | "fullPdf";
+export type ContextMode = "none" | "currentPage";
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
   timestamp?: number;
   model?: string;
+  images?: string[];
 };
 export type ChatSession = {
   sessionId: string;
@@ -48,6 +49,7 @@ export type ServiceProvider = {
   apiUrl: string;
   apiKey: string;
   model: string;
+  miniModel?: string;
 };
 
 class Addon {
@@ -75,6 +77,7 @@ class Addon {
       prefillInput: string;
       referenceText: string;
       contextMode: ContextMode;
+      pendingImages: string[];
     };
   };
   public hooks: typeof hooks;
@@ -93,7 +96,8 @@ class Addon {
       chat: {
         prefillInput: "",
         referenceText: "",
-        contextMode: "currentPage",
+        contextMode: "none",
+        pendingImages: [],
       },
     };
     this.hooks = hooks;

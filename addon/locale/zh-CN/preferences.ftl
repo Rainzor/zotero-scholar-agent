@@ -11,6 +11,7 @@ pref-svc-apiFormat-messages = Messages
 pref-svc-apiUrl = API 地址
 pref-svc-apiKey = API 密钥
 pref-svc-model = 模型
+pref-svc-miniModel = 小模型
 pref-svc-save = 保存
 pref-svc-test = 测试
 pref-svc-empty = 尚未配置服务。点击"添加"创建。

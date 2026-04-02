@@ -133,12 +133,12 @@ export async function getCurrentPageNumber(
 
 export type ContextResult = {
   text: string;
-  source: "none" | "currentPage" | "fullPdf";
+  source: "none" | "currentPage";
   pageNumber?: number;
 };
 
 export async function getContextByMode(options: {
-  mode: "none" | "currentPage" | "fullPdf";
+  mode: "none" | "currentPage";
   reader?: _ZoteroTypes.ReaderInstance | null;
   itemId?: number;
 }): Promise<ContextResult> {
@@ -148,12 +148,6 @@ export async function getContextByMode(options: {
     return { text: "", source: "none" };
   }
 
-  if (mode === "fullPdf") {
-    const itemId = options.itemId || reader?.itemID;
-    const text = itemId ? await getFullText(itemId) : "";
-    return { text, source: "fullPdf" };
-  }
-
   const pageNumber = await getCurrentPageNumber(reader);
   let text = await getCurrentPageText(reader);
   if (text) return { text, source: "currentPage", pageNumber };
@@ -161,7 +155,7 @@ export async function getContextByMode(options: {
   const itemId = options.itemId || reader?.itemID;
   if (itemId) {
     text = await getFullText(itemId);
-    if (text) return { text, source: "fullPdf" };
+    if (text) return { text, source: "currentPage", pageNumber };
   }
   return { text: "", source: "currentPage", pageNumber };
 }

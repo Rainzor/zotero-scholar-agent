@@ -380,7 +380,7 @@
 .zoteroagent-reference-card {
   display: none;
   flex-direction: column;
-  margin: 8px 12px 2px;
+  margin: 0;
   padding: 0;
   background: #f5f5f5;
   border: 1px solid #e0e0e0;
@@ -526,76 +526,369 @@
   font-weight: 500;
 }
 
+.zoteroagent-msg-images {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.zoteroagent-msg-image-thumb {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #dfe5ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.zoteroagent-msg-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.zoteroagent-msg-images.is-expanded {
+  flex-wrap: wrap;
+}
+
+.zoteroagent-msg-images.is-expanded .zoteroagent-msg-image-thumb {
+  width: 120px;
+  height: 120px;
+}
+
+.zoteroagent-msg-images.is-expanded .zoteroagent-msg-image-thumb.active {
+  width: 180px;
+  height: 180px;
+  border-color: #93c5fd;
+}
+
 /* ===== Input Area ===== */
 .zoteroagent-input-area {
   display: none;
   flex-shrink: 0;
   flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: var(--material-sidepane, #ffffff);
+  position: relative;
+}
+
+.zoteroagent-input-area.is-drag-active .zoteroagent-compose-area {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14) inset;
+}
+
+.zoteroagent-slash-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 16px);
+  z-index: 30;
+  display: none;
+  grid-template-columns: 1fr;
   gap: 0;
-  border-top: 1px solid #f0f0f0;
-  background: #fafafa;
-}
-
-/* ---- Textarea Row ---- */
-.zoteroagent-chat-input-row {
-  display: flex;
-  align-items: flex-end;
-  padding: 10px 12px 6px;
-  gap: 8px;
-}
-
-.zoteroagent-chat-input-row textarea {
-  flex: 1;
-  resize: none;
-  min-height: 40px;
-  max-height: 120px;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #d9dee8;
+  border-radius: 14px;
   background: #ffffff;
-  padding: 8px 10px;
+  box-shadow: 0 16px 36px rgba(17, 24, 39, 0.18);
+  max-height: min(44vh, 320px);
+  overflow-y: auto;
+  padding: 6px 0;
+  backdrop-filter: blur(10px);
+}
+
+.zoteroagent-slash-item {
+  appearance: none;
+  -moz-appearance: none;
+  position: relative;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  cursor: pointer;
+  display: grid;
+  grid-template-rows: auto auto;
+  row-gap: 4px;
+  text-align: left;
+  padding: 12px 16px 11px;
+  width: 100%;
+  min-height: 62px;
+  box-sizing: border-box;
+  transition: background-color 120ms ease, padding-left 120ms ease;
+}
+
+.zoteroagent-slash-item + .zoteroagent-slash-item {
+  border-top: 1px solid #f1f3f7;
+}
+
+.zoteroagent-slash-item::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.zoteroagent-slash-item:hover,
+.zoteroagent-slash-item.active {
+  background: #f3f8ff;
+  padding-left: 20px;
+}
+
+.zoteroagent-slash-item:hover::before,
+.zoteroagent-slash-item.active::before {
+  background: #2b82f6;
+}
+
+.zoteroagent-slash-item-title {
+  display: block;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-slash-item-desc {
+  display: block;
+  margin: 0;
+  font-size: 11px;
+  color: #5f6b7a;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.95;
+}
+
+/* Avoid oversized slash text from global heading rules */
+.zoteroagent-slash-menu h1,
+.zoteroagent-slash-menu h2,
+.zoteroagent-slash-menu h3,
+.zoteroagent-slash-menu h4,
+.zoteroagent-slash-menu h5,
+.zoteroagent-slash-menu h6 {
+  all: unset;
+}
+
+@media (max-height: 820px) {
+  .zoteroagent-slash-item-title {
+    font-size: 15px;
+  }
+}
+
+@media (max-height: 720px) {
+  .zoteroagent-slash-item-title {
+    font-size: 14px;
+  }
+  .zoteroagent-slash-item {
+    min-height: 56px;
+    padding-top: 10px;
+    padding-bottom: 9px;
+  }
+}
+
+/* Keep legacy declarations below overridden by higher specificity */
+.zoteroagent-slash-menu .zoteroagent-slash-item {
+  font-family: inherit;
+  transform: none;
+}
+
+/* ---- Compose Area (card) ---- */
+.zoteroagent-compose-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke-secondary, #e0e0e0);
+  background: var(--material-background, #fafafa);
+  transition: border-color 200ms ease;
+}
+
+.zoteroagent-compose-area:focus-within {
+  border-color: var(--color-accent, #2563eb);
+}
+
+/* ---- Textarea ---- */
+.zoteroagent-compose-area textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 80px;
+  max-height: 220px;
+  border-radius: 14px;
+  border: 1px solid var(--stroke-secondary, #e5e7eb);
+  background: var(--fill-quaternary, #f4f4f5);
+  padding: 12px 14px;
   box-sizing: border-box;
   font-size: 13px;
-  line-height: 1.5;
-  color: #1a1a1a;
+  line-height: 1.55;
+  color: var(--fill-primary, #1a1a1a);
   font-family: inherit;
-  transition: border-color 140ms;
+  transition: border-color 200ms ease, background-color 200ms ease;
 }
 
-.zoteroagent-chat-input-row textarea:focus {
+.zoteroagent-compose-area textarea:focus {
   outline: none;
-  border-color: #999;
+  border-color: var(--color-accent, #2563eb);
+  background: #ffffff;
 }
 
-.zoteroagent-chat-input-row textarea::placeholder {
-  color: #bbb;
+.zoteroagent-compose-area textarea::placeholder {
+  color: var(--fill-tertiary, #9ca3af);
 }
 
-.zoteroagent-send-button {
+/* ---- Actions Row (inside compose card) ---- */
+.zoteroagent-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  gap: 6px;
+}
+
+.zoteroagent-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.zoteroagent-upload-btn {
   width: 32px;
   height: 32px;
   min-width: 32px;
   border-radius: 8px;
+}
+
+.zoteroagent-image-preview {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 4px;
+}
+
+.zoteroagent-image-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #dbe2ea;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.zoteroagent-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.zoteroagent-image-thumb .remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
   border: none;
-  background: #1a1a1a;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.72);
+  color: #fff;
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.zoteroagent-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ---- Selects (context & service) ---- */
+.zoteroagent-context-select,
+.zoteroagent-service-select {
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--stroke-secondary, #e0e0e0);
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--fill-secondary, #555);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 140ms ease;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-context-select:hover,
+.zoteroagent-service-select:hover {
+  border-color: var(--color-accent, #2563eb);
+}
+
+.zoteroagent-context-select:focus,
+.zoteroagent-service-select:focus {
+  outline: none;
+  border-color: var(--color-accent, #2563eb);
+}
+
+/* ---- Send Button (primary, pill) ---- */
+.zoteroagent-send-button {
+  min-width: 72px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: #2563eb;
   color: #ffffff;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 140ms;
+  padding: 0 18px;
+  transition: background-color 140ms ease, transform 80ms ease;
   flex-shrink: 0;
-  padding: 0;
+  letter-spacing: 0.01em;
 }
 
 .zoteroagent-send-button:hover {
-  opacity: 0.8;
+  background: #1d4ed8;
+}
+
+.zoteroagent-send-button:active {
+  transform: scale(0.97);
 }
 
 .zoteroagent-send-button.is-stop {
-  background: #ff4d4f;
-  font-size: 12px;
+  background: #ef4444;
   animation: zoteroagent-pulse 1.5s ease-in-out infinite;
 }
 
@@ -604,63 +897,29 @@
   50% { opacity: 0.7; }
 }
 
-/* ---- Controls / Status Bar ---- */
-.zoteroagent-controls-row {
+/* ---- Status Bar ---- */
+.zoteroagent-status-bar {
   display: flex;
-  align-items: center;
-  padding: 4px 12px 8px;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
+  padding: 0 4px;
+  min-height: 16px;
+}
+
+.zoteroagent-status-text {
   font-size: 11px;
+  color: var(--fill-tertiary, #9ca3af);
+  line-height: 1;
+  user-select: none;
 }
 
-.zoteroagent-context-select {
-  height: 24px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  padding: 0 8px;
-  font-size: 11px;
-  color: #666;
-  background: #fff;
-  cursor: pointer;
+.zoteroagent-status-text.ready {
+  color: var(--color-accent, #2563eb);
 }
 
-.zoteroagent-service-select {
-  height: 24px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  padding: 0 8px;
-  font-size: 11px;
-  color: #666;
-  background: #fff;
-  cursor: pointer;
-  margin-left: auto;
-}
-
-.zoteroagent-clear-button {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
-  padding: 0;
-  color: #9ca3af;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 120ms, border-color 120ms, background-color 120ms;
-}
-
-.zoteroagent-clear-button:hover {
-  color: #ef4444;
-  border-color: #fecaca;
-  background: #fff5f5;
-}
-
-.zoteroagent-clear-button svg {
-  width: 12px;
-  height: 12px;
+.zoteroagent-status-text.sending {
+  color: #f59e0b;
 }
 
 /* ===== Markdown Rendered Content ===== */

@@ -17,6 +17,7 @@ export type FluentMessageId =
   | 'pref-svc-apiUrl'
   | 'pref-svc-defaultSet'
   | 'pref-svc-empty'
+  | 'pref-svc-miniModel'
   | 'pref-svc-model'
   | 'pref-svc-name'
   | 'pref-svc-provider'

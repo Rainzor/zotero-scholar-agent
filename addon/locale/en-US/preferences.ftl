@@ -11,6 +11,7 @@ pref-svc-apiFormat-messages = Messages
 pref-svc-apiUrl = API URL
 pref-svc-apiKey = API Key
 pref-svc-model = Model
+pref-svc-miniModel = Mini Model
 pref-svc-save = Save
 pref-svc-test = Test
 pref-svc-empty = No services configured. Click "Add" to create one.
