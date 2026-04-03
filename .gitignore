@@ -6,3 +6,5 @@ zotero-cmd.json
 **/test
 build
 .DS_Store
+*.tsbuildinfo
+.scaffold

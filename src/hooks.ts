@@ -31,7 +31,11 @@ async function onStartup() {
     tabNotifierID = Zotero.Notifier.registerObserver(
       {
         notify: (_event: string, _type: string) => {
-          setTimeout(() => updateSidebarPanels(), 300);
+          if (!addon.data.alive) return;
+          setTimeout(() => {
+            if (!addon.data.alive) return;
+            updateSidebarPanels();
+          }, 300);
         },
       },
       ["tab"],
@@ -72,12 +76,18 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-  win.document.querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)?.remove();
-  win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
-  win.document.querySelector(`#${config.addonRef}-katex-style`)?.remove();
+  try {
+    if (Components.utils.isDeadWrapper(win)) return;
+    win.document.querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)?.remove();
+    win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
+    win.document.querySelector(`#${config.addonRef}-katex-style`)?.remove();
+  } catch (_e) {
+    // Window may already be destroyed
+  }
 }
 
 async function onShutdown() {
+  addon.data.alive = false;
   await chatStore.flushAll();
   if (tabNotifierID) {
     try { Zotero.Notifier.unregisterObserver(tabNotifierID); } catch (_e) { /* ignore */ }
@@ -93,7 +103,6 @@ async function onShutdown() {
   Zotero.getMainWindows().forEach((win) => {
     onMainWindowUnload(win);
   });
-  addon.data.alive = false;
   // @ts-ignore Plugin instance is not typed
   delete Zotero[config.addonInstance];
 }

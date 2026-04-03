@@ -226,7 +226,18 @@ class ChatStore {
     if (!session) return;
     if (msgIndex < 0 || msgIndex >= session.messages.length) return;
     session.messages.splice(msgIndex, 1);
-    // Deleting a turn can invalidate summary index coverage.
+    session.summaryText = "";
+    session.summaryUpToIndex = 0;
+    session.summaryUpdatedAt = Date.now();
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  truncateMessagesFrom(itemId: number, fromIndex: number) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    if (fromIndex < 0 || fromIndex >= session.messages.length) return;
+    session.messages.splice(fromIndex);
     session.summaryText = "";
     session.summaryUpToIndex = 0;
     session.summaryUpdatedAt = Date.now();

@@ -18,6 +18,7 @@ export function registerReaderInitializer() {
   Zotero.Reader.registerEventListener(
     "renderToolbar",
     (_event) => {
+      if (typeof addon !== "undefined" && !addon.data.alive) return;
       updateSidebarPanels();
     },
     config.addonID,

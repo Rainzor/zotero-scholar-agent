@@ -136,6 +136,7 @@ async function runTranslate(
       disableThinking: true,
       model: miniModel,
       onChunk: (state) => {
+        if (!popup.isConnected) return;
         textarea.value = state.content;
         resizePopup(popup, textarea);
       },

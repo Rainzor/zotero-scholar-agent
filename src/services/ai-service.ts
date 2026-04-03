@@ -15,6 +15,7 @@ type ChatMessage = {
 type StreamState = {
   content: string;
   reasoning: string;
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
 };
 
 type ChatOptions = {
@@ -384,11 +385,11 @@ export class AIService {
         AIService.throwApiError(e);
       }
 
-      const finalParsed = parseSSE(
-        (Zotero as any)._lastXMLHttpRequest?.responseText || "",
-      );
+      const finalRaw = (Zotero as any)._lastXMLHttpRequest?.responseText || "";
+      const finalParsed = parseSSE(finalRaw);
       if (finalParsed.content) state.content = finalParsed.content;
       if (finalParsed.reasoning) state.reasoning = finalParsed.reasoning;
+      state.usage = AIService.extractUsageFromSSE(finalRaw, fmt);
       emit();
       return state;
     }
@@ -407,12 +408,44 @@ export class AIService {
         AIService.parseChatCompletionsJSON(resp, canThink, disableThinking);
       state.content = parsed.content;
       state.reasoning = parsed.reasoning;
+      state.usage = AIService.extractUsageFromJSON(resp, fmt);
     } catch (e: any) {
       AIService.throwApiError(e);
     }
 
     onChunk?.({ ...state });
     return state;
+  }
+
+  private static extractUsageFromSSE(raw: string, fmt: string): StreamState["usage"] {
+    const lines = raw.match(/data: (.+)/g) || [];
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (line.indexOf("[DONE]") !== -1) continue;
+      try {
+        const p = JSON.parse(line.replace("data: ", ""));
+        const u = p.usage;
+        if (u) {
+          if (fmt === "anthropic") {
+            return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0) };
+          }
+          if (fmt === "responses") {
+            return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
+          }
+          return { promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, totalTokens: u.total_tokens };
+        }
+      } catch { /* skip */ }
+    }
+    return undefined;
+  }
+
+  private static extractUsageFromJSON(resp: any, fmt: string): StreamState["usage"] {
+    const u = resp?.usage;
+    if (!u) return undefined;
+    if (fmt === "anthropic" || fmt === "responses") {
+      return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
+    }
+    return { promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, totalTokens: u.total_tokens };
   }
 
   private static throwApiError(e: any): never {

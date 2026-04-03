@@ -4,6 +4,11 @@ import hooks from "./hooks";
 import api from "./api";
 
 export type ContextMode = "agent" | "none" | "currentPage";
+export type TokenUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -11,6 +16,7 @@ export type ChatMessage = {
   timestamp?: number;
   model?: string;
   images?: string[];
+  usage?: TokenUsage;
 };
 export type ChatSession = {
   sessionId: string;
@@ -77,6 +83,7 @@ class Addon {
     chat: {
       prefillInput: string;
       referenceText: string;
+      responseQuote: string;
       pendingImages: string[];
     };
   };
@@ -96,6 +103,7 @@ class Addon {
       chat: {
         prefillInput: "",
         referenceText: "",
+        responseQuote: "",
         pendingImages: [],
       },
     };

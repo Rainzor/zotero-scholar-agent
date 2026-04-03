@@ -25,6 +25,7 @@ type PromptMessage = {
 type StreamState = {
   content: string;
   reasoning: string;
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
 };
 
 type AgentStatusStage = "init" | "plan" | "load" | "answer";
