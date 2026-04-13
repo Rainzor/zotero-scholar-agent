@@ -45,6 +45,7 @@ let isGenerating = false;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
+let referenceSyncRetryTimer: number | null = null;
 const slashStateByPane = new Map<
   string,
   {
@@ -330,6 +331,26 @@ function teardownResizeObserver(body: HTMLElement) {
   lastWidthMap.delete(body);
 }
 
+function scheduleReferenceSyncRetry(delayMs = 120) {
+  try {
+    const win =
+      activeBody?.ownerDocument?.defaultView ||
+      Zotero.getMainWindow?.() ||
+      null;
+    if (!win) return;
+    if (referenceSyncRetryTimer) {
+      win.clearTimeout(referenceSyncRetryTimer);
+      referenceSyncRetryTimer = null;
+    }
+    referenceSyncRetryTimer = win.setTimeout(() => {
+      referenceSyncRetryTimer = null;
+      syncReferenceCardDirect(2);
+    }, delayMs);
+  } catch (_e) {
+    // ignore
+  }
+}
+
 export function unregisterAgentSection() {
   isGenerating = false;
   try {
@@ -340,6 +361,15 @@ export function unregisterAgentSection() {
   } catch (_e) { /* ignore */ }
   if (activeBody) {
     teardownResizeObserver(activeBody);
+  }
+  try {
+    const win = activeBody?.ownerDocument?.defaultView || Zotero.getMainWindow?.() || null;
+    if (win && referenceSyncRetryTimer) {
+      win.clearTimeout(referenceSyncRetryTimer);
+      referenceSyncRetryTimer = null;
+    }
+  } catch (_e) {
+    // ignore
   }
   try {
     if (sectionPaneID) {
@@ -365,11 +395,22 @@ export function updateSidebarPanels() {
   }
 }
 
-export function syncReferenceCardDirect() {
+export function syncReferenceCardDirect(retryCount = 0) {
   try {
-    if (!isSafeBody(activeBody)) return;
+    if (!isSafeBody(activeBody)) {
+      if (retryCount < 2) {
+        scheduleReferenceSyncRetry(120);
+      }
+      return;
+    }
     syncContextChips(activeBody);
     const inputArea = activeBody.querySelector("#zoteroagent-input-area") as HTMLElement | null;
+    if (!inputArea) {
+      if (retryCount < 2) {
+        scheduleReferenceSyncRetry(120);
+      }
+      return;
+    }
     if (inputArea && (addon.data.chat.referenceText || addon.data.chat.responseQuote)) {
       inputArea.style.display = "flex";
       activeBody.dataset.chatMode = "chat";

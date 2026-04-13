@@ -12,6 +12,7 @@
   box-sizing: border-box;
   background: var(--material-sidepane, #ffffff);
   overflow: hidden;
+  isolation: isolate;
   overflow-anchor: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   color: var(--fill-primary, #1a1a1a);
@@ -24,6 +25,8 @@
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  position: relative;
+  z-index: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px 6px 8px;
@@ -734,7 +737,7 @@
   position: absolute;
   left: -1px;
   bottom: calc(100% + 6px);
-  z-index: 50;
+  z-index: 80;
   width: max(280px, 100%);
   max-width: 400px;
   max-height: 180px;
@@ -933,7 +936,8 @@
   position: relative;
   border-top: 1px solid #f0f1f4;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 20;
 }
 
 .zoteroagent-input-area.is-drag-active .zoteroagent-compose-area {
