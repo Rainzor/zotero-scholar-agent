@@ -23,7 +23,9 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 6px 8px;
   gap: 0;
   -moz-user-select: text;
@@ -210,6 +212,7 @@
   gap: 6px;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 
 .zoteroagent-message-main {
@@ -509,11 +512,14 @@
 /* ---- Content Bubble ---- */
 .zoteroagent-message-content {
   max-width: 100%;
+  min-width: 0;
   border-radius: 10px;
   padding: 8px 10px;
   line-height: 1.7;
   font-size: 13.5px;
   word-break: break-word;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
   -moz-user-select: text;
   user-select: text;
   cursor: text;
@@ -926,6 +932,8 @@
   background: var(--material-sidepane, #ffffff);
   position: relative;
   border-top: 1px solid #f0f1f4;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .zoteroagent-input-area.is-drag-active .zoteroagent-compose-area {
@@ -1377,6 +1385,7 @@
   background: #282c34;
   color: #abb2bf;
   overflow-x: auto;
+  max-width: 100%;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1390,9 +1399,12 @@
 
 .zoteroagent-message.assistant .zoteroagent-message-content table {
   width: 100%;
+  max-width: 100%;
   margin: 8px 0;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
+  overflow-wrap: break-word;
 }
 
 .zoteroagent-message.assistant .zoteroagent-message-content th,

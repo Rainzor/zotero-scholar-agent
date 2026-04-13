@@ -42,6 +42,9 @@ let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
 let activeXHR: XMLHttpRequest | null = null;
 let isGenerating = false;
+const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
+const pollTimerMap = new WeakMap<HTMLElement, number>();
+const lastWidthMap = new WeakMap<HTMLElement, number>();
 const slashStateByPane = new Map<
   string,
   {
@@ -144,6 +147,7 @@ export function registerAgentSection() {
         body.dataset.paneUid = paneUID;
       },
       onDestroy: ({ body }: { body: HTMLElement }) => {
+        teardownResizeObserver(body);
         clearSlashState(body);
         delete body.dataset.paneUid;
       },
@@ -177,6 +181,7 @@ export function registerAgentSection() {
         ensureChatUI(body);
         loadSectionData(body, item);
         onUpdateHeight({ body });
+        setupResizeObserver(body);
       },
       sectionButtons: [
         {
@@ -184,7 +189,7 @@ export function registerAgentSection() {
           icon: `chrome://${config.addonRef}/content/icons/full-16.svg`,
           l10nID: getLocaleID("itemPaneSection-fullHeight"),
           onClick: ({ body }: { body: HTMLElement }) => {
-            const details = body.closest("item-details");
+            const details = findAncestor(body, "item-details");
             onUpdateHeight({ body });
             // @ts-ignore item-details is a Zotero custom element
             details?.scrollToPane?.(sectionPaneID);
@@ -200,23 +205,129 @@ export function registerAgentSection() {
   }
 }
 
+/**
+ * Walk up the DOM tree crossing shadow DOM boundaries to find an ancestor
+ * matching the given selector.
+ */
+function findAncestor(start: HTMLElement, selector: string): HTMLElement | null {
+  const direct = start.closest(selector) as HTMLElement | null;
+  if (direct) return direct;
+  let current: HTMLElement | null = start;
+  while (current) {
+    try {
+      const root = current.getRootNode();
+      if (root === current.ownerDocument || !(root as ShadowRoot).host) break;
+      const host = (root as ShadowRoot).host as HTMLElement;
+      if (host.matches?.(selector)) return host;
+      const viaHost = host.closest(selector) as HTMLElement | null;
+      if (viaHost) return viaHost;
+      current = host;
+    } catch (_e) {
+      break;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the reference elements for layout calculations, crossing shadow DOM
+ * boundaries when necessary.
+ */
+function resolveLayoutRefs(body: HTMLElement): {
+  details: HTMLElement | null;
+  section: HTMLElement | null;
+  head: HTMLElement | null;
+  viewItem: HTMLElement | null;
+} {
+  const section = findAncestor(body, "item-pane-custom-section");
+  const head = section?.querySelector(".head") as HTMLElement | null;
+  const details = findAncestor(body, "item-details");
+  const viewItem = (details?.querySelector(".zotero-view-item") as HTMLElement | null) || null;
+  return { details, section, head, viewItem };
+}
+
 function onUpdateHeight({ body }: { body: HTMLElement }) {
   try {
-    const details = body.closest("item-details");
-    const head = body
-      .closest("item-pane-custom-section")
-      ?.querySelector(".head");
-    if (!details || !head) return;
-    const viewItem = details.querySelector(".zotero-view-item");
-    if (!viewItem) return;
-    const height = viewItem.clientHeight - head.clientHeight - 8;
-    if (height > 0) {
-      body.style.height = `${height}px`;
-      body.style.setProperty("--details-height", `${height}px`);
+    const { details, head, viewItem } = resolveLayoutRefs(body);
+    if (details && head && viewItem) {
+      const height = viewItem.clientHeight - head.clientHeight - 8;
+      if (height > 0) {
+        body.style.height = `${height}px`;
+        body.style.setProperty("--details-height", `${height}px`);
+      }
     }
+
+    // Never lock a pixel width here; otherwise sidebar drag can leave a stale width.
+    // Keep the section fluid and let parent pane resizing drive the width.
+    body.style.minWidth = "0";
+    body.style.width = "100%";
+    body.style.maxWidth = "100%";
+    const widthProbe = viewItem?.clientWidth || details?.clientWidth || body.parentElement?.clientWidth || 0;
+    if (widthProbe > 0) lastWidthMap.set(body, widthProbe);
   } catch (_e) {
-    // ignore
+    body.style.width = "100%";
+    body.style.maxWidth = "100%";
   }
+}
+
+function setupResizeObserver(body: HTMLElement) {
+  teardownResizeObserver(body);
+  const { details, section, viewItem } = resolveLayoutRefs(body);
+  const targets = new Set<Element>();
+  if (viewItem) targets.add(viewItem);
+  if (details) targets.add(details);
+  if (section) targets.add(section);
+  if (body.parentElement) targets.add(body.parentElement);
+
+  // ResizeObserver: primary mechanism
+  if (targets.size > 0) {
+    let rafId = 0;
+    const observer = new ResizeObserver(() => {
+      if (rafId) return;
+      rafId = (body.ownerDocument.defaultView || globalThis).requestAnimationFrame(() => {
+        rafId = 0;
+        if (isSafeBody(body)) onUpdateHeight({ body });
+      });
+    });
+    for (const t of targets) observer.observe(t);
+    resizeObserverMap.set(body, observer);
+  }
+
+  // Polling fallback: catches splitter drags that ResizeObserver may miss
+  // (e.g. when XUL layout changes don't propagate to HTML ResizeObserver)
+  const win = body.ownerDocument.defaultView;
+  if (win) {
+    const timerId = win.setInterval(() => {
+      if (!isSafeBody(body)) {
+        teardownResizeObserver(body);
+        return;
+      }
+      const refs = resolveLayoutRefs(body);
+      const refEl = refs.viewItem || refs.details;
+      if (!refEl) return;
+      const currentWidth = refEl.clientWidth;
+      const prevWidth = lastWidthMap.get(body) || 0;
+      if (currentWidth > 0 && currentWidth !== prevWidth) {
+        lastWidthMap.set(body, currentWidth);
+        onUpdateHeight({ body });
+      }
+    }, 250);
+    pollTimerMap.set(body, timerId);
+  }
+}
+
+function teardownResizeObserver(body: HTMLElement) {
+  const observer = resizeObserverMap.get(body);
+  if (observer) {
+    observer.disconnect();
+    resizeObserverMap.delete(body);
+  }
+  const timerId = pollTimerMap.get(body);
+  if (timerId) {
+    try { body.ownerDocument?.defaultView?.clearInterval(timerId); } catch (_e) { /* ignore */ }
+    pollTimerMap.delete(body);
+  }
+  lastWidthMap.delete(body);
 }
 
 export function unregisterAgentSection() {
@@ -227,6 +338,9 @@ export function unregisterAgentSection() {
       activeXHR = null;
     }
   } catch (_e) { /* ignore */ }
+  if (activeBody) {
+    teardownResizeObserver(activeBody);
+  }
   try {
     if (sectionPaneID) {
       Zotero.ItemPaneManager.unregisterSection(sectionPaneID);
@@ -272,7 +386,7 @@ export function showAgentPanel() {
   updateSidebarPanels();
   try {
     if (isSafeBody(activeBody) && sectionPaneID) {
-      const details = activeBody.closest("item-details");
+      const details = findAncestor(activeBody, "item-details");
       (details as any)?.scrollToPane?.(sectionPaneID);
     }
   } catch (_e) {

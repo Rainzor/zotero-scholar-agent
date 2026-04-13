@@ -129,7 +129,7 @@ export class AIService {
         model,
         input,
         stream,
-        ...(maxTokensOverride ? { max_output_tokens: maxTokensOverride } : {}),
+        max_output_tokens: maxTokensOverride || 16384,
         ...(reasoning ? { reasoning } : {}),
       });
     }
@@ -137,7 +137,7 @@ export class AIService {
       model,
       messages,
       stream,
-      ...(maxTokensOverride ? { max_tokens: maxTokensOverride } : {}),
+      max_tokens: maxTokensOverride || 16384,
       ...(canThink && disableThinking ? { thinking: { type: "disabled" } } : {}),
     });
   }
