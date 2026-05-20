@@ -27,7 +27,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     key: "litellm",
     label: "LiteLLM Proxy",
-    apiUrl: "https://llm-proxy.forgeax.com/v1/chat/completions",
+    apiUrl: "https://llm-proxy.forgeax.com/v1",
     defaultModel: "gpt-5.5",
     miniModel: "gpt-5.5",
     maxContextTokens: 128000,

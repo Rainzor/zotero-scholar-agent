@@ -85,6 +85,46 @@ export class AIService {
     );
   }
 
+  private static resolveApiUrl(apiUrl: string, apiFormat: ApiFormat): string {
+    const cleaned = apiUrl.trim().replace(/\/+$/, "");
+    if (!cleaned) return "";
+
+    const targetSuffix =
+      apiFormat === "responses"
+        ? "/responses"
+        : apiFormat === "anthropic"
+          ? "/messages"
+          : "/chat/completions";
+    const defaultVersionedSuffix =
+      apiFormat === "anthropic"
+        ? "/v1/messages"
+        : `/v1${targetSuffix}`;
+    const knownEndpointPattern =
+      /\/(?:chat\/completions|responses|embeddings|files|models|messages)$/i;
+    const versionPathPattern = /\/v\d+(?:beta)?$/i;
+
+    try {
+      const parsed = new URL(cleaned);
+      const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+      if (knownEndpointPattern.test(pathname)) {
+        parsed.pathname = pathname.replace(knownEndpointPattern, targetSuffix);
+      } else if (versionPathPattern.test(pathname)) {
+        parsed.pathname = `${pathname}${targetSuffix}`;
+      } else {
+        parsed.pathname = `${pathname === "/" ? "" : pathname}${defaultVersionedSuffix}`;
+      }
+      return parsed.toString();
+    } catch {
+      if (knownEndpointPattern.test(cleaned)) {
+        return cleaned.replace(knownEndpointPattern, targetSuffix);
+      }
+      if (versionPathPattern.test(cleaned)) {
+        return `${cleaned}${targetSuffix}`;
+      }
+      return `${cleaned}${defaultVersionedSuffix}`;
+    }
+  }
+
   private static buildHeaders(cfg: ServiceConfig): Record<string, string> {
     if (cfg.authType === "x-api-key") {
       return {
@@ -374,7 +414,8 @@ export class AIService {
       maxTokens,
     } = options;
     const cfg = AIService.getConfig();
-    if (!cfg.apiUrl || !cfg.apiKey) {
+    const requestUrl = AIService.resolveApiUrl(cfg.apiUrl, cfg.apiFormat);
+    if (!requestUrl || !cfg.apiKey) {
       throw new Error(
         "API URL or API Key is not configured. Add a service in preferences.",
       );
@@ -428,7 +469,7 @@ export class AIService {
       };
 
       try {
-        await Zotero.HTTP.request("POST", cfg.apiUrl, {
+        await Zotero.HTTP.request("POST", requestUrl, {
           headers,
           body,
           responseType: "text",
@@ -461,7 +502,7 @@ export class AIService {
     }
 
     try {
-      const response = await Zotero.HTTP.request("POST", cfg.apiUrl, {
+      const response = await Zotero.HTTP.request("POST", requestUrl, {
         headers,
         body,
         responseType: "json",
