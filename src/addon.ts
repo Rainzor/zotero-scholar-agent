@@ -9,6 +9,20 @@ export type TokenUsage = {
   completionTokens?: number;
   totalTokens?: number;
 };
+export type ContextPdfSource = "upload" | "library";
+export type SessionContextPdfRef = {
+  source: ContextPdfSource;
+  hash: string;
+  fileName: string;
+  fileSize: number;
+  addedAt: number;
+  itemKey?: string;
+  itemId?: number;
+};
+export type PendingContextPdf = SessionContextPdfRef & {
+  status: "uploading" | "parsing" | "overviewing" | "ready" | "error";
+  error?: string;
+};
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -16,6 +30,7 @@ export type ChatMessage = {
   timestamp?: number;
   model?: string;
   images?: string[];
+  contextPdfRef?: { fileName: string; source?: ContextPdfSource };
   usage?: TokenUsage;
 };
 export type ChatSession = {
@@ -28,11 +43,13 @@ export type ChatSession = {
   summaryUpToIndex?: number;
   summaryUpdatedAt?: number;
   contextMode: ContextMode;
+  contextPdf?: SessionContextPdfRef;
   createdAt: number;
   updatedAt: number;
 };
 export type ProviderKey =
   | "openai"
+  | "litellm"
   | "azure"
   | "azureAnthropic"
   | "anthropic"
@@ -85,6 +102,7 @@ class Addon {
       referenceText: string;
       responseQuote: string;
       pendingImages: string[];
+      pendingContextPdf: PendingContextPdf | null;
     };
   };
   public hooks: typeof hooks;
@@ -98,13 +116,19 @@ class Addon {
       ztoolkit: createZToolkit(),
       locale: {},
       prefs: { window: null },
-      popup: { currentPopup: null, selectedText: "", selectedPageLabel: "", currentReader: null },
+      popup: {
+        currentPopup: null,
+        selectedText: "",
+        selectedPageLabel: "",
+        currentReader: null,
+      },
       panel: { activePanels: {}, standaloneWindow: null },
       chat: {
         prefillInput: "",
         referenceText: "",
         responseQuote: "",
         pendingImages: [],
+        pendingContextPdf: null,
       },
     };
     this.hooks = hooks;

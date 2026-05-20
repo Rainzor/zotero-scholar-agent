@@ -37,7 +37,8 @@ export function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+    reader.onerror = () =>
+      reject(reader.error || new Error("Failed to read file."));
     reader.readAsDataURL(file);
   });
 }
@@ -78,7 +79,8 @@ export async function optimizeImage(
     ctx.drawImage(img, 0, 0, dstW, dstH);
 
     const mime = getImageMimeType(dataUrl);
-    const lossy = mime === "image/jpeg" || mime === "image/jpg" || mime === "image/webp";
+    const lossy =
+      mime === "image/jpeg" || mime === "image/jpg" || mime === "image/webp";
     const next = lossy
       ? canvas.toDataURL(mime, clampQuality(maxQuality))
       : canvas.toDataURL(mime);

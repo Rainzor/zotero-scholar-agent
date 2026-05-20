@@ -41,10 +41,17 @@ export type RetrievedPage = {
   text: string;
 };
 
+export type ReferencePdfPromptContext = {
+  fileName: string;
+  overview: string;
+  pages: RetrievedPage[];
+};
+
 export function askPrompt(
   question: string,
   retrievedPages: RetrievedPage[],
   paperOverview?: string,
+  contextPdf?: ReferencePdfPromptContext,
 ): ChatMessage[] {
   let systemMsg =
     "You are an academic PDF reading assistant that helps users understand paper content. Respond in the same language the user uses.\n" +
@@ -71,8 +78,39 @@ export function askPrompt(
     systemMsg +=
       "\nBelow are dynamically loaded page snippets from the paper PDF. Ground your answer in these snippets when possible.";
   }
-  const userContent = pageBlocks
-    ? `${pageBlocks}\n\n[Question]\n${question}`
+  const refName = String(contextPdf?.fileName || "").trim();
+  const refOverview = compactOverviewForPrompt(
+    String(contextPdf?.overview || "").trim(),
+    1400,
+  );
+  const refPages = (contextPdf?.pages || [])
+    .map((p) => ({
+      pageNumber: Math.max(1, Math.floor(Number(p.pageNumber) || 0)),
+      text: String(p.text || "").trim(),
+    }))
+    .filter((p) => p.text)
+    .slice(0, 3);
+  if (refName) {
+    systemMsg +=
+      `\nThe user attached a reference PDF "${refName}" for comparison/background.\n` +
+      "Use reference evidence only when needed, and clearly distinguish the main paper from the reference paper.";
+  }
+  if (refOverview) {
+    systemMsg += `\n\n[Reference Paper Overview]\n${refOverview}`;
+  }
+  const refBlocks = refPages
+    .map((p) => `[Reference Paper Page ${p.pageNumber}]\n${p.text}`)
+    .join("\n\n");
+  if (refBlocks) {
+    systemMsg +=
+      "\nBelow are dynamically loaded page snippets from the reference PDF. Use them only when relevant to comparison/background questions.";
+  }
+
+  const contentBlocks: string[] = [];
+  if (pageBlocks) contentBlocks.push(pageBlocks);
+  if (refBlocks) contentBlocks.push(refBlocks);
+  const userContent = contentBlocks.length
+    ? `${contentBlocks.join("\n\n")}\n\n[Question]\n${question}`
     : question;
 
   return [
@@ -86,8 +124,16 @@ export function contextPlanningPrompt(
   paperOverview: string,
   currentPageNumber?: number,
   historySummary?: string,
+  contextPaperOverview?: string,
 ): ChatMessage[] {
-  const overview = compactOverviewForPrompt(String(paperOverview || "").trim(), 3000);
+  const overview = compactOverviewForPrompt(
+    String(paperOverview || "").trim(),
+    3000,
+  );
+  const referenceOverview = compactOverviewForPrompt(
+    String(contextPaperOverview || "").trim(),
+    1800,
+  );
   const safeQuestion = String(question || "").trim();
   const currentPage = Number(currentPageNumber || 0);
   const memory = String(historySummary || "").trim();
@@ -97,13 +143,17 @@ export function contextPlanningPrompt(
       content:
         "You are a context planning assistant for an academic PDF agent.\n" +
         "Given AGENTS.md and a user question, choose the minimum relevant pages to load from the paper.\n" +
+        "If a reference paper overview is provided, also choose minimal relevant pages from it.\n" +
         "The user question may include quote markers like [Quote|page=12]; treat them as high-priority page hints.\n" +
         "Return ONLY valid JSON with this exact shape:\n" +
-        '{"pages":[1,2],"reasoning":"short explanation"}\n' +
+        '{"pages":[1,2],"contextPages":[3],"reasoning":"short explanation"}\n' +
         "Rules:\n" +
         "- pages must be unique positive integers sorted ascending.\n" +
+        "- contextPages must be unique positive integers sorted ascending.\n" +
         "- choose at most 5 pages.\n" +
+        "- choose at most 3 contextPages.\n" +
         "- prefer pages explicitly hinted by AGENTS.md section index/page tags.\n" +
+        "- if reference overview is unavailable, return contextPages as [].\n" +
         "- if uncertain, include current page if provided.\n" +
         "- do not include markdown, prose outside JSON, or code fences.",
     },
@@ -115,7 +165,10 @@ export function contextPlanningPrompt(
         (memory ? `\n\n[Conversation memory]\n${memory}` : "") +
         (overview
           ? `\n\n[AGENTS.md]\n${overview}`
-          : "\n\n[AGENTS.md]\nUnavailable. Return pages based on best guess and current page."),
+          : "\n\n[AGENTS.md]\nUnavailable. Return pages based on best guess and current page.") +
+        (referenceOverview
+          ? `\n\n[Reference AGENTS.md]\n${referenceOverview}`
+          : "\n\n[Reference AGENTS.md]\nUnavailable. Return contextPages as []."),
     },
   ];
 }
@@ -144,6 +197,31 @@ export function initPaperPrompt(text: string): ChatMessage[] {
         "- If any detail is uncertain, explicitly mark it as Uncertain.\n" +
         "- Keep the output concise and directly reusable for downstream Q&A.\n\n" +
         `Full paper text:\n${text}`,
+    },
+  ];
+}
+
+export function initContextPdfPrompt(text: string): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content:
+        "You are an academic reference-paper compressor. Build a concise overview used for cross-paper comparison and background grounding.",
+    },
+    {
+      role: "user",
+      content:
+        "Based on the uploaded reference PDF text, generate a concise Markdown overview with these top-level headings:\n" +
+        "1. Paper Metadata\n" +
+        "2. Core Idea\n" +
+        "3. Methods and Evidence\n" +
+        "4. Section Index\n\n" +
+        "Requirements:\n" +
+        "- Keep total length around 200-400 words.\n" +
+        "- In Section Index, include page tags like [p.X] or [p.X-Y].\n" +
+        "- Mark uncertain statements explicitly as Uncertain.\n" +
+        "- Do not invent results not present in the text.\n\n" +
+        `Reference PDF text:\n${text}`,
     },
   ];
 }

@@ -1,4 +1,10 @@
-export type TextBlockType = "heading" | "paragraph" | "caption" | "footnote" | "listItem" | "other";
+export type TextBlockType =
+  | "heading"
+  | "paragraph"
+  | "caption"
+  | "footnote"
+  | "listItem"
+  | "other";
 
 export type TextBlock = {
   type: TextBlockType;
@@ -29,7 +35,9 @@ type LineRow = {
   fontName: string;
 };
 
-export async function parseAllPages(pdfDocument: any): Promise<StructuredPage[]> {
+export async function parseAllPages(
+  pdfDocument: any,
+): Promise<StructuredPage[]> {
   const totalPages = Number(pdfDocument?.numPages || 0);
   if (!Number.isFinite(totalPages) || totalPages <= 0) return [];
   const pages: StructuredPage[] = [];
@@ -39,7 +47,9 @@ export async function parseAllPages(pdfDocument: any): Promise<StructuredPage[]>
   return pages;
 }
 
-export function getPdfDocumentFromReader(reader?: _ZoteroTypes.ReaderInstance | null): any | null {
+export function getPdfDocumentFromReader(
+  reader?: _ZoteroTypes.ReaderInstance | null,
+): any | null {
   try {
     const iframeWin = (reader as any)?._iframeWindow;
     const wrapped = iframeWin?.wrappedJSObject;
@@ -59,7 +69,8 @@ export async function parsePageStructured(
     const textContent = await page.getTextContent();
     const rows = collectRows(textContent?.items || []);
     if (rows.length === 0) return emptyPage(pageNumber);
-    const medianFont = computeMedian(rows.map((r) => r.fontSize).filter((n) => n > 0)) || 10;
+    const medianFont =
+      computeMedian(rows.map((r) => r.fontSize).filter((n) => n > 0)) || 10;
     const maxY = Math.max(...rows.map((r) => r.y));
     const blocks = rows
       .map((row) => classifyRow(row, medianFont, maxY))
@@ -81,13 +92,16 @@ export function toPlainText(page: StructuredPage): string {
     .join("\n");
 }
 
-export function formatStructuredPagesForPrompt(pages: StructuredPage[]): string {
+export function formatStructuredPagesForPrompt(
+  pages: StructuredPage[],
+): string {
   return (pages || [])
     .filter((p) => p.pageNumber > 0 && (p.blocks?.length || p.plainText))
     .map((p) => {
       const body = (p.blocks || [])
         .map((block) => {
-          const headingTag = block.type === "heading" ? `[H${block.headingLevel || 3}] ` : "";
+          const headingTag =
+            block.type === "heading" ? `[H${block.headingLevel || 3}] ` : "";
           return `${headingTag}${block.text}`;
         })
         .join("\n");
@@ -96,7 +110,9 @@ export function formatStructuredPagesForPrompt(pages: StructuredPage[]): string 
     .join("\n\n");
 }
 
-export function stripReferencesFromPages(pages: StructuredPage[]): StructuredPage[] {
+export function stripReferencesFromPages(
+  pages: StructuredPage[],
+): StructuredPage[] {
   let referencesStarted = false;
   const output: StructuredPage[] = [];
   for (const page of pages || []) {
@@ -109,7 +125,9 @@ export function stripReferencesFromPages(pages: StructuredPage[]): StructuredPag
       output.push({ ...safePage, blocks: [], plainText: "" });
       continue;
     }
-    const markerIndex = safePage.blocks.findIndex((block) => isReferenceHeading(block));
+    const markerIndex = safePage.blocks.findIndex((block) =>
+      isReferenceHeading(block),
+    );
     if (markerIndex < 0) {
       output.push(safePage);
       continue;
@@ -129,12 +147,18 @@ export function findBlocksByKeyword(
   pages: StructuredPage[],
   keyword: string,
 ): Array<{ pageNumber: number; block: TextBlock }> {
-  const q = String(keyword || "").trim().toLowerCase();
+  const q = String(keyword || "")
+    .trim()
+    .toLowerCase();
   if (!q) return [];
   const matches: Array<{ pageNumber: number; block: TextBlock }> = [];
   for (const page of pages || []) {
     for (const block of page.blocks || []) {
-      if (String(block.text || "").toLowerCase().includes(q)) {
+      if (
+        String(block.text || "")
+          .toLowerCase()
+          .includes(q)
+      ) {
         matches.push({ pageNumber: page.pageNumber, block });
       }
     }
@@ -142,13 +166,22 @@ export function findBlocksByKeyword(
   return matches;
 }
 
-export function getSectionPages(pages: StructuredPage[], sectionTitle: string): StructuredPage[] {
-  const q = String(sectionTitle || "").trim().toLowerCase();
+export function getSectionPages(
+  pages: StructuredPage[],
+  sectionTitle: string,
+): StructuredPage[] {
+  const q = String(sectionTitle || "")
+    .trim()
+    .toLowerCase();
   if (!q) return [];
   const selected = new Set<number>();
   for (const page of pages || []) {
     const hasSection = (page.blocks || []).some(
-      (b) => b.type === "heading" && String(b.text || "").toLowerCase().includes(q),
+      (b) =>
+        b.type === "heading" &&
+        String(b.text || "")
+          .toLowerCase()
+          .includes(q),
     );
     if (hasSection) {
       selected.add(page.pageNumber);
@@ -200,7 +233,11 @@ function collectRows(items: RawItem[]): LineRow[] {
   return rows;
 }
 
-function classifyRow(row: LineRow, medianFont: number, maxY: number): TextBlock {
+function classifyRow(
+  row: LineRow,
+  medianFont: number,
+  maxY: number,
+): TextBlock {
   const text = String(row.text || "").trim();
   const fontSize = row.fontSize > 0 ? row.fontSize : medianFont;
   const fontName = row.fontName || "";
@@ -212,11 +249,19 @@ function classifyRow(row: LineRow, medianFont: number, maxY: number): TextBlock 
   const isFootnote = fontSize <= medianFont * 0.85 && row.y <= maxY * 0.2;
 
   if (isCaption) return { type: "caption", text, fontSize, fontName, y: row.y };
-  if (isFootnote) return { type: "footnote", text, fontSize, fontName, y: row.y };
+  if (isFootnote)
+    return { type: "footnote", text, fontSize, fontName, y: row.y };
   if (isHeading) {
     const headingLevel: 1 | 2 | 3 =
       fontSize >= medianFont * 1.8 ? 1 : fontSize >= medianFont * 1.45 ? 2 : 3;
-    return { type: "heading", text, fontSize, fontName, y: row.y, headingLevel };
+    return {
+      type: "heading",
+      text,
+      fontSize,
+      fontName,
+      y: row.y,
+      headingLevel,
+    };
   }
   if (isList) return { type: "listItem", text, fontSize, fontName, y: row.y };
   if (!lower) return { type: "other", text, fontSize, fontName, y: row.y };
@@ -225,7 +270,8 @@ function classifyRow(row: LineRow, medianFont: number, maxY: number): TextBlock 
 
 function getItemFontSize(it: RawItem): number {
   const byTransform = Number(it?.transform?.[0]);
-  if (Number.isFinite(byTransform) && byTransform > 0) return Math.abs(byTransform);
+  if (Number.isFinite(byTransform) && byTransform > 0)
+    return Math.abs(byTransform);
   const byHeight = Number(it?.height);
   if (Number.isFinite(byHeight) && byHeight > 0) return Math.abs(byHeight);
   return 0;
@@ -245,7 +291,9 @@ function emptyPage(pageNumber: number): StructuredPage {
 
 function isReferenceHeading(block: TextBlock): boolean {
   if (!block || block.type !== "heading") return false;
-  const text = String(block.text || "").trim().toLowerCase();
+  const text = String(block.text || "")
+    .trim()
+    .toLowerCase();
   if (!text) return false;
   return /^(references|bibliography|参考文献)\b/.test(text);
 }

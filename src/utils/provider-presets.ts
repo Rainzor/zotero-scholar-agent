@@ -25,6 +25,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     supportsThinking: false,
   },
   {
+    key: "litellm",
+    label: "LiteLLM Proxy",
+    apiUrl: "https://llm-proxy.forgeax.com/v1/chat/completions",
+    defaultModel: "gpt-5.5",
+    miniModel: "gpt-5.5",
+    maxContextTokens: 128000,
+    apiFormat: "chat-completions",
+    authType: "bearer",
+    supportsThinking: false,
+  },
+  {
     key: "azure",
     label: "Azure OpenAI",
     apiUrl: "",
@@ -82,7 +93,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     key: "gemini",
     label: "Gemini (Google)",
-    apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    apiUrl:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     defaultModel: "gemini-2.0-flash",
     miniModel: "gemini-2.0-flash-lite",
     maxContextTokens: 1000000,
@@ -115,7 +127,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     key: "qwen",
     label: "Qwen (通义千问)",
-    apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    apiUrl:
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     defaultModel: "qwen-plus",
     miniModel: "qwen-turbo",
     maxContextTokens: 128000,

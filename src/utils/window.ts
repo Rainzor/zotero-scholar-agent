@@ -64,6 +64,6 @@ function localeWindow(win: Window) {
             : elem.setAttribute(normalizedKey, errorInfo);
         }
       });
-    }
+    },
   );
 }

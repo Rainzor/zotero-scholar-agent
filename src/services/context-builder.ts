@@ -15,7 +15,9 @@ type BuildContextOptions = {
 
 const DROPPED_SUMMARY_MARKER = "[Dropped History Summary]";
 
-export function buildContextMessages(options: BuildContextOptions): PromptMessage[] {
+export function buildContextMessages(
+  options: BuildContextOptions,
+): PromptMessage[] {
   const {
     systemMessage,
     currentMessage,
@@ -43,7 +45,9 @@ export function buildContextMessages(options: BuildContextOptions): PromptMessag
 
   const droppedCount = history.length - included.length;
   if (droppedCount > 0) {
-    const droppedSummary = buildCondensedSummary(history.slice(0, droppedCount));
+    const droppedSummary = buildCondensedSummary(
+      history.slice(0, droppedCount),
+    );
     const summaryCost = estimateTokens(droppedSummary) + 4;
     if (historyBudget >= summaryCost) {
       included.unshift({
@@ -60,7 +64,8 @@ export function truncateDocContext(text: string, maxTokens: number): string {
   if (!text || maxTokens <= 0) return "";
   if (estimateTokens(text) <= maxTokens) return text;
 
-  const suffix = "\n\n[... Document content truncated to fit model context window ...]";
+  const suffix =
+    "\n\n[... Document content truncated to fit model context window ...]";
   let left = 0;
   let right = text.length;
   let best = "";
@@ -78,12 +83,20 @@ export function truncateDocContext(text: string, maxTokens: number): string {
 }
 
 function buildCondensedSummary(messages: PromptMessage[]): string {
-  const lines = [`${DROPPED_SUMMARY_MARKER} Earlier turns were trimmed to fit context:`];
+  const lines = [
+    `${DROPPED_SUMMARY_MARKER} Earlier turns were trimmed to fit context:`,
+  ];
   for (const msg of messages) {
-    const role = msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "System";
+    const role =
+      msg.role === "user"
+        ? "User"
+        : msg.role === "assistant"
+          ? "Assistant"
+          : "System";
     const normalized = (msg.content || "").replace(/\s+/g, " ").trim();
     if (!normalized) continue;
-    const clipped = normalized.length > 180 ? `${normalized.slice(0, 180)}...` : normalized;
+    const clipped =
+      normalized.length > 180 ? `${normalized.slice(0, 180)}...` : normalized;
     lines.push(`- ${role}: ${clipped}`);
   }
   return lines.join("\n");

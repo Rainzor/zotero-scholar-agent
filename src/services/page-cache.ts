@@ -61,7 +61,9 @@ export async function hasPageCache(itemKey: string): Promise<boolean> {
   }
 }
 
-export async function loadPageCache(itemKey: string): Promise<PageCacheData | null> {
+export async function loadPageCache(
+  itemKey: string,
+): Promise<PageCacheData | null> {
   const fromMemory = memoryCache.get(itemKey);
   if (fromMemory) return fromMemory;
 
@@ -82,13 +84,19 @@ export async function loadPageCache(itemKey: string): Promise<PageCacheData | nu
   }
 }
 
-export async function savePageCache(itemKey: string, data: PageCacheData): Promise<void> {
+export async function savePageCache(
+  itemKey: string,
+  data: PageCacheData,
+): Promise<void> {
   const ioUtils = getIOUtils();
   if (!ioUtils) return;
   const normalized = normalizeCache(data);
   if (!normalized) return;
   await ensurePageCacheDir();
-  await ioUtils.writeUTF8(getPageCachePath(itemKey), JSON.stringify(normalized));
+  await ioUtils.writeUTF8(
+    getPageCachePath(itemKey),
+    JSON.stringify(normalized),
+  );
   rememberInMemory(itemKey, normalized);
 }
 

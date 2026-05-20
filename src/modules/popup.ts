@@ -50,9 +50,13 @@ export function buildReaderPopup(
               properties: {
                 innerText: "Translate",
                 onclick: () => {
-                  const btn = popup.querySelector(`#${makeId("translate")}`) as HTMLElement;
+                  const btn = popup.querySelector(
+                    `#${makeId("translate")}`,
+                  ) as HTMLElement;
                   if (btn) btn.hidden = true;
-                  const ta = popup.querySelector(`#${makeId("result")}`) as HTMLElement;
+                  const ta = popup.querySelector(
+                    `#${makeId("result")}`,
+                  ) as HTMLElement;
                   if (ta) ta.hidden = false;
                   void runTranslate(popup, makeId);
                 },
@@ -130,7 +134,8 @@ async function runTranslate(
     const targetLanguage = DEFAULT_TRANSLATE_TARGET_LANG;
     const messages = translatePrompt(selectedText, targetLanguage);
     const svc = getActiveService();
-    const miniModel = svc?.miniModel || getPreset(svc?.provider || "custom")?.miniModel;
+    const miniModel =
+      svc?.miniModel || getPreset(svc?.provider || "custom")?.miniModel;
     await AIService.chat(messages as any, {
       stream: true,
       disableThinking: true,

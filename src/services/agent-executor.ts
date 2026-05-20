@@ -6,7 +6,11 @@ import {
   type RetrievedPage,
 } from "./prompts";
 import { buildContextMessages, truncateDocContext } from "./context-builder";
-import { getFullText, getMultiPageText, getCurrentPageNumber } from "../modules/pdf-context";
+import {
+  getFullText,
+  getMultiPageText,
+  getCurrentPageNumber,
+} from "../modules/pdf-context";
 import { loadPaperOverview, savePaperOverview } from "./paper-overview";
 import {
   formatStructuredPagesForPrompt,
@@ -25,10 +29,21 @@ type PromptMessage = {
 type StreamState = {
   content: string;
   reasoning: string;
-  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 };
 
 type AgentStatusStage = "init" | "plan" | "load" | "answer";
+
+type ReferenceContextPdf = {
+  hash: string;
+  fileName: string;
+  overview: string;
+  pages: StructuredPage[];
+};
 
 export type AgentExecutionInput = {
   itemId: number;
@@ -41,6 +56,7 @@ export type AgentExecutionInput = {
   paperOverview?: string;
   miniModel?: string;
   pendingImages?: string[];
+  contextPdf?: ReferenceContextPdf;
   historySummary?: string;
   onStatus?: (stage: AgentStatusStage, text: string) => void;
   onRequest?: (xhr: XMLHttpRequest) => void;
@@ -49,6 +65,7 @@ export type AgentExecutionInput = {
 
 type ContextPlan = {
   pages: number[];
+  contextPages: number[];
   reasoning: string;
 };
 
@@ -72,7 +89,10 @@ export async function ensureAgentsMd(
       "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.",
     );
   }
-  const clipped = truncateDocContext(fullText, Math.floor(maxContextTokens * 0.8));
+  const clipped = truncateDocContext(
+    fullText,
+    Math.floor(maxContextTokens * 0.8),
+  );
   const prompts = initPaperPrompt(clipped);
   const result = await AIService.chat(prompts as any, {
     stream: false,
@@ -81,7 +101,9 @@ export async function ensureAgentsMd(
   });
   const overview = String(result.content || "").trim();
   if (!overview) {
-    throw new Error("Failed to generate AGENTS.md: the model did not return valid content.");
+    throw new Error(
+      "Failed to generate AGENTS.md: the model did not return valid content.",
+    );
   }
   await savePaperOverview(itemKey, overview);
   return overview;
@@ -90,6 +112,7 @@ export async function ensureAgentsMd(
 export async function planContext(options: {
   question: string;
   paperOverview: string;
+  contextPaperOverview?: string;
   currentPageNumber?: number;
   historySummary?: string;
   miniModel?: string;
@@ -99,6 +122,7 @@ export async function planContext(options: {
     options.paperOverview,
     options.currentPageNumber,
     options.historySummary,
+    options.contextPaperOverview,
   );
   const result = await AIService.chat(prompts as any, {
     stream: false,
@@ -113,6 +137,7 @@ export async function planContext(options: {
 export async function executeAgent(options: AgentExecutionInput): Promise<{
   answer: StreamState;
   usedPages: RetrievedPage[];
+  usedContextPages: RetrievedPage[];
   plan: ContextPlan;
 }> {
   const onStatus = options.onStatus;
@@ -121,6 +146,7 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
   const cachedPages = await ensurePageCache(options.itemKey, reader, onStatus);
   const llmPages = stripReferencesFromPages(cachedPages);
   const cacheByPage = indexByPage(llmPages);
+  const contextCacheByPage = indexByPage(options.contextPdf?.pages || []);
 
   const paperOverview =
     (options.paperOverview || "").trim() ||
@@ -138,27 +164,59 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
     plan = await planContext({
       question: options.question,
       paperOverview,
+      contextPaperOverview: options.contextPdf?.overview || "",
       currentPageNumber,
       historySummary: options.historySummary,
       miniModel: options.miniModel,
     });
   } catch (_e) {
     const fallbackPage = currentPageNumber > 0 ? [currentPageNumber] : [];
-    plan = { pages: fallbackPage, reasoning: "Planning failed; fallback to current page." };
+    plan = {
+      pages: fallbackPage,
+      contextPages: [],
+      reasoning: "Planning failed; fallback to current page.",
+    };
   }
 
   const pagesToLoad = selectPages(plan.pages, currentPageNumber);
-  onStatus?.("load", pagesToLoad.length ? `Loading pages ${pagesToLoad.join(", ")}...` : "Loading context...");
+  onStatus?.(
+    "load",
+    pagesToLoad.length
+      ? `Loading pages ${pagesToLoad.join(", ")}...`
+      : "Loading context...",
+  );
   const missingPages = pagesToLoad.filter((page) => !cacheByPage.has(page));
-  const pageMap = missingPages.length ? await getMultiPageText(reader, missingPages) : new Map<number, string>();
+  const pageMap = missingPages.length
+    ? await getMultiPageText(reader, missingPages)
+    : new Map<number, string>();
   const retrievedPages = pagesToLoad
     .map((pageNumber) => ({
       pageNumber,
-      text: String(cacheByPage.get(pageNumber) || pageMap.get(pageNumber) || "").trim(),
+      text: String(
+        cacheByPage.get(pageNumber) || pageMap.get(pageNumber) || "",
+      ).trim(),
+    }))
+    .filter((p) => p.text);
+  const contextPagesToLoad = selectContextPages(plan.contextPages);
+  const retrievedContextPages = contextPagesToLoad
+    .map((pageNumber) => ({
+      pageNumber,
+      text: String(contextCacheByPage.get(pageNumber) || "").trim(),
     }))
     .filter((p) => p.text);
 
-  const prompts = askPrompt(options.question, retrievedPages, paperOverview);
+  const prompts = askPrompt(
+    options.question,
+    retrievedPages,
+    paperOverview,
+    options.contextPdf
+      ? {
+          fileName: options.contextPdf.fileName,
+          overview: options.contextPdf.overview,
+          pages: retrievedContextPages,
+        }
+      : undefined,
+  );
   if ((options.pendingImages || []).length > 0) {
     prompts[0].content +=
       "\nThe user has attached images. Analyze image content together with the paper context and the user question.";
@@ -188,7 +246,12 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
     onChunk: options.onChunk,
   });
 
-  return { answer, usedPages: retrievedPages, plan };
+  return {
+    answer,
+    usedPages: retrievedPages,
+    usedContextPages: retrievedContextPages,
+    plan,
+  };
 }
 
 export async function ensurePageCache(
@@ -209,10 +272,19 @@ export async function ensurePageCache(
   return pages;
 }
 
-function parseContextPlan(raw: string, currentPageNumber?: number): ContextPlan {
+function parseContextPlan(
+  raw: string,
+  currentPageNumber?: number,
+): ContextPlan {
   const text = String(raw || "").trim();
-  const fallbackPage = currentPageNumber && currentPageNumber > 0 ? [currentPageNumber] : [];
-  if (!text) return { pages: fallbackPage, reasoning: "No planning output." };
+  const fallbackPage =
+    currentPageNumber && currentPageNumber > 0 ? [currentPageNumber] : [];
+  if (!text)
+    return {
+      pages: fallbackPage,
+      contextPages: [],
+      reasoning: "No planning output.",
+    };
 
   let payload: any = null;
   try {
@@ -221,13 +293,24 @@ function parseContextPlan(raw: string, currentPageNumber?: number): ContextPlan 
     payload = extractJsonObject(text);
   }
   if (!payload || typeof payload !== "object") {
-    return { pages: fallbackPage, reasoning: "Invalid planning output." };
+    return {
+      pages: fallbackPage,
+      contextPages: [],
+      reasoning: "Invalid planning output.",
+    };
   }
 
-  const pages = selectPages(Array.isArray(payload.pages) ? payload.pages : [], currentPageNumber);
+  const pages = selectPages(
+    Array.isArray(payload.pages) ? payload.pages : [],
+    currentPageNumber,
+  );
+  const contextPages = selectContextPages(
+    Array.isArray(payload.contextPages) ? payload.contextPages : [],
+  );
   const reasoning = String(payload.reasoning || "").trim();
   return {
     pages,
+    contextPages,
     reasoning: reasoning || "Planned pages from AGENTS.md index.",
   };
 }
@@ -253,8 +336,22 @@ function selectPages(candidates: any[], fallbackPageNumber?: number): number[] {
     ),
   ).sort((a, b) => a - b);
   if (numbers.length > 0) return numbers.slice(0, 5);
-  if (fallbackPageNumber && fallbackPageNumber > 0) return [Math.floor(fallbackPageNumber)];
+  if (fallbackPageNumber && fallbackPageNumber > 0)
+    return [Math.floor(fallbackPageNumber)];
   return [];
+}
+
+function selectContextPages(candidates: any[]): number[] {
+  return Array.from(
+    new Set(
+      (candidates || [])
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .map((v) => Math.floor(v)),
+    ),
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 3);
 }
 
 function indexByPage(pages: StructuredPage[]): Map<number, string> {

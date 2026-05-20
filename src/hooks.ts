@@ -1,6 +1,9 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
-import { registerPrefsWindow, registerPrefsScripts } from "./modules/preferences";
+import {
+  registerPrefsWindow,
+  registerPrefsScripts,
+} from "./modules/preferences";
 import { registerReaderInitializer } from "./modules/reader";
 import {
   registerAgentSection,
@@ -41,9 +44,13 @@ async function onStartup() {
       ["tab"],
       config.addonID,
     );
-  } catch (_e) { /* tab notifier may not be available */ }
+  } catch (_e) {
+    /* tab notifier may not be available */
+  }
 
-  await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
+  await Promise.all(
+    Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
+  );
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
@@ -52,7 +59,9 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     Zotero.unlockPromise,
     Zotero.uiReadyPromise,
   ]);
-  (win as any).MozXULElement.insertFTLIfNeeded(`${config.addonRef}-mainWindow.ftl`);
+  (win as any).MozXULElement.insertFTLIfNeeded(
+    `${config.addonRef}-mainWindow.ftl`,
+  );
   if (!win.document.querySelector(`#${config.addonRef}-panel-style`)) {
     const styleLink = win.document.createElement("link");
     styleLink.id = `${config.addonRef}-panel-style`;
@@ -78,7 +87,9 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 async function onMainWindowUnload(win: Window): Promise<void> {
   try {
     if (Components.utils.isDeadWrapper(win)) return;
-    win.document.querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)?.remove();
+    win.document
+      .querySelector(`[href="${config.addonRef}-mainWindow.ftl"]`)
+      ?.remove();
     win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
     win.document.querySelector(`#${config.addonRef}-katex-style`)?.remove();
   } catch (_e) {
@@ -90,7 +101,11 @@ async function onShutdown() {
   addon.data.alive = false;
   await chatStore.flushAll();
   if (tabNotifierID) {
-    try { Zotero.Notifier.unregisterObserver(tabNotifierID); } catch (_e) { /* ignore */ }
+    try {
+      Zotero.Notifier.unregisterObserver(tabNotifierID);
+    } catch (_e) {
+      /* ignore */
+    }
     tabNotifierID = null;
   }
   unregisterAgentSection();

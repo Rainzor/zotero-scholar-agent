@@ -1,6 +1,10 @@
 import { config } from "../../package.json";
 import { loadPageCache } from "../services/page-cache";
-import { getPdfDocumentFromReader, parsePageStructured, toPlainText } from "../services/pdf-parser";
+import {
+  getPdfDocumentFromReader,
+  parsePageStructured,
+  toPlainText,
+} from "../services/pdf-parser";
 
 function getZToolkit(): any {
   return (Zotero as any)[config.addonInstance]?.data?.ztoolkit;
@@ -64,7 +68,10 @@ async function getPageTextFromReader(
     const pdfApp = wrapped?.PDFViewerApplication;
     if (!pdfApp?.pdfViewer || !pdfApp?.pdfDocument) return "";
 
-    const targetPage = normalizePageNumber(pageNumber, pdfApp.pdfViewer.currentPageNumber);
+    const targetPage = normalizePageNumber(
+      pageNumber,
+      pdfApp.pdfViewer.currentPageNumber,
+    );
     if (!targetPage) return "";
 
     const textFromDOM = readTextLayerDOM(iframeWin, targetPage);
@@ -89,7 +96,11 @@ export async function getMultiPageText(
 ): Promise<Map<number, string>> {
   const result = new Map<number, string>();
   const uniquePages = Array.from(
-    new Set((pageNumbers || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)),
+    new Set(
+      (pageNumbers || [])
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0),
+    ),
   );
   const cache = await loadReaderPageCache(reader);
   if (cache?.pages?.length) {
@@ -233,7 +244,10 @@ async function getTargetReader(
   return ((await tk?.Reader?.getReader()) as any) || null;
 }
 
-function normalizePageNumber(pageNumber: number | undefined, fallback: number): number {
+function normalizePageNumber(
+  pageNumber: number | undefined,
+  fallback: number,
+): number {
   const n = Number(pageNumber);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
   const f = Number(fallback);

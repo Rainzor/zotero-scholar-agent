@@ -7,40 +7,98 @@
 >
   <groupbox>
     <label><html:h2 data-l10n-id="pref-services-title"></html:h2></label>
-    <html:div id="__addonRef__-services-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;max-height:160px;overflow-y:auto;border:1px solid #ccc;border-radius:6px;padding:4px;"></html:div>
+    <html:div
+      id="__addonRef__-services-list"
+      style="
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 8px;
+        max-height: 160px;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 4px;
+      "
+    ></html:div>
     <hbox align="center">
       <button id="__addonRef__-svcAdd" data-l10n-id="pref-svc-add"></button>
-      <button id="__addonRef__-svcRemove" data-l10n-id="pref-svc-remove"></button>
-      <button id="__addonRef__-svcDefault" data-l10n-id="pref-svc-setDefault"></button>
+      <button
+        id="__addonRef__-svcRemove"
+        data-l10n-id="pref-svc-remove"
+      ></button>
+      <button
+        id="__addonRef__-svcDefault"
+        data-l10n-id="pref-svc-setDefault"
+      ></button>
     </hbox>
-    <vbox id="__addonRef__-svcEditor" style="margin-top:8px;">
+    <vbox id="__addonRef__-svcEditor" style="margin-top: 8px">
       <hbox align="center">
-        <label data-l10n-id="pref-svc-provider" style="min-width:80px"></label>
-        <html:select id="__addonRef__-svcProvider" style="min-width:200px"></html:select>
+        <label data-l10n-id="pref-svc-provider" style="min-width: 80px"></label>
+        <html:select
+          id="__addonRef__-svcProvider"
+          style="min-width: 200px"
+        ></html:select>
       </hbox>
       <hbox align="center">
-        <label data-l10n-id="pref-svc-name" style="min-width:80px"></label>
-        <html:input id="__addonRef__-svcName" type="text" style="min-width:200px"></html:input>
-        <label data-l10n-id="pref-svc-apiFormat" style="min-width:80px;margin-left:12px"></label>
-        <html:select id="__addonRef__-svcApiFormat" style="min-width:140px">
-          <html:option value="chat-completions" data-l10n-id="pref-svc-apiFormat-chatCompletions"></html:option>
-          <html:option value="responses" data-l10n-id="pref-svc-apiFormat-responses"></html:option>
-          <html:option value="anthropic" data-l10n-id="pref-svc-apiFormat-messages"></html:option>
+        <label data-l10n-id="pref-svc-name" style="min-width: 80px"></label>
+        <html:input
+          id="__addonRef__-svcName"
+          type="text"
+          style="min-width: 200px"
+        ></html:input>
+        <label
+          data-l10n-id="pref-svc-apiFormat"
+          style="min-width: 80px; margin-left: 12px"
+        ></label>
+        <html:select id="__addonRef__-svcApiFormat" style="min-width: 140px">
+          <html:option
+            value="chat-completions"
+            data-l10n-id="pref-svc-apiFormat-chatCompletions"
+          ></html:option>
+          <html:option
+            value="responses"
+            data-l10n-id="pref-svc-apiFormat-responses"
+          ></html:option>
+          <html:option
+            value="anthropic"
+            data-l10n-id="pref-svc-apiFormat-messages"
+          ></html:option>
         </html:select>
       </hbox>
       <hbox align="center">
-        <label data-l10n-id="pref-svc-apiUrl" style="min-width:80px"></label>
-        <html:input id="__addonRef__-svcApiUrl" type="text" style="min-width:480px"></html:input>
+        <label data-l10n-id="pref-svc-apiUrl" style="min-width: 80px"></label>
+        <html:input
+          id="__addonRef__-svcApiUrl"
+          type="text"
+          style="min-width: 480px"
+        ></html:input>
       </hbox>
       <hbox align="center">
-        <label data-l10n-id="pref-svc-apiKey" style="min-width:80px"></label>
-        <html:input id="__addonRef__-svcApiKey" type="password" style="min-width:320px"></html:input>
+        <label data-l10n-id="pref-svc-apiKey" style="min-width: 80px"></label>
+        <html:input
+          id="__addonRef__-svcApiKey"
+          type="password"
+          style="min-width: 320px"
+        ></html:input>
       </hbox>
       <hbox align="center">
-        <label data-l10n-id="pref-svc-model" style="min-width:80px"></label>
-        <html:input id="__addonRef__-svcModel" type="text" style="min-width:200px"></html:input>
-        <label data-l10n-id="pref-svc-miniModel" style="min-width:80px;margin-left:12px"></label>
-        <html:input id="__addonRef__-svcMiniModel" type="text" style="min-width:160px" placeholder="auto"></html:input>
+        <label data-l10n-id="pref-svc-model" style="min-width: 80px"></label>
+        <html:input
+          id="__addonRef__-svcModel"
+          type="text"
+          style="min-width: 200px"
+        ></html:input>
+        <label
+          data-l10n-id="pref-svc-miniModel"
+          style="min-width: 80px; margin-left: 12px"
+        ></label>
+        <html:input
+          id="__addonRef__-svcMiniModel"
+          type="text"
+          style="min-width: 160px"
+          placeholder="auto"
+        ></html:input>
       </hbox>
       <hbox align="center">
         <button id="__addonRef__-svcSave" data-l10n-id="pref-svc-save"></button>

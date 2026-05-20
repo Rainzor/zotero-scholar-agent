@@ -56,30 +56,65 @@ function bindServiceManager(doc: Document) {
     `#${prefId("services-list")}`,
   ) as HTMLElement | null;
   const addBtn = doc.querySelector(`#${prefId("svcAdd")}`) as XUL.Button | null;
-  const removeBtn = doc.querySelector(`#${prefId("svcRemove")}`) as XUL.Button | null;
-  const defaultBtn = doc.querySelector(`#${prefId("svcDefault")}`) as XUL.Button | null;
-  const saveBtn = doc.querySelector(`#${prefId("svcSave")}`) as XUL.Button | null;
-  const testBtn = doc.querySelector(`#${prefId("svcTest")}`) as XUL.Button | null;
+  const removeBtn = doc.querySelector(
+    `#${prefId("svcRemove")}`,
+  ) as XUL.Button | null;
+  const defaultBtn = doc.querySelector(
+    `#${prefId("svcDefault")}`,
+  ) as XUL.Button | null;
+  const saveBtn = doc.querySelector(
+    `#${prefId("svcSave")}`,
+  ) as XUL.Button | null;
+  const testBtn = doc.querySelector(
+    `#${prefId("svcTest")}`,
+  ) as XUL.Button | null;
 
-  const providerSelect = doc.querySelector(`#${prefId("svcProvider")}`) as HTMLSelectElement | null;
-  const nameInput = doc.querySelector(`#${prefId("svcName")}`) as HTMLInputElement | null;
-  const apiFormatSelect = doc.querySelector(`#${prefId("svcApiFormat")}`) as HTMLSelectElement | null;
-  const urlInput = doc.querySelector(`#${prefId("svcApiUrl")}`) as HTMLInputElement | null;
-  const keyInput = doc.querySelector(`#${prefId("svcApiKey")}`) as HTMLInputElement | null;
-  const modelInput = doc.querySelector(`#${prefId("svcModel")}`) as HTMLInputElement | null;
-  const miniModelInput = doc.querySelector(`#${prefId("svcMiniModel")}`) as HTMLInputElement | null;
+  const providerSelect = doc.querySelector(
+    `#${prefId("svcProvider")}`,
+  ) as HTMLSelectElement | null;
+  const nameInput = doc.querySelector(
+    `#${prefId("svcName")}`,
+  ) as HTMLInputElement | null;
+  const apiFormatSelect = doc.querySelector(
+    `#${prefId("svcApiFormat")}`,
+  ) as HTMLSelectElement | null;
+  const urlInput = doc.querySelector(
+    `#${prefId("svcApiUrl")}`,
+  ) as HTMLInputElement | null;
+  const keyInput = doc.querySelector(
+    `#${prefId("svcApiKey")}`,
+  ) as HTMLInputElement | null;
+  const modelInput = doc.querySelector(
+    `#${prefId("svcModel")}`,
+  ) as HTMLInputElement | null;
+  const miniModelInput = doc.querySelector(
+    `#${prefId("svcMiniModel")}`,
+  ) as HTMLInputElement | null;
 
   if (
-    !listContainer || !addBtn || !removeBtn || !defaultBtn ||
-    !saveBtn || !testBtn || !providerSelect || !nameInput ||
-    !apiFormatSelect || !urlInput || !keyInput || !modelInput || !miniModelInput
+    !listContainer ||
+    !addBtn ||
+    !removeBtn ||
+    !defaultBtn ||
+    !saveBtn ||
+    !testBtn ||
+    !providerSelect ||
+    !nameInput ||
+    !apiFormatSelect ||
+    !urlInput ||
+    !keyInput ||
+    !modelInput ||
+    !miniModelInput
   ) {
     return;
   }
 
   while (providerSelect.firstChild) providerSelect.firstChild.remove();
   for (const preset of PROVIDER_PRESETS) {
-    const opt = doc.createElementNS("http://www.w3.org/1999/xhtml", "option") as HTMLOptionElement;
+    const opt = doc.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "option",
+    ) as HTMLOptionElement;
     opt.value = preset.key;
     opt.textContent = preset.label;
     providerSelect.appendChild(opt);
@@ -105,7 +140,10 @@ function bindServiceManager(doc: Document) {
     const activeId = getActiveServiceId();
 
     for (const svc of services) {
-      const row = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLDivElement;
+      const row = doc.createElementNS(
+        "http://www.w3.org/1999/xhtml",
+        "div",
+      ) as HTMLDivElement;
       row.style.cssText =
         "display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;";
       if (svc.id === selectedServiceId) {
@@ -138,7 +176,8 @@ function bindServiceManager(doc: Document) {
 
     if (services.length === 0) {
       const empty = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-      empty.style.cssText = "padding:8px;font-size:12px;color:#888;text-align:center;";
+      empty.style.cssText =
+        "padding:8px;font-size:12px;color:#888;text-align:center;";
       empty.textContent = getString("pref-svc-empty");
       listContainer.appendChild(empty);
     }
@@ -153,7 +192,10 @@ function bindServiceManager(doc: Document) {
       id,
       name: preset?.label || "New Service",
       provider: selectedProvider,
-      apiFormat: preset?.apiFormat || (apiFormatSelect.value as ApiFormat) || "chat-completions",
+      apiFormat:
+        preset?.apiFormat ||
+        (apiFormatSelect.value as ApiFormat) ||
+        "chat-completions",
       apiUrl: preset?.apiUrl || "",
       apiKey: "",
       model: preset?.defaultModel || "",

@@ -27,26 +27,26 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 
 ### UI Modules (`src/modules/`)
 
-| Module | Responsibility |
-|---|---|
-| `sidebar.ts` | Main chat panel (~2000 lines): session management, message rendering, streaming updates, slash commands, image upload |
-| `popup.ts` | In-reader text-selection popup with "Ask" and "Translate" quick actions |
-| `pdf-context.ts` | Extracts text from PDF.js DOM text layers; caches via page-cache service |
-| `slash-commands.ts` | Slash command parsing and autocomplete menu (`/init`, `/summary`, `/compact`) |
-| `preferences.ts` | Settings UI for AI service configuration |
-| `reader.ts` | Reader lifecycle integration |
+| Module              | Responsibility                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `sidebar.ts`        | Main chat panel (~2000 lines): session management, message rendering, streaming updates, slash commands, image upload |
+| `popup.ts`          | In-reader text-selection popup with "Ask" and "Translate" quick actions                                               |
+| `pdf-context.ts`    | Extracts text from PDF.js DOM text layers; caches via page-cache service                                              |
+| `slash-commands.ts` | Slash command parsing and autocomplete menu (`/init`, `/summary`, `/compact`)                                         |
+| `preferences.ts`    | Settings UI for AI service configuration                                                                              |
+| `reader.ts`         | Reader lifecycle integration                                                                                          |
 
 ### Service Layer (`src/services/`)
 
-| Service | Responsibility |
-|---|---|
-| `ai-service.ts` | Abstract AI API client supporting `chat-completions` (OpenAI-compatible), `anthropic`, and `responses` formats; handles streaming, multimodal, and extended thinking |
-| `agent-executor.ts` | Core agent pipeline: generates paper AGENTS.md overview, plans which PDF pages to load, builds context-aware prompts, streams response |
-| `chat-store.ts` | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/extension/zotero-agent/{itemKey}.json` |
-| `prompts.ts` | All system prompts: Q&A, context planning, paper init, translate, explain |
-| `context-builder.ts` | Assembles message history respecting token limits |
-| `page-cache.ts` | Caches parsed PDF pages to avoid re-parsing |
-| `paper-overview.ts` | Reads/writes AGENTS.md per paper |
+| Service              | Responsibility                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ai-service.ts`      | Abstract AI API client supporting `chat-completions` (OpenAI-compatible), `anthropic`, and `responses` formats; handles streaming, multimodal, and extended thinking |
+| `agent-executor.ts`  | Core agent pipeline: generates paper AGENTS.md overview, plans which PDF pages to load, builds context-aware prompts, streams response                               |
+| `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/extension/zotero-agent/{itemKey}.json`                                                           |
+| `prompts.ts`         | All system prompts: Q&A, context planning, paper init, translate, explain                                                                                            |
+| `context-builder.ts` | Assembles message history respecting token limits                                                                                                                    |
+| `page-cache.ts`      | Caches parsed PDF pages to avoid re-parsing                                                                                                                          |
+| `paper-overview.ts`  | Reads/writes AGENTS.md per paper                                                                                                                                     |
 
 ### Agent Execution Flow
 
@@ -65,6 +65,7 @@ When a user submits a question in the sidebar (`sidebar.ts::submitQuestion`):
 ### AI Provider Support
 
 Providers are configured in `src/utils/provider-presets.ts`. Supported API formats:
+
 - `chat-completions` — OpenAI, Azure, DeepSeek, Kimi, Gemini, GLM, Qwen, etc.
 - `anthropic` — Claude native (with extended thinking support)
 - `responses` — Custom reasoning format
@@ -72,6 +73,7 @@ Providers are configured in `src/utils/provider-presets.ts`. Supported API forma
 ### Key Data Structures
 
 **Session file** (`{dataDir}/extension/zotero-agent/{itemKey}.json`):
+
 ```typescript
 {
   version: 2,

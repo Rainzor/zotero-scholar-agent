@@ -1,4 +1,9 @@
-import type { ChatMessage, ChatSession, ContextMode } from "../addon";
+import type {
+  ChatMessage,
+  ChatSession,
+  ContextMode,
+  SessionContextPdfRef,
+} from "../addon";
 import { estimateTokens } from "../utils/token-estimate";
 
 type PersistedSession = {
@@ -6,6 +11,7 @@ type PersistedSession = {
   title: string;
   contextMode: ContextMode;
   messages: ChatMessage[];
+  contextPdf?: SessionContextPdfRef;
   summaryText?: string;
   summaryUpToIndex?: number;
   summaryUpdatedAt?: number;
@@ -56,12 +62,19 @@ class ChatStore {
       const ioUtils = (globalThis as any).IOUtils;
       if (!ioUtils) return;
       await this.ensureStorageDir();
-      const children: string[] = await ioUtils.getChildren(this.getStorageDir());
+      const children: string[] = await ioUtils.getChildren(
+        this.getStorageDir(),
+      );
       for (const filePath of children) {
         if (!String(filePath).endsWith(".json")) continue;
         const raw = await ioUtils.readUTF8(filePath);
         const parsed = JSON.parse(raw) as Partial<PersistedItemStateV2>;
-        if (!parsed || parsed.version !== 2 || !parsed.itemKey || !Array.isArray(parsed.sessions)) {
+        if (
+          !parsed ||
+          parsed.version !== 2 ||
+          !parsed.itemKey ||
+          !Array.isArray(parsed.sessions)
+        ) {
           continue;
         }
         const migrated = this.normalizePersisted(parsed);
@@ -97,7 +110,9 @@ class ChatStore {
         });
       }
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, Math.max(1, limit));
+    return summaries
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, Math.max(1, limit));
   }
 
   listSessions(itemId: number): ChatSessionSummary[] {
@@ -113,7 +128,11 @@ class ChatStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  createSession(itemId: number, title?: string, contextMode: ContextMode = "agent"): ChatSession | null {
+  createSession(
+    itemId: number,
+    title?: string,
+    contextMode: ContextMode = "agent",
+  ): ChatSession | null {
     if (itemId <= 0) return null;
     const state = this.getOrCreateItemState(itemId);
     const now = Date.now();
@@ -128,6 +147,7 @@ class ChatStore {
       summaryUpToIndex: 0,
       summaryUpdatedAt: 0,
       contextMode: this.normalizeContextMode(contextMode),
+      contextPdf: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -158,7 +178,9 @@ class ChatStore {
       state.activeSessionId = state.sessions[0].sessionId;
     }
     if (!state.activeSessionId) return null;
-    return state.sessions.find((s) => s.sessionId === state.activeSessionId) || null;
+    return (
+      state.sessions.find((s) => s.sessionId === state.activeSessionId) || null
+    );
   }
 
   getMessages(itemId: number): ChatMessage[] {
@@ -166,8 +188,11 @@ class ChatStore {
     return session ? session.messages : [];
   }
 
-
-  addMessage(itemId: number, message: ChatMessage, contextMode: ContextMode = "agent") {
+  addMessage(
+    itemId: number,
+    message: ChatMessage,
+    contextMode: ContextMode = "agent",
+  ) {
     if (itemId <= 0) return;
     let session = this.getSession(itemId);
     if (!session) {
@@ -263,10 +288,31 @@ class ChatStore {
     this.markDirty(itemId);
   }
 
+  setSessionContextPdf(
+    itemId: number,
+    contextPdf: SessionContextPdfRef | null | undefined,
+  ) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    session.contextPdf = this.normalizeContextPdfRef(contextPdf);
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  clearSessionContextPdf(itemId: number) {
+    const session = this.getSession(itemId);
+    if (!session) return;
+    if (!session.contextPdf) return;
+    session.contextPdf = undefined;
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
   touchSession(itemId: number, contextMode?: ContextMode) {
     const session = this.getSession(itemId);
     if (!session) return;
-    if (contextMode) session.contextMode = this.normalizeContextMode(contextMode);
+    if (contextMode)
+      session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -296,13 +342,15 @@ class ChatStore {
       itemId,
       itemKey: persisted.itemKey,
       paperTitle: persisted.paperTitle || meta.title,
-      activeSessionId: persisted.activeSessionId || persisted.sessions[0]?.sessionId || null,
+      activeSessionId:
+        persisted.activeSessionId || persisted.sessions[0]?.sessionId || null,
       sessions: persisted.sessions.map((s) => ({
         sessionId: s.sessionId,
         itemId,
         itemKey: persisted.itemKey,
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
+        contextPdf: this.normalizeContextPdfRef((s as any).contextPdf),
         summaryText: s.summaryText || "",
         summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
         summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
@@ -330,18 +378,23 @@ class ChatStore {
     return state;
   }
 
-  private normalizePersisted(parsed: Partial<PersistedItemStateV2>): PersistedItemStateV2 {
+  private normalizePersisted(
+    parsed: Partial<PersistedItemStateV2>,
+  ): PersistedItemStateV2 {
     return {
       version: 2,
       itemId: Number(parsed.itemId) || undefined,
       itemKey: String(parsed.itemKey || ""),
       paperTitle: String(parsed.paperTitle || "Untitled"),
-      activeSessionId: String(parsed.activeSessionId || parsed.sessions?.[0]?.sessionId || ""),
+      activeSessionId: String(
+        parsed.activeSessionId || parsed.sessions?.[0]?.sessionId || "",
+      ),
       sessions: (parsed.sessions || []).map((s: any) => ({
         sessionId: String(s?.sessionId || this.newSessionId()),
         title: String(s?.title || "Chat"),
         contextMode: this.normalizeContextMode(s?.contextMode),
         messages: Array.isArray(s?.messages) ? s.messages : [],
+        contextPdf: this.normalizeContextPdfRef(s?.contextPdf),
         summaryText: String(s?.summaryText || ""),
         summaryUpToIndex: Math.max(0, Number(s?.summaryUpToIndex) || 0),
         summaryUpdatedAt: Number(s?.summaryUpdatedAt) || 0,
@@ -353,14 +406,18 @@ class ChatStore {
 
   private applyCompaction(session: ChatSession) {
     const overMessageLimit = session.messages.length > MAX_MESSAGES;
-    const overTokenLimit = this.approxTokens(session.messages) > MAX_TOKENS_APPROX;
+    const overTokenLimit =
+      this.approxTokens(session.messages) > MAX_TOKENS_APPROX;
     if (!overMessageLimit && !overTokenLimit) return;
     const keepTailCount = 20;
     const tail = session.messages.slice(-keepTailCount).map((m) => {
       if (!m.images?.length) return m;
       return { ...m, images: [] };
     });
-    const head = session.messages.slice(0, Math.max(0, session.messages.length - keepTailCount));
+    const head = session.messages.slice(
+      0,
+      Math.max(0, session.messages.length - keepTailCount),
+    );
     if (head.length === 0) return;
     const previousSummary = session.messages.find(
       (m) => m.role === "assistant" && m.content.startsWith(SUMMARY_MARKER),
@@ -372,18 +429,28 @@ class ChatStore {
       images: [],
     };
     session.messages = [summaryMessage, ...tail];
-    while (session.messages.length > 10 && this.approxTokens(session.messages) > MAX_TOKENS_APPROX) {
+    while (
+      session.messages.length > 10 &&
+      this.approxTokens(session.messages) > MAX_TOKENS_APPROX
+    ) {
       session.messages.splice(1, 2);
     }
   }
 
   private approxTokens(messages: ChatMessage[]): number {
     return messages.reduce((sum, m) => {
-      return sum + estimateTokens(m.content || "") + estimateTokens(m.reasoning || "");
+      return (
+        sum +
+        estimateTokens(m.content || "") +
+        estimateTokens(m.reasoning || "")
+      );
     }, 0);
   }
 
-  private buildSummary(messages: ChatMessage[], previousSummary?: string): string {
+  private buildSummary(
+    messages: ChatMessage[],
+    previousSummary?: string,
+  ): string {
     const lines: string[] = [];
     if (previousSummary) {
       lines.push(previousSummary.replace(/\s+$/g, ""));
@@ -396,7 +463,9 @@ class ChatStore {
       const role = msg.role === "user" ? "User" : "Assistant";
       const content = (msg.content || "").replace(/\s+/g, " ").trim();
       if (!content) continue;
-      lines.push(`- ${role}: ${content.length > 180 ? `${content.slice(0, 180)}...` : content}`);
+      lines.push(
+        `- ${role}: ${content.length > 180 ? `${content.slice(0, 180)}...` : content}`,
+      );
     }
     return lines.join("\n");
   }
@@ -432,6 +501,7 @@ class ChatStore {
             title: s.title,
             contextMode: s.contextMode,
             messages: s.messages.map((m) => ({ ...m })),
+            contextPdf: this.normalizeContextPdfRef(s.contextPdf),
             summaryText: s.summaryText || "",
             summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
             summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
@@ -465,7 +535,9 @@ class ChatStore {
   }
 
   private isAutoGeneratedTitle(title: string): boolean {
-    return /^Chat\s+\d+\s+·\s+\d{2}:\d{2}$/.test(title) || /^Chat \d+$/.test(title);
+    return (
+      /^Chat\s+\d+\s+·\s+\d{2}:\d{2}$/.test(title) || /^Chat \d+$/.test(title)
+    );
   }
 
   private maybeAutoTitleSession(_session: ChatSession, _message: ChatMessage) {
@@ -478,17 +550,21 @@ class ChatStore {
     if (!this.isAutoGeneratedTitle(session.title)) return false;
     const userMsgs = session.messages.filter((m) => m.role === "user");
     const assistantMsgs = session.messages.filter(
-      (m) => m.role === "assistant" && m.content && !m.content.startsWith("[Error]"),
+      (m) =>
+        m.role === "assistant" && m.content && !m.content.startsWith("[Error]"),
     );
     return userMsgs.length === 1 && assistantMsgs.length === 1;
   }
 
-  getFirstExchange(itemId: number): { userMsg: string; assistantMsg: string } | null {
+  getFirstExchange(
+    itemId: number,
+  ): { userMsg: string; assistantMsg: string } | null {
     const session = this.getSession(itemId);
     if (!session) return null;
     const userMsg = session.messages.find((m) => m.role === "user");
     const assistantMsg = session.messages.find(
-      (m) => m.role === "assistant" && m.content && !m.content.startsWith("[Error]"),
+      (m) =>
+        m.role === "assistant" && m.content && !m.content.startsWith("[Error]"),
     );
     if (!userMsg || !assistantMsg) return null;
     return { userMsg: userMsg.content, assistantMsg: assistantMsg.content };
@@ -499,7 +575,11 @@ class ChatStore {
       const item = Zotero.Items.get(itemId) as any;
       return {
         itemKey: String(item?.key || itemId),
-        title: String(item?.getField?.("title") || item?.getDisplayTitle?.() || `Item ${itemId}`),
+        title: String(
+          item?.getField?.("title") ||
+            item?.getDisplayTitle?.() ||
+            `Item ${itemId}`,
+        ),
       };
     } catch (_e) {
       return { itemKey: String(itemId), title: `Item ${itemId}` };
@@ -509,26 +589,76 @@ class ChatStore {
   private normalizeContextMode(raw: any): ContextMode {
     if (raw === "agent") return "agent";
     // Backward compatibility for old chat/current-page sessions.
-    if (raw === "currentPage" || raw === "none" || raw === "fullPdf") return "agent";
+    if (raw === "currentPage" || raw === "none" || raw === "fullPdf")
+      return "agent";
     return "agent";
+  }
+
+  private normalizeContextPdfRef(raw: any): SessionContextPdfRef | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const fileName = String(raw.fileName || "").trim();
+    const fileSize = Math.max(0, Number(raw.fileSize) || 0);
+    const addedAt = Math.max(0, Number(raw.addedAt) || 0) || Date.now();
+    const itemKey = String(raw.itemKey || "").trim().toUpperCase();
+    const hashRaw = String(raw.hash || "").trim();
+    const explicitSource = raw.source === "library" ? "library" : raw.source === "upload" ? "upload" : null;
+
+    let source: SessionContextPdfRef["source"];
+    if (explicitSource) {
+      source = explicitSource;
+    } else if (/^[A-Z0-9]{8}$/.test(itemKey)) {
+      source = "library";
+    } else {
+      source = "upload";
+    }
+
+    if (source === "library") {
+      if (!/^[A-Z0-9]{8}$/.test(itemKey) || !fileName) return undefined;
+      const itemId =
+        typeof raw.itemId === "number" && Number.isFinite(raw.itemId)
+          ? Number(raw.itemId)
+          : undefined;
+      return {
+        source: "library",
+        hash: hashRaw || `lib-${itemKey}`,
+        fileName,
+        fileSize,
+        addedAt,
+        itemKey,
+        itemId,
+      };
+    }
+    if (!hashRaw || !fileName) return undefined;
+    return {
+      source: "upload",
+      hash: hashRaw.toLowerCase(),
+      fileName,
+      fileSize,
+      addedAt,
+    };
   }
 
   private getStorageDir(): string {
     const pathUtils = (globalThis as any).PathUtils;
-    if (pathUtils?.join) return pathUtils.join(Zotero.DataDirectory.dir, "zoteroagent", "chats");
+    if (pathUtils?.join)
+      return pathUtils.join(Zotero.DataDirectory.dir, "zoteroagent", "chats");
     return `${Zotero.DataDirectory.dir}/zoteroagent/chats`;
   }
 
   private getStorageFilePath(itemKey: string): string {
     const pathUtils = (globalThis as any).PathUtils;
-    if (pathUtils?.join) return pathUtils.join(this.getStorageDir(), `${itemKey}.json`);
+    if (pathUtils?.join)
+      return pathUtils.join(this.getStorageDir(), `${itemKey}.json`);
     return `${this.getStorageDir()}/${itemKey}.json`;
   }
 
   private async ensureStorageDir() {
     const ioUtils = (globalThis as any).IOUtils;
     if (!ioUtils) return;
-    await ioUtils.makeDirectory(this.getStorageDir(), { createAncestors: true, ignoreExisting: true });
+    await ioUtils.makeDirectory(this.getStorageDir(), {
+      createAncestors: true,
+      ignoreExisting: true,
+    });
   }
 }
 

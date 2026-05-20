@@ -1,5 +1,9 @@
 import type { ContextMode } from "./addon";
-import { showAgentPanel, syncReferenceCardDirect, updateSidebarPanels } from "./modules/sidebar";
+import {
+  showAgentPanel,
+  syncReferenceCardDirect,
+  updateSidebarPanels,
+} from "./modules/sidebar";
 import { chatStore } from "./services/chat-store";
 
 function refreshPanels() {

@@ -18,7 +18,10 @@ type CommandHandlers = Record<
   (body: HTMLElement, itemId: number) => Promise<void>
 >;
 
-export function parseSlashToken(input: string, caret: number): SlashToken | null {
+export function parseSlashToken(
+  input: string,
+  caret: number,
+): SlashToken | null {
   const safeInput = typeof input === "string" ? input : "";
   if (!safeInput) return null;
 
@@ -33,7 +36,10 @@ export function parseSlashToken(input: string, caret: number): SlashToken | null
       }
       if (normalizedCaret <= tokenEnd) {
         return {
-          query: safeInput.slice(slashIndex + 1, Math.min(normalizedCaret, tokenEnd)),
+          query: safeInput.slice(
+            slashIndex + 1,
+            Math.min(normalizedCaret, tokenEnd),
+          ),
           slashStart: slashIndex,
           caretEnd: normalizedCaret,
         };

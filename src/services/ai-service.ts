@@ -1,4 +1,4 @@
- import { getActiveService } from "../utils/services";
+import { getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
 import type { ProviderKey, ApiFormat, AuthType } from "../addon";
 import { getImageMimeType, stripDataUrlPrefix } from "../utils/image-utils";
@@ -15,7 +15,11 @@ type ChatMessage = {
 type StreamState = {
   content: string;
   reasoning: string;
-  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 };
 
 type ChatOptions = {
@@ -38,8 +42,13 @@ type ServiceConfig = {
 };
 
 export class AIService {
-  static buildMultimodalUserContent(text: string, images: string[]): string | ContentPart[] {
-    const imageUrls = (images || []).map((v) => String(v || "").trim()).filter(Boolean);
+  static buildMultimodalUserContent(
+    text: string,
+    images: string[],
+  ): string | ContentPart[] {
+    const imageUrls = (images || [])
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
     if (imageUrls.length === 0) return text;
     return [
       { type: "text", text: text || "" },
@@ -67,6 +76,15 @@ export class AIService {
     return getPreset(provider)?.supportsThinking ?? false;
   }
 
+  private static usesMaxCompletionTokens(model: string): boolean {
+    const name = model.toLowerCase();
+    return (
+      name.startsWith("gpt-5") ||
+      name.startsWith("o") ||
+      name.includes("reasoning")
+    );
+  }
+
   private static buildHeaders(cfg: ServiceConfig): Record<string, string> {
     if (cfg.authType === "x-api-key") {
       return {
@@ -78,7 +96,10 @@ export class AIService {
     if (cfg.authType === "api-key") {
       return { "Content-Type": "application/json", "api-key": cfg.apiKey };
     }
-    return { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` };
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${cfg.apiKey}`,
+    };
   }
 
   private static buildBody(
@@ -94,7 +115,9 @@ export class AIService {
     if (cfg.apiFormat === "anthropic") {
       const systemParts = messages.filter((m) => m.role === "system");
       const nonSystem = messages.filter((m) => m.role !== "system");
-      const systemText = systemParts.map((m) => AIService.toPlainText(m.content)).join("\n");
+      const systemText = systemParts
+        .map((m) => AIService.toPlainText(m.content))
+        .join("\n");
       const anthropicMessages = nonSystem.map((m) => ({
         role: m.role,
         content: AIService.toAnthropicContent(m.content),
@@ -115,12 +138,11 @@ export class AIService {
       });
     }
     if (cfg.apiFormat === "responses") {
-      const reasoning =
-        canThink
-          ? (disableThinking
-            ? { effort: "none" }
-            : { effort: "medium", summary: "auto" })
-          : undefined;
+      const reasoning = canThink
+        ? disableThinking
+          ? { effort: "none" }
+          : { effort: "medium", summary: "auto" }
+        : undefined;
       const input = messages.map((m) => ({
         role: m.role,
         content: AIService.toResponsesContent(m.role, m.content),
@@ -133,12 +155,17 @@ export class AIService {
         ...(reasoning ? { reasoning } : {}),
       });
     }
+    const tokenParam = AIService.usesMaxCompletionTokens(model)
+      ? { max_completion_tokens: maxTokensOverride || 16384 }
+      : { max_tokens: maxTokensOverride || 16384 };
     return JSON.stringify({
       model,
       messages,
       stream,
-      max_tokens: maxTokensOverride || 16384,
-      ...(canThink && disableThinking ? { thinking: { type: "disabled" } } : {}),
+      ...tokenParam,
+      ...(canThink && disableThinking
+        ? { thinking: { type: "disabled" } }
+        : {}),
     });
   }
 
@@ -210,7 +237,8 @@ export class AIService {
         const payload = JSON.parse(line.replace("data: ", ""));
         const delta = payload.choices?.[0]?.delta;
         if (!delta) continue;
-        if (!disableThinking && canThink && delta.reasoning_content) reasoning += delta.reasoning_content;
+        if (!disableThinking && canThink && delta.reasoning_content)
+          reasoning += delta.reasoning_content;
         if (delta.content) content += delta.content;
       } catch {
         // ignore transient parse errors
@@ -249,7 +277,10 @@ export class AIService {
     return { content, reasoning };
   }
 
-  private static parseAnthropicSSE(raw: string): { content: string; reasoning: string } {
+  private static parseAnthropicSSE(raw: string): {
+    content: string;
+    reasoning: string;
+  } {
     const lines = raw.match(/data: (.+)/g) || [];
     let content = "";
     let reasoning = "";
@@ -272,13 +303,17 @@ export class AIService {
     return { content, reasoning };
   }
 
-  private static parseAnthropicJSON(resp: any): { content: string; reasoning: string } {
+  private static parseAnthropicJSON(resp: any): {
+    content: string;
+    reasoning: string;
+  } {
     const blocks: any[] = resp?.content || [];
     let content = "";
     let reasoning = "";
     for (const block of blocks) {
       if (block.type === "text" && block.text) content += block.text;
-      else if (block.type === "thinking" && block.thinking) reasoning += block.thinking;
+      else if (block.type === "thinking" && block.thinking)
+        reasoning += block.thinking;
     }
     return { content, reasoning };
   }
@@ -290,7 +325,10 @@ export class AIService {
   ): { content: string; reasoning: string } {
     const choice = resp?.choices?.[0];
     const content = choice?.message?.content || "";
-    const reasoning = !disableThinking && canThink ? choice?.message?.reasoning_content || "" : "";
+    const reasoning =
+      !disableThinking && canThink
+        ? choice?.message?.reasoning_content || ""
+        : "";
     return { content, reasoning };
   }
 
@@ -307,7 +345,12 @@ export class AIService {
         for (const part of item.content) {
           if (part.type === "output_text" && part.text) content += part.text;
         }
-      } else if (!disableThinking && canThink && item.type === "reasoning" && Array.isArray(item.summary)) {
+      } else if (
+        !disableThinking &&
+        canThink &&
+        item.type === "reasoning" &&
+        Array.isArray(item.summary)
+      ) {
         for (const s of item.summary) {
           if (s.type === "summary_text" && s.text) reasoning += s.text;
           else if (typeof s.text === "string") reasoning += s.text;
@@ -317,7 +360,10 @@ export class AIService {
     return { content, reasoning };
   }
 
-  static async chat(messages: ChatMessage[], options: ChatOptions = {}): Promise<StreamState> {
+  static async chat(
+    messages: ChatMessage[],
+    options: ChatOptions = {},
+  ): Promise<StreamState> {
     const {
       stream = true,
       onChunk,
@@ -329,19 +375,31 @@ export class AIService {
     } = options;
     const cfg = AIService.getConfig();
     if (!cfg.apiUrl || !cfg.apiKey) {
-      throw new Error("API URL or API Key is not configured. Add a service in preferences.");
+      throw new Error(
+        "API URL or API Key is not configured. Add a service in preferences.",
+      );
     }
 
     const canThink = AIService.supportsThinking(cfg.provider);
     const headers = AIService.buildHeaders(cfg);
-    const body = AIService.buildBody(cfg, messages, stream, canThink, disableThinking, modelOverride, maxTokens);
+    const body = AIService.buildBody(
+      cfg,
+      messages,
+      stream,
+      canThink,
+      disableThinking,
+      modelOverride,
+      maxTokens,
+    );
     const fmt = cfg.apiFormat;
     const state: StreamState = { content: "", reasoning: "" };
 
     const requestTimeout =
       typeof timeoutMs === "number" && timeoutMs > 0
         ? timeoutMs
-        : (disableThinking ? 60000 : 300000);
+        : disableThinking
+          ? 60000
+          : 300000;
 
     if (stream) {
       let prevContent = "";
@@ -349,12 +407,20 @@ export class AIService {
 
       const parseSSE = (raw: string) => {
         if (fmt === "anthropic") return AIService.parseAnthropicSSE(raw);
-        if (fmt === "responses") return AIService.parseResponsesSSE(raw, canThink, disableThinking);
-        return AIService.parseChatCompletionsSSE(raw, canThink, disableThinking);
+        if (fmt === "responses")
+          return AIService.parseResponsesSSE(raw, canThink, disableThinking);
+        return AIService.parseChatCompletionsSSE(
+          raw,
+          canThink,
+          disableThinking,
+        );
       };
 
       const emit = () => {
-        if (state.content !== prevContent || state.reasoning !== prevReasoning) {
+        if (
+          state.content !== prevContent ||
+          state.reasoning !== prevReasoning
+        ) {
           prevContent = state.content;
           prevReasoning = state.reasoning;
           onChunk?.({ ...state });
@@ -403,9 +469,15 @@ export class AIService {
       });
       const resp = response.response;
       const parsed =
-        fmt === "anthropic" ? AIService.parseAnthropicJSON(resp) :
-        fmt === "responses" ? AIService.parseResponsesJSON(resp, canThink, disableThinking) :
-        AIService.parseChatCompletionsJSON(resp, canThink, disableThinking);
+        fmt === "anthropic"
+          ? AIService.parseAnthropicJSON(resp)
+          : fmt === "responses"
+            ? AIService.parseResponsesJSON(resp, canThink, disableThinking)
+            : AIService.parseChatCompletionsJSON(
+                resp,
+                canThink,
+                disableThinking,
+              );
       state.content = parsed.content;
       state.reasoning = parsed.reasoning;
       state.usage = AIService.extractUsageFromJSON(resp, fmt);
@@ -417,7 +489,10 @@ export class AIService {
     return state;
   }
 
-  private static extractUsageFromSSE(raw: string, fmt: string): StreamState["usage"] {
+  private static extractUsageFromSSE(
+    raw: string,
+    fmt: string,
+  ): StreamState["usage"] {
     const lines = raw.match(/data: (.+)/g) || [];
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
@@ -427,25 +502,53 @@ export class AIService {
         const u = p.usage;
         if (u) {
           if (fmt === "anthropic") {
-            return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0) };
+            return {
+              promptTokens: u.input_tokens,
+              completionTokens: u.output_tokens,
+              totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0),
+            };
           }
           if (fmt === "responses") {
-            return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
+            return {
+              promptTokens: u.input_tokens,
+              completionTokens: u.output_tokens,
+              totalTokens:
+                u.total_tokens ||
+                (u.input_tokens || 0) + (u.output_tokens || 0),
+            };
           }
-          return { promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, totalTokens: u.total_tokens };
+          return {
+            promptTokens: u.prompt_tokens,
+            completionTokens: u.completion_tokens,
+            totalTokens: u.total_tokens,
+          };
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
     return undefined;
   }
 
-  private static extractUsageFromJSON(resp: any, fmt: string): StreamState["usage"] {
+  private static extractUsageFromJSON(
+    resp: any,
+    fmt: string,
+  ): StreamState["usage"] {
     const u = resp?.usage;
     if (!u) return undefined;
     if (fmt === "anthropic" || fmt === "responses") {
-      return { promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
+      return {
+        promptTokens: u.input_tokens,
+        completionTokens: u.output_tokens,
+        totalTokens:
+          u.total_tokens || (u.input_tokens || 0) + (u.output_tokens || 0),
+      };
     }
-    return { promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, totalTokens: u.total_tokens };
+    return {
+      promptTokens: u.prompt_tokens,
+      completionTokens: u.completion_tokens,
+      totalTokens: u.total_tokens,
+    };
   }
 
   private static throwApiError(e: any): never {

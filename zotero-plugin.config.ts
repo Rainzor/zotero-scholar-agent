@@ -26,9 +26,7 @@ export default defineConfig({
     },
     esbuildOptions: [
       {
-        entryPoints: [
-          { in: "src/index.ts", out: pkg.config.addonRef },
-        ],
+        entryPoints: [{ in: "src/index.ts", out: pkg.config.addonRef }],
         define: {
           __env__: `"${process.env.NODE_ENV}"`,
         },

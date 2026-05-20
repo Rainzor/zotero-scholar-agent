@@ -1,35 +1,44 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <title>Agent Chat</title>
-  <link rel="stylesheet" href="chrome://zoteroagent/content/styles/chat-panel.css" />
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--material-sidepane, #f8f9fa);
-    }
-    #agent-standalone-root {
-      height: 100%;
-      box-sizing: border-box;
-    }
-    #agent-standalone-root .zoteroagent-chat-panel {
-      height: 100%;
-      border-radius: 0;
-    }
-  </style>
-</head>
-<body>
-  <div id="agent-standalone-root"></div>
-  <script type="text/javascript">
-    window.addEventListener("load", () => {
-      if (window.arguments && window.arguments[0] && window.arguments[0].loadLock) {
-        window.arguments[0].loadLock.resolve();
+  <head>
+    <title>Agent Chat</title>
+    <link
+      rel="stylesheet"
+      href="chrome://zoteroagent/content/styles/chat-panel.css"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--material-sidepane, #f8f9fa);
       }
-    });
-  </script>
-</body>
+      #agent-standalone-root {
+        height: 100%;
+        box-sizing: border-box;
+      }
+      #agent-standalone-root .zoteroagent-chat-panel {
+        height: 100%;
+        border-radius: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="agent-standalone-root"></div>
+    <script type="text/javascript">
+      window.addEventListener("load", () => {
+        if (
+          window.arguments &&
+          window.arguments[0] &&
+          window.arguments[0].loadLock
+        ) {
+          window.arguments[0].loadLock.resolve();
+        }
+      });
+    </script>
+  </body>
 </html>

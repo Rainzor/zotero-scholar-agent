@@ -5,9 +5,9 @@ export function estimateTokens(text: string): number {
     const code = text.charCodeAt(i);
     // CJK characters are usually tokenized more densely.
     if (
-      (code >= 0x4E00 && code <= 0x9FFF) ||
-      (code >= 0x3400 && code <= 0x4DBF) ||
-      (code >= 0xF900 && code <= 0xFAFF)
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0xf900 && code <= 0xfaff)
     ) {
       tokens += 1.5;
     } else {

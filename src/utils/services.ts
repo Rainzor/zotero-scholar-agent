@@ -5,9 +5,13 @@ import type { ServiceProvider, ProviderKey } from "../addon";
 function inferProvider(apiUrl: string): ProviderKey {
   if (!apiUrl) return "custom";
   const url = apiUrl.toLowerCase();
-  if (url.includes("services.ai.azure") && url.includes("/anthropic/")) return "azureAnthropic";
-  if (url.includes("anthropic.com") || url.includes("anthropic/v1/messages")) return "anthropic";
-  if (url.includes("azure") || url.includes("services.ai.azure")) return "azure";
+  if (url.includes("llm-proxy.forgeax.com")) return "litellm";
+  if (url.includes("services.ai.azure") && url.includes("/anthropic/"))
+    return "azureAnthropic";
+  if (url.includes("anthropic.com") || url.includes("anthropic/v1/messages"))
+    return "anthropic";
+  if (url.includes("azure") || url.includes("services.ai.azure"))
+    return "azure";
   if (url.includes("deepseek")) return "deepseek";
   if (url.includes("moonshot")) return "kimi";
   if (url.includes("generativelanguage.googleapis")) return "gemini";

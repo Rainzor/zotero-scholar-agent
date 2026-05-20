@@ -7,6 +7,7 @@
   height: var(--details-height, 100%);
   min-height: 0;
   width: 100%;
+  min-width: 0;
   max-width: 100%;
   padding: 0;
   box-sizing: border-box;
@@ -14,7 +15,9 @@
   overflow: hidden;
   isolation: isolate;
   overflow-anchor: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
   color: var(--fill-primary, #1a1a1a);
 }
 
@@ -165,7 +168,9 @@
   padding: 8px 14px;
   cursor: pointer;
   border-left: 3px solid transparent;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .zoteroagent-history-item:hover {
@@ -333,7 +338,11 @@
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease,
+    transform 120ms ease;
 }
 
 .zoteroagent-icon-button svg {
@@ -384,7 +393,9 @@
   resize: vertical;
   box-sizing: border-box;
   outline: none;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .zoteroagent-edit-textarea:focus {
@@ -411,7 +422,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .zoteroagent-edit-cancel {
@@ -608,7 +622,9 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: color 120ms, background-color 120ms;
+  transition:
+    color 120ms,
+    background-color 120ms;
 }
 
 .zoteroagent-reference-dismiss:hover {
@@ -675,7 +691,9 @@
   line-height: 1;
   color: #4b5563;
   white-space: nowrap;
-  transition: background 100ms ease, border-color 100ms ease;
+  transition:
+    background 100ms ease,
+    border-color 100ms ease;
 }
 
 .zoteroagent-context-chip:hover {
@@ -724,7 +742,9 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: color 80ms, background 80ms;
+  transition:
+    color 80ms,
+    background 80ms;
 }
 
 .zoteroagent-context-chip-dismiss:hover {
@@ -882,6 +902,50 @@
   font-weight: 500;
 }
 
+.zoteroagent-msg-reference-pdf {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 8px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid #d9e3f0;
+  background: #f6f9ff;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.zoteroagent-msg-reference-pdf.source-library {
+  border-color: #c7d8f7;
+  background: #eef4ff;
+}
+
+.zoteroagent-msg-reference-pdf.source-library
+  .zoteroagent-msg-reference-pdf-label {
+  color: #1d4ed8;
+}
+
+.zoteroagent-msg-reference-pdf-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4b5563;
+}
+
+.zoteroagent-msg-reference-pdf-text {
+  min-width: 0;
+  max-width: 280px;
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .zoteroagent-msg-images {
   display: flex;
   align-items: center;
@@ -984,7 +1048,9 @@
   width: 100%;
   min-height: 62px;
   box-sizing: border-box;
-  transition: background-color 120ms ease, padding-left 120ms ease;
+  transition:
+    background-color 120ms ease,
+    padding-left 120ms ease;
 }
 
 .zoteroagent-slash-item + .zoteroagent-slash-item {
@@ -1078,11 +1144,16 @@
   flex-direction: column;
   gap: 0;
   padding: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border-radius: 14px;
   border: 1px solid var(--stroke-secondary, #dde1e8);
   background: var(--material-background, #ffffff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-  transition: border-color 200ms ease, box-shadow 200ms ease;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
   overflow: hidden;
 }
 
@@ -1150,6 +1221,132 @@
   gap: 8px;
   overflow-x: auto;
   padding: 2px 2px 4px;
+}
+
+.zoteroagent-context-pdf-chip {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  margin: 4px 10px 6px;
+  min-width: 0;
+  max-width: calc(100% - 20px);
+  box-sizing: border-box;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f7faff;
+  overflow: hidden;
+}
+
+.zoteroagent-context-pdf-chip.is-ready {
+  border-color: #cde9da;
+  background: #f2fbf6;
+}
+
+.zoteroagent-context-pdf-chip.is-error {
+  border-color: #f3cdcd;
+  background: #fff6f6;
+}
+
+.zoteroagent-context-pdf-chip.source-library {
+  border-color: #c7d8f7;
+  background: #eff5ff;
+}
+
+.zoteroagent-context-pdf-icon {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #334155;
+  background: rgba(51, 65, 85, 0.1);
+}
+
+.zoteroagent-context-pdf-chip.source-library .zoteroagent-context-pdf-icon {
+  color: #1d4ed8;
+  background: rgba(29, 78, 216, 0.12);
+}
+
+.zoteroagent-context-pdf-text {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.zoteroagent-context-pdf-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.zoteroagent-context-pdf-source-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.08);
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.zoteroagent-context-pdf-source-badge.is-library {
+  background: rgba(29, 78, 216, 0.12);
+  color: #1d4ed8;
+}
+
+.zoteroagent-context-pdf-source-badge.is-upload {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+
+.zoteroagent-context-pdf-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+
+.zoteroagent-context-pdf-meta {
+  min-width: 0;
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-context-pdf-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.08);
+  color: #334155;
+  cursor: pointer;
+  line-height: 22px;
+  text-align: center;
+  padding: 0;
+}
+
+.zoteroagent-context-pdf-remove:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
 }
 
 .zoteroagent-image-thumb {
@@ -1235,7 +1432,9 @@
   align-items: center;
   justify-content: center;
   padding: 0 18px;
-  transition: background-color 140ms ease, transform 80ms ease;
+  transition:
+    background-color 140ms ease,
+    transform 80ms ease;
   flex-shrink: 0;
   letter-spacing: 0.01em;
 }
@@ -1254,8 +1453,13 @@
 }
 
 @keyframes zoteroagent-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 /* ---- Inline Agent Status (inside chat message) ---- */
@@ -1298,7 +1502,7 @@
     90deg,
     transparent 0%,
     rgba(59, 130, 246, 0.06) 40%,
-    rgba(59, 130, 246, 0.10) 50%,
+    rgba(59, 130, 246, 0.1) 50%,
     rgba(59, 130, 246, 0.06) 60%,
     transparent 100%
   );
@@ -1307,18 +1511,35 @@
 }
 
 @keyframes zoteroagent-status-ping {
-  0%, 100% { opacity: 0.4; transform: scale(0.85); }
-  50% { opacity: 1; transform: scale(1.1); }
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
 }
 
 @keyframes zoteroagent-status-shimmer {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes zoteroagent-status-fadein {
-  from { opacity: 0; transform: translateY(3px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ===== Markdown Rendered Content ===== */
@@ -1338,10 +1559,18 @@
   line-height: 1.35;
   color: #1a1a1a;
 }
-.zoteroagent-message.assistant .zoteroagent-message-content h1 { font-size: 16px; }
-.zoteroagent-message.assistant .zoteroagent-message-content h2 { font-size: 15px; }
-.zoteroagent-message.assistant .zoteroagent-message-content h3 { font-size: 14px; }
-.zoteroagent-message.assistant .zoteroagent-message-content h4 { font-size: 13px; }
+.zoteroagent-message.assistant .zoteroagent-message-content h1 {
+  font-size: 16px;
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h2 {
+  font-size: 15px;
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h3 {
+  font-size: 14px;
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h4 {
+  font-size: 13px;
+}
 
 .zoteroagent-message.assistant .zoteroagent-message-content strong {
   font-weight: 700;
@@ -1461,4 +1690,86 @@
 
 .zoteroagent-message-content .katex-display > .katex {
   font-size: 1.1em;
+}
+
+.zoteroagent-mention-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 16px);
+  z-index: 31;
+  display: none;
+  border: 1px solid #d9dee8;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(17, 24, 39, 0.18);
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.zoteroagent-mention-empty {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.zoteroagent-mention-item {
+  appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 2px;
+  overflow: hidden;
+  color: #111827;
+}
+
+.zoteroagent-mention-item + .zoteroagent-mention-item {
+  border-top: 1px solid #f1f3f7;
+}
+
+.zoteroagent-mention-item.active,
+.zoteroagent-mention-item:hover {
+  background: #f0f5ff;
+}
+
+.zoteroagent-mention-item-title {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-mention-item-subtitle {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -38,7 +38,9 @@ async function ensureOverviewDir(): Promise<void> {
   });
 }
 
-export async function loadPaperOverview(itemKey: string): Promise<string | null> {
+export async function loadPaperOverview(
+  itemKey: string,
+): Promise<string | null> {
   const ioUtils = getIOUtils();
   if (!ioUtils) return null;
   try {
