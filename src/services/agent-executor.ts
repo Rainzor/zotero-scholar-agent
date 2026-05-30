@@ -43,6 +43,7 @@ type ReferenceContextPdf = {
   fileName: string;
   overview: string;
   pages: StructuredPage[];
+  asMain?: boolean;
 };
 
 export type AgentExecutionInput = {
@@ -143,13 +144,19 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
   const onStatus = options.onStatus;
   const reader = options.reader || null;
   const currentPageNumber = await getCurrentPageNumber(reader);
-  const cachedPages = await ensurePageCache(options.itemKey, reader, onStatus);
+  const contextPdfAsMain = options.contextPdf?.asMain === true;
+  const cachedPages = contextPdfAsMain
+    ? options.contextPdf?.pages || []
+    : await ensurePageCache(options.itemKey, reader, onStatus);
   const llmPages = stripReferencesFromPages(cachedPages);
   const cacheByPage = indexByPage(llmPages);
-  const contextCacheByPage = indexByPage(options.contextPdf?.pages || []);
+  const contextCacheByPage = contextPdfAsMain
+    ? new Map<number, string>()
+    : indexByPage(options.contextPdf?.pages || []);
 
   const paperOverview =
     (options.paperOverview || "").trim() ||
+    (contextPdfAsMain ? String(options.contextPdf?.overview || "").trim() : "") ||
     (await ensureAgentsMd(
       options.itemKey,
       options.pdfItemId,
@@ -164,7 +171,9 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
     plan = await planContext({
       question: options.question,
       paperOverview,
-      contextPaperOverview: options.contextPdf?.overview || "",
+      contextPaperOverview: contextPdfAsMain
+        ? ""
+        : options.contextPdf?.overview || "",
       currentPageNumber,
       historySummary: options.historySummary,
       miniModel: options.miniModel,
@@ -198,18 +207,20 @@ export async function executeAgent(options: AgentExecutionInput): Promise<{
     }))
     .filter((p) => p.text);
   const contextPagesToLoad = selectContextPages(plan.contextPages);
-  const retrievedContextPages = contextPagesToLoad
-    .map((pageNumber) => ({
-      pageNumber,
-      text: String(contextCacheByPage.get(pageNumber) || "").trim(),
-    }))
-    .filter((p) => p.text);
+  const retrievedContextPages = contextPdfAsMain
+    ? []
+    : contextPagesToLoad
+        .map((pageNumber) => ({
+          pageNumber,
+          text: String(contextCacheByPage.get(pageNumber) || "").trim(),
+        }))
+        .filter((p) => p.text);
 
   const prompts = askPrompt(
     options.question,
     retrievedPages,
     paperOverview,
-    options.contextPdf
+    options.contextPdf && !contextPdfAsMain
       ? {
           fileName: options.contextPdf.fileName,
           overview: options.contextPdf.overview,

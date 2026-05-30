@@ -5,7 +5,11 @@ import {
   formatStructuredPagesForPrompt,
   type StructuredPage,
 } from "./pdf-parser";
-import { sha256OfBytes } from "../utils/pdf-upload-utils";
+import {
+  MAX_CONTEXT_PDF_SIZE_BYTES,
+  sha256OfBytes,
+} from "../utils/pdf-upload-utils";
+import { resolveLocalPdfPath } from "../utils/local-pdf-path";
 
 export type ContextPdfStatus =
   | "uploading"
@@ -93,6 +97,64 @@ export async function addUploadContextPdf(
   };
   await saveContextPdfData(data);
   options.onStatus?.("ready", "Reference PDF is ready.");
+  return { ref: buildUploadRef(data), data };
+}
+
+export async function addLocalPathContextPdf(
+  rawPath: string,
+  options: AddContextPdfOptions = {},
+): Promise<{ ref: ContextPdfSessionRef; data: ContextPdfData }> {
+  options.onStatus?.("uploading", "Resolving local PDF path...");
+  const resolved = await resolveLocalPdfPath(rawPath);
+  if (
+    resolved.fileSize > 0 &&
+    resolved.fileSize > MAX_CONTEXT_PDF_SIZE_BYTES
+  ) {
+    throw new Error("PDF is too large to process as context.");
+  }
+
+  options.onStatus?.("uploading", "Reading local PDF file...");
+  const bytes = await readLocalPdfBytes(resolved.filePath);
+  const fileSize = Math.max(resolved.fileSize, bytes.byteLength);
+  if (fileSize > MAX_CONTEXT_PDF_SIZE_BYTES) {
+    throw new Error("PDF is too large to process as context.");
+  }
+
+  options.onStatus?.("uploading", "Hashing local PDF file...");
+  const hash = await sha256OfBytes(bytes);
+  const cached = await loadUploadContextPdfByHash(hash);
+  if (cached) {
+    options.onStatus?.("ready", "Local PDF is ready.");
+    return { ref: buildUploadRef(cached), data: cached };
+  }
+
+  await ensureStorageDir();
+  await writePdfBytesIfMissing(hash, bytes);
+
+  options.onStatus?.("parsing", "Parsing local PDF text...");
+  const parsed = await parseUploadPdfBytes(bytes);
+
+  options.onStatus?.("overviewing", "Generating local PDF overview...");
+  const overview = await generateReferenceOverview(
+    parsed.pages,
+    parsed.fullText,
+    resolved.fileName,
+    options,
+  );
+
+  const data: ContextPdfData = {
+    version: CACHE_VERSION,
+    source: "upload",
+    hash,
+    fileName: resolved.fileName,
+    fileSize,
+    totalPages: parsed.pages.length,
+    pages: parsed.pages,
+    overview,
+    createdAt: Date.now(),
+  };
+  await saveContextPdfData(data);
+  options.onStatus?.("ready", "Local PDF is ready.");
   return { ref: buildUploadRef(data), data };
 }
 
@@ -474,16 +536,22 @@ async function runPdfWorkerGetFullText(
   if (!worker) {
     throw new Error("Zotero.PDFWorker is unavailable.");
   }
-  if (typeof worker._query !== "function") {
+  if (typeof worker._query !== "function" || typeof worker._enqueue !== "function") {
     throw new Error(
-      "Zotero.PDFWorker._query is unavailable; cannot parse uploaded PDF without a Zotero item.",
+      "Zotero.PDFWorker internals are unavailable; cannot parse local PDF without a Zotero item.",
     );
   }
   try {
-    const result = await worker._query(
-      "getFullText",
-      { buf, password: "" },
-      [buf],
+    const result = await worker._enqueue(
+      async () => {
+        const queryBuf = cloneArrayBuffer(buf);
+        return worker._query(
+          "getFulltext",
+          { buf: queryBuf, maxPages: null, password: "" },
+          [queryBuf],
+        );
+      },
+      true,
     );
     return {
       text: String(result?.text || ""),
@@ -493,6 +561,69 @@ async function runPdfWorkerGetFullText(
     const reason = e?.message ? `: ${e.message}` : "";
     throw new Error(`PDFWorker failed to parse uploaded PDF${reason}`);
   }
+}
+
+function cloneArrayBuffer(buf: ArrayBuffer): ArrayBuffer {
+  return buf.slice(0);
+}
+
+async function readLocalPdfBytes(path: string): Promise<Uint8Array> {
+  const ioUtils = getIOUtils();
+  if (!ioUtils?.read) {
+    throw new Error("IOUtils.read is unavailable; cannot read local PDF.");
+  }
+  const raw = await ioUtils.read(path);
+  const bytes = toUint8Array(raw);
+  if (bytes) return bytes;
+  throw new Error(`Failed to read local PDF bytes (${describeValue(raw)}).`);
+}
+
+function toUint8Array(value: any): Uint8Array | null {
+  if (!value) return null;
+  if (value instanceof Uint8Array) return value;
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (isArrayBufferLike(value)) return new Uint8Array(value);
+  if (Array.isArray(value)) return new Uint8Array(value);
+  if (isByteArrayLike(value)) return Uint8Array.from(value);
+  return null;
+}
+
+function isArrayBufferLike(value: any): value is ArrayBuffer {
+  return (
+    value &&
+    typeof value === "object" &&
+    typeof value.byteLength === "number" &&
+    typeof value.slice === "function" &&
+    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
+  );
+}
+
+function isByteArrayLike(value: any): value is ArrayLike<number> {
+  return (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    value.length >= 0 &&
+    Number.isFinite(value.length) &&
+    (value.length === 0 || typeof value[0] === "number")
+  );
+}
+
+function describeValue(value: any): string {
+  if (value === null) return "null";
+  if (typeof value === "undefined") return "undefined";
+  const tag = Object.prototype.toString.call(value);
+  const ctor = value?.constructor?.name ? `/${value.constructor.name}` : "";
+  const length =
+    typeof value?.byteLength === "number"
+      ? ` byteLength=${value.byteLength}`
+      : typeof value?.length === "number"
+        ? ` length=${value.length}`
+        : "";
+  return `${tag}${ctor}${length}`;
 }
 
 function splitPdfTextToPages(

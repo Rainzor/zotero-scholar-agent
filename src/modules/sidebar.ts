@@ -50,8 +50,10 @@ import {
 } from "../utils/image-utils";
 import {
   addLibraryContextPdf,
+  addLocalPathContextPdf,
   addUploadContextPdf,
   loadContextPdfByRef,
+  type ContextPdfData,
   type ContextPdfStatus,
 } from "../services/context-pdf";
 import {
@@ -59,6 +61,7 @@ import {
   formatFileSize,
   isPdfFile,
 } from "../utils/pdf-upload-utils";
+import { extractLocalPathCandidates } from "../utils/local-pdf-path";
 import {
   consumeMentionToken,
   parseMentionToken,
@@ -1153,6 +1156,73 @@ async function processIncomingContextPdf(body: HTMLElement, file?: File) {
     };
     refreshContextPdfChip(body);
   }
+}
+
+async function processLocalPathContextPdfFromQuestion(
+  body: HTMLElement,
+  itemId: number,
+  question: string,
+): Promise<ContextPdfData | null> {
+  const candidates = extractLocalPathCandidates(question).slice(0, 3);
+  if (!candidates.length) return null;
+  if (!chatStore.getSession(itemId)) {
+    chatStore.createSession(itemId, undefined, AGENT_CONTEXT_MODE);
+  }
+
+  const firstPath = candidates[0];
+  const baseRef: SessionContextPdfRef = {
+    source: "upload",
+    hash: "",
+    fileName: firstPath.split(/[\\/]/).filter(Boolean).pop() || "local.pdf",
+    fileSize: 0,
+    addedAt: Date.now(),
+  };
+  const currentTaskId = ++contextPdfTaskId;
+  addon.data.chat.pendingContextPdf = {
+    ...baseRef,
+    status: "uploading",
+  };
+  refreshContextPdfChip(body);
+
+  let lastError = "";
+  for (const candidate of candidates) {
+    try {
+      const result = await addLocalPathContextPdf(candidate, {
+        miniModel: getMiniModel(),
+        maxContextTokens: getActiveMaxContextTokens(),
+        onStatus: (status: ContextPdfStatus, text: string) => {
+          if (currentTaskId !== contextPdfTaskId || !isSafeBody(body)) return;
+          const previous = addon.data.chat.pendingContextPdf;
+          addon.data.chat.pendingContextPdf = {
+            ...(previous || baseRef),
+            status,
+            error: status === "error" ? text : "",
+          };
+          refreshContextPdfChip(body);
+        },
+      });
+      if (currentTaskId !== contextPdfTaskId || !isSafeBody(body)) return null;
+      chatStore.setSessionContextPdf(itemId, result.ref);
+      addon.data.chat.pendingContextPdf = {
+        ...result.ref,
+        status: "ready",
+      };
+      refreshContextPdfChip(body);
+      return result.data;
+    } catch (e: any) {
+      lastError = e?.message || String(e) || "Failed to read local PDF.";
+    }
+  }
+
+  if (currentTaskId === contextPdfTaskId && isSafeBody(body)) {
+    addon.data.chat.pendingContextPdf = {
+      ...baseRef,
+      status: "error",
+      error: lastError || `No readable PDF found at ${firstPath}.`,
+    };
+    refreshContextPdfChip(body);
+  }
+  throw new Error(lastError || `No readable PDF found at ${firstPath}.`);
 }
 
 function refreshContextPdfChip(body: HTMLElement) {
@@ -2293,7 +2363,21 @@ async function submitQuestion(body: HTMLElement) {
   const reader = addon.data.popup.currentReader;
   const maxCtx = getActiveMaxContextTokens();
   const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
-  if (pdfItemId <= 0) {
+  let localPathContextPdfData: ContextPdfData | null = null;
+  try {
+    localPathContextPdfData = await processLocalPathContextPdfFromQuestion(
+      body,
+      itemId,
+      question,
+    );
+  } catch (e: any) {
+    assistant.content = `[Error] ${e?.message || String(e)}`;
+    setGenerating(body, false);
+    renderMessages(body, itemId);
+    return;
+  }
+  const localPathPdfAsMain = Boolean(localPathContextPdfData);
+  if (pdfItemId <= 0 && !localPathPdfAsMain) {
     assistant.content =
       "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.";
     setGenerating(body, false);
@@ -2317,8 +2401,10 @@ async function submitQuestion(body: HTMLElement) {
   await ensureAiSessionSummary(itemId, fullHistory);
   const session = chatStore.getSession(itemId);
   let contextPdfData: Awaited<ReturnType<typeof loadContextPdfByRef>> | null =
-    null;
-  const sessionContextPdfRef = session?.contextPdf || activeContextPdfRef;
+    localPathContextPdfData;
+  const sessionContextPdfRef = localPathPdfAsMain
+    ? null
+    : session?.contextPdf || activeContextPdfRef;
   if (sessionContextPdfRef) {
     contextPdfData = await loadContextPdfByRef(sessionContextPdfRef);
     if (!contextPdfData) {
@@ -2344,7 +2430,9 @@ async function submitQuestion(body: HTMLElement) {
       reader,
       history,
       maxContextTokens: maxCtx,
-      paperOverview: paperOverview || "",
+      paperOverview: localPathPdfAsMain
+        ? contextPdfData?.overview || paperOverview || ""
+        : paperOverview || "",
       miniModel: getMiniModel(),
       pendingImages,
       contextPdf: contextPdfData
@@ -2353,6 +2441,7 @@ async function submitQuestion(body: HTMLElement) {
             fileName: contextPdfData.fileName,
             overview: contextPdfData.overview,
             pages: contextPdfData.pages,
+            asMain: localPathPdfAsMain,
           }
         : undefined,
       historySummary: (session?.summaryText || "").trim(),
