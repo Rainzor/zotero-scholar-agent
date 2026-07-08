@@ -8,6 +8,7 @@ import { estimateTokens } from "../utils/token-estimate";
 
 type PersistedSession = {
   sessionId: string;
+  codexThreadId?: string;
   title: string;
   contextMode: ContextMode;
   messages: ChatMessage[];
@@ -141,6 +142,7 @@ class ChatStore {
       sessionId: this.newSessionId(),
       itemId,
       itemKey: state.itemKey,
+      codexThreadId: "",
       title: title?.trim() || this.buildDefaultSessionTitle(index),
       messages: [],
       summaryText: "",
@@ -317,6 +319,17 @@ class ChatStore {
     this.markDirty(itemId);
   }
 
+  updateCodexThreadId(itemId: number, threadId: string, sessionId?: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const session = state.sessions.find((s) => s.sessionId === targetId);
+    if (!session) return;
+    session.codexThreadId = String(threadId || "").trim();
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
   async flushAll() {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -348,6 +361,7 @@ class ChatStore {
         sessionId: s.sessionId,
         itemId,
         itemKey: persisted.itemKey,
+        codexThreadId: s.codexThreadId || "",
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
         contextPdf: this.normalizeContextPdfRef((s as any).contextPdf),
@@ -391,6 +405,7 @@ class ChatStore {
       ),
       sessions: (parsed.sessions || []).map((s: any) => ({
         sessionId: String(s?.sessionId || this.newSessionId()),
+        codexThreadId: String(s?.codexThreadId || ""),
         title: String(s?.title || "Chat"),
         contextMode: this.normalizeContextMode(s?.contextMode),
         messages: Array.isArray(s?.messages) ? s.messages : [],
@@ -498,6 +513,7 @@ class ChatStore {
           activeSessionId: state.activeSessionId || undefined,
           sessions: state.sessions.map((s) => ({
             sessionId: s.sessionId,
+            codexThreadId: s.codexThreadId || undefined,
             title: s.title,
             contextMode: s.contextMode,
             messages: s.messages.map((m) => ({ ...m })),

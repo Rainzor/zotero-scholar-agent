@@ -26,7 +26,20 @@ import type {
   TokenUsage,
 } from "../addon";
 import { chatStore } from "../services/chat-store";
-import { ensureAgentsMd, executeAgent } from "../services/agent-executor";
+import { ensureAgentsMd } from "../services/agent-executor";
+import {
+  appendConversationTurn,
+  appendVaultLog,
+  commitVaultChanges,
+  ensurePaperVault,
+  listVaultPapers,
+  readPaperMemory,
+  runCodexTurn,
+  searchVaultMemory,
+  type PaperVaultMeta,
+  type RunningLineProcess,
+  type VaultSearchHit,
+} from "../services/codex";
 import {
   buildSlashCommands,
   consumeSlashToken,
@@ -73,6 +86,7 @@ import {
 let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
 let activeXHR: XMLHttpRequest | null = null;
+let activeCodexProcess: RunningLineProcess | null = null;
 let isGenerating = false;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
@@ -164,6 +178,7 @@ function resolveAttachmentItemId(
   reader: _ZoteroTypes.ReaderInstance | null,
   item: any,
 ): number {
+  if ((reader as any)?.itemID) return Number((reader as any).itemID);
   if (reader?._item?.id) return reader._item.id;
   if (!item) return 0;
   const id = Number(item.id) || 0;
@@ -433,6 +448,10 @@ export function unregisterAgentSection() {
       activeXHR.abort();
       activeXHR = null;
     }
+    if (activeCodexProcess) {
+      activeCodexProcess.kill();
+      activeCodexProcess = null;
+    }
   } catch (_e) {
     /* ignore */
   }
@@ -525,6 +544,256 @@ export function showAgentPanel() {
 }
 
 // ===================== Chat UI =====================
+
+const XHTML = "http://www.w3.org/1999/xhtml";
+let memorySearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function buildMemoryPanel(doc: Document): HTMLElement {
+  const panel = doc.createElementNS(XHTML, "div") as HTMLElement;
+  panel.id = "zoteroagent-memory-panel";
+  panel.className = "zoteroagent-memory-panel";
+  panel.style.display = "none";
+
+  const toolbar = doc.createElementNS(XHTML, "div") as HTMLElement;
+  toolbar.className = "zoteroagent-memory-toolbar";
+
+  const search = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+  search.id = "zoteroagent-memory-search";
+  search.type = "text";
+  search.placeholder = "Search across all papers' memory...";
+  search.className = "zoteroagent-memory-search";
+
+  const refresh = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  refresh.id = "zoteroagent-memory-refresh";
+  refresh.className = "zoteroagent-memory-refresh";
+  refresh.title = "Refresh";
+  refresh.textContent = "\u21bb";
+
+  toolbar.appendChild(search);
+  toolbar.appendChild(refresh);
+
+  const bodyDiv = doc.createElementNS(XHTML, "div") as HTMLElement;
+  bodyDiv.id = "zoteroagent-memory-body";
+  bodyDiv.className = "zoteroagent-memory-body";
+
+  panel.appendChild(toolbar);
+  panel.appendChild(bodyDiv);
+  return panel;
+}
+
+function switchChatView(body: HTMLElement, mode: "chat" | "memory") {
+  body.dataset.chatMode = mode;
+  const isMemory = mode === "memory";
+  const set = (sel: string, show: boolean) => {
+    const el = body.querySelector(sel) as HTMLElement | null;
+    if (el) el.style.display = show ? "" : "none";
+  };
+  set("#zoteroagent-chat-messages", !isMemory);
+  set("#zoteroagent-input-area", !isMemory);
+  set("#zoteroagent-session-row", !isMemory);
+  set("#zoteroagent-memory-panel", isMemory);
+  body
+    .querySelector("#zoteroagent-view-chat")
+    ?.classList.toggle("is-active", !isMemory);
+  body
+    .querySelector("#zoteroagent-view-memory")
+    ?.classList.toggle("is-active", isMemory);
+  if (isMemory) void renderMemoryBrowse(body);
+}
+
+function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
+  return body.querySelector("#zoteroagent-memory-body") as HTMLElement | null;
+}
+
+async function renderMemoryBrowse(body: HTMLElement) {
+  const host = getMemoryBodyEl(body);
+  if (!host) return;
+  const search = body.querySelector(
+    "#zoteroagent-memory-search",
+  ) as HTMLInputElement | null;
+  if (search) search.value = "";
+  host.textContent = "";
+  const doc = host.ownerDocument;
+
+  const currentItemId = Number(body.dataset.itemID);
+  const currentKey =
+    currentItemId > 0 ? getPaperMeta(currentItemId).itemKey : "";
+
+  let papers: PaperVaultMeta[] = [];
+  try {
+    papers = await listVaultPapers();
+  } catch (error) {
+    host.appendChild(memoryNotice(doc, `Failed to read vault: ${String(error)}`));
+    return;
+  }
+
+  if (currentItemId > 0) {
+    const currentMeta = getPaperMeta(currentItemId);
+    const header = doc.createElementNS(XHTML, "div") as HTMLElement;
+    header.className = "zoteroagent-memory-section-title";
+    header.textContent = "Current paper";
+    host.appendChild(header);
+    await appendPaperMemoryCard(host, currentKey, currentMeta.title);
+  }
+
+  const listTitle = doc.createElementNS(XHTML, "div") as HTMLElement;
+  listTitle.className = "zoteroagent-memory-section-title";
+  listTitle.textContent = `All papers (${papers.length})`;
+  host.appendChild(listTitle);
+
+  if (!papers.length) {
+    host.appendChild(
+      memoryNotice(
+        doc,
+        "No papers in the vault yet. Ask a question in Chat to let Codex build memory.",
+      ),
+    );
+    return;
+  }
+
+  const list = doc.createElementNS(XHTML, "div") as HTMLElement;
+  list.className = "zoteroagent-memory-list";
+  for (const paper of papers) {
+    const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    row.className = "zoteroagent-memory-list-item";
+    if (paper.itemKey === currentKey) row.classList.add("is-current");
+    const title = doc.createElementNS(XHTML, "span") as HTMLElement;
+    title.className = "zoteroagent-memory-list-title";
+    title.textContent = paper.title || paper.itemKey;
+    const sub = doc.createElementNS(XHTML, "span") as HTMLElement;
+    sub.className = "zoteroagent-memory-list-sub";
+    sub.textContent = [paper.creators, paper.year].filter(Boolean).join(" · ");
+    row.appendChild(title);
+    if (sub.textContent) row.appendChild(sub);
+    row.addEventListener("click", () => {
+      void renderMemoryDetail(body, paper.itemKey, paper.title || paper.itemKey);
+    });
+    list.appendChild(row);
+  }
+  host.appendChild(list);
+}
+
+async function appendPaperMemoryCard(
+  host: HTMLElement,
+  itemKey: string,
+  title: string,
+) {
+  const doc = host.ownerDocument;
+  const card = doc.createElementNS(XHTML, "div") as HTMLElement;
+  card.className = "zoteroagent-memory-card";
+  const content = await readPaperMemory(itemKey);
+  const inner = doc.createElementNS(XHTML, "div") as HTMLElement;
+  inner.className = "zoteroagent-memory-content markdown-body";
+  if (content.trim()) {
+    inner.innerHTML = renderMarkdown(content);
+  } else {
+    inner.appendChild(
+      memoryNotice(
+        doc,
+        `No memory yet for "${title}". Ask about it in Chat and Codex will write one.`,
+      ),
+    );
+  }
+  card.appendChild(inner);
+  host.appendChild(card);
+}
+
+async function renderMemoryDetail(
+  body: HTMLElement,
+  itemKey: string,
+  title: string,
+) {
+  const host = getMemoryBodyEl(body);
+  if (!host) return;
+  host.textContent = "";
+  const doc = host.ownerDocument;
+
+  const back = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  back.className = "zoteroagent-memory-back";
+  back.textContent = "\u2190 All papers";
+  back.addEventListener("click", () => void renderMemoryBrowse(body));
+  host.appendChild(back);
+
+  const heading = doc.createElementNS(XHTML, "div") as HTMLElement;
+  heading.className = "zoteroagent-memory-section-title";
+  heading.textContent = title;
+  host.appendChild(heading);
+
+  await appendPaperMemoryCard(host, itemKey, title);
+}
+
+function scheduleMemorySearch(body: HTMLElement, query: string) {
+  if (memorySearchTimer) clearTimeout(memorySearchTimer);
+  const trimmed = query.trim();
+  if (!trimmed) {
+    void renderMemoryBrowse(body);
+    return;
+  }
+  memorySearchTimer = setTimeout(() => {
+    void runMemorySearch(body, trimmed);
+  }, 220);
+}
+
+async function runMemorySearch(body: HTMLElement, query: string) {
+  const host = getMemoryBodyEl(body);
+  if (!host) return;
+  host.textContent = "";
+  const doc = host.ownerDocument;
+  let hits: VaultSearchHit[] = [];
+  try {
+    hits = await searchVaultMemory(query);
+  } catch (error) {
+    host.appendChild(memoryNotice(doc, `Search failed: ${String(error)}`));
+    return;
+  }
+  const title = doc.createElementNS(XHTML, "div") as HTMLElement;
+  title.className = "zoteroagent-memory-section-title";
+  title.textContent = `${hits.length} paper(s) match "${query}"`;
+  host.appendChild(title);
+
+  if (!hits.length) {
+    host.appendChild(memoryNotice(doc, "No matches."));
+    return;
+  }
+
+  const list = doc.createElementNS(XHTML, "div") as HTMLElement;
+  list.className = "zoteroagent-memory-list";
+  for (const hit of hits) {
+    const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    row.className = "zoteroagent-memory-list-item";
+    const t = doc.createElementNS(XHTML, "span") as HTMLElement;
+    t.className = "zoteroagent-memory-list-title";
+    t.textContent = hit.title || hit.itemKey;
+    row.appendChild(t);
+    for (const m of hit.matches.slice(0, 3)) {
+      const snippet = doc.createElementNS(XHTML, "span") as HTMLElement;
+      snippet.className = "zoteroagent-memory-snippet";
+      snippet.textContent = highlightSnippet(m.text, query);
+      row.appendChild(snippet);
+    }
+    row.addEventListener("click", () => {
+      void renderMemoryDetail(body, hit.itemKey, hit.title || hit.itemKey);
+    });
+    list.appendChild(row);
+  }
+  host.appendChild(list);
+}
+
+function highlightSnippet(text: string, query: string): string {
+  const clean = text.replace(/^#+\s*/, "").trim();
+  if (clean.length <= 160) return clean;
+  const idx = clean.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return `${clean.slice(0, 157)}...`;
+  const start = Math.max(0, idx - 40);
+  return `${start > 0 ? "..." : ""}${clean.slice(start, start + 157)}...`;
+}
+
+function memoryNotice(doc: Document, text: string): HTMLElement {
+  const el = doc.createElementNS(XHTML, "div") as HTMLElement;
+  el.className = "zoteroagent-memory-notice";
+  el.textContent = text;
+  return el;
+}
 
 function ensureChatUI(body: HTMLElement) {
   if (body.querySelector("#zoteroagent-chat-panel")) return;
@@ -756,13 +1025,37 @@ function ensureChatUI(body: HTMLElement) {
   inputArea.appendChild(mentionMenu);
   inputArea.appendChild(composeArea);
 
+  const viewTabs = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  viewTabs.id = "zoteroagent-view-tabs";
+  viewTabs.className = "zoteroagent-view-tabs";
+  const chatTab = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  chatTab.id = "zoteroagent-view-chat";
+  chatTab.className = "zoteroagent-view-tab is-active";
+  chatTab.textContent = "Chat";
+  const memoryTab = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  memoryTab.id = "zoteroagent-view-memory";
+  memoryTab.className = "zoteroagent-view-tab";
+  memoryTab.textContent = "Memory";
+  viewTabs.appendChild(chatTab);
+  viewTabs.appendChild(memoryTab);
+
   const headerWrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   headerWrap.className = "zoteroagent-header-wrap";
+  headerWrap.appendChild(viewTabs);
   headerWrap.appendChild(sessionRow);
   headerWrap.appendChild(historyPanel);
 
+  const memoryPanel = buildMemoryPanel(doc);
+
   container.appendChild(headerWrap);
   container.appendChild(messagesDiv);
+  container.appendChild(memoryPanel);
   container.appendChild(inputArea);
   const quotePopup = doc.createElementNS(
     XHTML_NS,
@@ -779,6 +1072,23 @@ function ensureChatUI(body: HTMLElement) {
 }
 
 function bindChatEvents(body: HTMLElement) {
+  body
+    .querySelector("#zoteroagent-view-chat")
+    ?.addEventListener("click", () => switchChatView(body, "chat"));
+  body
+    .querySelector("#zoteroagent-view-memory")
+    ?.addEventListener("click", () => switchChatView(body, "memory"));
+  const memorySearch = body.querySelector(
+    "#zoteroagent-memory-search",
+  ) as HTMLInputElement | null;
+  memorySearch?.addEventListener("input", () => {
+    scheduleMemorySearch(body, memorySearch.value);
+  });
+  body
+    .querySelector("#zoteroagent-memory-refresh")
+    ?.addEventListener("click", () => {
+      void renderMemoryBrowse(body);
+    });
   body
     .querySelector("#zoteroagent-chat-send")
     ?.addEventListener("click", () => {
@@ -1854,6 +2164,7 @@ function setGenerating(body: HTMLElement, generating: boolean) {
       sendBtn.textContent = "Send";
       sendBtn.title = "Send";
       activeXHR = null;
+      activeCodexProcess = null;
     }
   }
   if (!generating) {
@@ -1924,6 +2235,14 @@ function abortGeneration(body: HTMLElement) {
     }
     activeXHR = null;
   }
+  if (activeCodexProcess) {
+    try {
+      activeCodexProcess.kill();
+    } catch (_e) {
+      /* ignore */
+    }
+    activeCodexProcess = null;
+  }
   setGenerating(body, false);
   const itemId = Number(body.dataset.itemID);
   if (itemId > 0) renderMessages(body, itemId);
@@ -1940,11 +2259,50 @@ function getItemKey(itemId: number): string {
   }
 }
 
+function getPaperMeta(itemId: number): {
+  itemKey: string;
+  title: string;
+  creators: string;
+  year: string;
+} {
+  try {
+    const item = Zotero.Items.get(itemId) as any;
+    const creators = (item?.getCreators?.() || [])
+      .map((creator: any) =>
+        [creator?.firstName, creator?.lastName].filter(Boolean).join(" ").trim(),
+      )
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ");
+    const date = String(item?.getField?.("date") || "");
+    return {
+      itemKey: String(item?.key || itemId),
+      title: String(
+        item?.getField?.("title") ||
+          item?.getDisplayTitle?.() ||
+          `Item ${itemId}`,
+      ),
+      creators,
+      year: (date.match(/\b(18|19|20)\d{2}\b/) || [""])[0],
+    };
+  } catch (_e) {
+    return {
+      itemKey: String(itemId),
+      title: `Item ${itemId}`,
+      creators: "",
+      year: "",
+    };
+  }
+}
+
 function resolvePdfAttachmentItemId(
   itemId: number,
   reader?: _ZoteroTypes.ReaderInstance | null,
 ): number {
   const candidates = new Set<number>();
+  if ((reader as any)?.itemID) {
+    candidates.add(Number((reader as any).itemID));
+  }
   if (reader?._item?.id) {
     candidates.add(Number(reader._item.id));
   }
@@ -2355,36 +2713,19 @@ async function submitQuestion(body: HTMLElement) {
     model: getModelLabel(),
   };
   chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
-  const sessions = chatStore.getMessages(itemId);
   renderMessages(body, itemId);
   setGenerating(body, true);
-  showAgentStatus(body, "Preparing agent...");
+  showAgentStatus(body, "Preparing Codex...");
 
-  const reader = addon.data.popup.currentReader;
-  const maxCtx = getActiveMaxContextTokens();
+  const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
-  let localPathContextPdfData: ContextPdfData | null = null;
-  try {
-    localPathContextPdfData = await processLocalPathContextPdfFromQuestion(
-      body,
-      itemId,
-      question,
-    );
-  } catch (e: any) {
-    assistant.content = `[Error] ${e?.message || String(e)}`;
-    setGenerating(body, false);
-    renderMessages(body, itemId);
-    return;
-  }
-  const localPathPdfAsMain = Boolean(localPathContextPdfData);
-  if (pdfItemId <= 0 && !localPathPdfAsMain) {
+  if (pdfItemId <= 0) {
     assistant.content =
       "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.";
     setGenerating(body, false);
     renderMessages(body, itemId);
     return;
   }
-  const paperOverview = await loadPaperOverview(getItemKey(itemId));
 
   const quotedBlocks: string[] = [];
   if (refText)
@@ -2397,61 +2738,40 @@ async function submitQuestion(body: HTMLElement) {
   const aiQuestion = quotedBlocks.length
     ? `${quotedBlocks.join("\n\n")}\n\n${question}`
     : question;
-  const fullHistory = sessions.slice(0, -2);
-  await ensureAiSessionSummary(itemId, fullHistory);
   const session = chatStore.getSession(itemId);
-  let contextPdfData: Awaited<ReturnType<typeof loadContextPdfByRef>> | null =
-    localPathContextPdfData;
-  const sessionContextPdfRef = localPathPdfAsMain
-    ? null
-    : session?.contextPdf || activeContextPdfRef;
-  if (sessionContextPdfRef) {
-    contextPdfData = await loadContextPdfByRef(sessionContextPdfRef);
-    if (!contextPdfData) {
-      chatStore.clearSessionContextPdf(itemId);
-      addon.data.chat.pendingContextPdf = null;
-      refreshContextPdfChip(body);
-    }
-  }
-  const history = buildHistoryForRequest(fullHistory, session)
-    .filter((m: ChatMessage) => (m.content || "").trim())
-    .map((m: ChatMessage) => ({ role: m.role, content: m.content })) as Array<{
-    role: "user" | "assistant" | "system";
-    content: string;
-  }>;
+  const paperMeta = getPaperMeta(itemId);
 
   try {
     let lastRefresh = 0;
-    const result = await executeAgent({
+    await ensurePaperVault({
       itemId,
-      itemKey: getItemKey(itemId),
+      itemKey: paperMeta.itemKey,
+      title: paperMeta.title,
+      creators: paperMeta.creators,
+      year: paperMeta.year,
       pdfItemId,
-      question: aiQuestion,
       reader,
-      history,
-      maxContextTokens: maxCtx,
-      paperOverview: localPathPdfAsMain
-        ? contextPdfData?.overview || paperOverview || ""
-        : paperOverview || "",
-      miniModel: getMiniModel(),
-      pendingImages,
-      contextPdf: contextPdfData
-        ? {
-            hash: contextPdfData.hash,
-            fileName: contextPdfData.fileName,
-            overview: contextPdfData.overview,
-            pages: contextPdfData.pages,
-            asMain: localPathPdfAsMain,
-          }
-        : undefined,
-      historySummary: (session?.summaryText || "").trim(),
-      onStatus: (_stage, text) => showAgentStatus(body, text),
-      onRequest: (xhr) => {
-        activeXHR = xhr;
+      onStatus: (text) => showAgentStatus(body, text),
+    });
+    const prompt = buildCodexPrompt({
+      itemKey: paperMeta.itemKey,
+      title: paperMeta.title,
+      creators: paperMeta.creators,
+      year: paperMeta.year,
+      question: aiQuestion,
+    });
+    const result = await runCodexTurn({
+      prompt,
+      threadId: session?.codexThreadId || "",
+      sandbox: "workspace-write",
+      onStatus: (text) => showAgentStatus(body, text),
+      onProcess: (proc) => {
+        activeCodexProcess = proc;
       },
       onChunk: (state) => {
         assistant.content = state.content;
         assistant.reasoning = state.reasoning;
+        if (state.usage) assistant.usage = state.usage;
         const now = Date.now();
         if (now - lastRefresh > 150) {
           lastRefresh = now;
@@ -2459,13 +2779,28 @@ async function submitQuestion(body: HTMLElement) {
         }
       },
     });
-    assistant.content = result.answer.content || assistant.content;
-    assistant.reasoning = result.answer.reasoning || assistant.reasoning;
-    if (result.answer.usage) assistant.usage = result.answer.usage;
-    ztoolkit.log(
-      `[Agent] planned pages: ${result.plan.pages.join(",") || "none"}; loaded pages: ${result.usedPages.map((p) => p.pageNumber).join(",") || "none"}; reference pages: ${result.usedContextPages.map((p) => p.pageNumber).join(",") || "none"}`,
-    );
+    assistant.content = result.content || assistant.content;
+    assistant.reasoning = result.reasoning || assistant.reasoning;
+    if (result.usage) assistant.usage = result.usage;
+    if (result.threadId) {
+      chatStore.updateCodexThreadId(itemId, result.threadId, session?.sessionId);
+    }
+    await appendConversationTurn({
+      itemKey: paperMeta.itemKey,
+      sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
+      userMessage: displayContent,
+      assistantMessage: assistant.content,
+      codexThreadId: result.threadId,
+    });
+    await commitVaultChanges(`turn: ${paperMeta.itemKey} ${session?.sessionId || ""}`.trim());
   } catch (e: any) {
+    await appendVaultLog("chat-turn-error", e?.message || String(e), {
+      itemId,
+      itemKey: paperMeta.itemKey,
+      title: paperMeta.title,
+      sessionId: session?.sessionId,
+      codexThreadId: session?.codexThreadId,
+    });
     if (!assistant.content && !assistant.reasoning) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
     }
@@ -2473,7 +2808,7 @@ async function submitQuestion(body: HTMLElement) {
   chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
   setGenerating(body, false);
   renderMessages(body, itemId);
-  void maybeGenerateSessionTitle(body, itemId);
+  maybeGenerateSessionTitleLocal(body, itemId, question);
 }
 
 function getMiniModel(): string | undefined {
@@ -2481,6 +2816,40 @@ function getMiniModel(): string | undefined {
   if (svc?.miniModel) return svc.miniModel;
   const preset = getPreset(svc?.provider || "custom");
   return preset?.miniModel;
+}
+
+function buildCodexPrompt(options: {
+  itemKey: string;
+  title: string;
+  creators: string;
+  year: string;
+  question: string;
+}): string {
+  const meta = [
+    `In-focus paper: ${options.itemKey}`,
+    `Title: ${options.title || options.itemKey}`,
+    options.creators ? `Authors: ${options.creators}` : "",
+    options.year ? `Year: ${options.year}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return `${meta}\n\nUser question:\n${options.question.trim()}`;
+}
+
+function maybeGenerateSessionTitleLocal(
+  body: HTMLElement,
+  itemId: number,
+  question: string,
+) {
+  if (!chatStore.needsAutoTitle(itemId)) return;
+  const title = question
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48)
+    .replace(/[。！？,.，；;:：\s]+$/g, "");
+  if (!title) return;
+  chatStore.renameSession(itemId, title);
+  if (isSafeBody(body)) syncSessionSelector(body, itemId);
 }
 
 async function maybeGenerateSessionTitle(body: HTMLElement, itemId: number) {

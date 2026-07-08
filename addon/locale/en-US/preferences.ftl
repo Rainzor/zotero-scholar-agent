@@ -1,3 +1,21 @@
+pref-codex-title = Codex CLI
+pref-codex-description = Zotero Agent uses your locally configured Codex CLI. Leave the path empty to auto-detect it.
+pref-codex-path = Path
+pref-codex-save = Save Path
+pref-codex-test = Auto Detect / Test
+pref-codex-saved = Codex path saved.
+pref-codex-testing = Testing Codex CLI...
+pref-codex-success = Codex OK
+pref-codex-fail = Codex test failed
+
+pref-vault-title = Knowledge Vault
+pref-vault-description = Paper text, memory notes, session transcripts, git history, and plugin logs are stored here.
+pref-vault-path = Directory
+pref-vault-save = Save Directory
+pref-vault-useDefault = Use Default
+pref-vault-saved = Vault directory saved.
+pref-vault-default = Using default vault directory.
+
 pref-services-title = AI Services
 pref-svc-add = Add
 pref-svc-remove = Remove

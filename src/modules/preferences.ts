@@ -7,6 +7,14 @@ import {
   setActiveServiceId,
 } from "../utils/services";
 import { AIService } from "../services/ai-service";
+import {
+  getConfiguredCodexPath,
+  getConfiguredVaultPath,
+  getDefaultVaultPath,
+  setConfiguredVaultPath,
+  setConfiguredCodexPath,
+  testCodexBinary,
+} from "../services/codex";
 import { PROVIDER_PRESETS, getPreset } from "../utils/provider-presets";
 import type { ServiceProvider, ProviderKey, ApiFormat } from "../addon";
 
@@ -48,7 +56,126 @@ export function registerPrefsScripts(win: Window) {
 let selectedServiceId = "";
 
 function bindEvents(doc: Document) {
+  bindCodexSettings(doc);
+  bindVaultSettings(doc);
   bindServiceManager(doc);
+}
+
+function bindCodexSettings(doc: Document) {
+  const pathInput = doc.querySelector(
+    `#${prefId("codexPath")}`,
+  ) as HTMLInputElement | null;
+  const saveBtn = doc.querySelector(
+    `#${prefId("codexSave")}`,
+  ) as XUL.Button | null;
+  const testBtn = doc.querySelector(
+    `#${prefId("codexTest")}`,
+  ) as XUL.Button | null;
+  const statusEl = doc.querySelector(
+    `#${prefId("codexStatus")}`,
+  ) as HTMLElement | null;
+  if (!pathInput || !saveBtn || !testBtn || !statusEl) return;
+
+  pathInput.value = getConfiguredCodexPath();
+  setCodexStatus(
+    statusEl,
+    pathInput.value
+      ? `Configured: ${pathInput.value}`
+      : "No explicit path configured. Auto-detection will be used.",
+  );
+
+  saveBtn.addEventListener("command", () => {
+    setConfiguredCodexPath(pathInput.value.trim());
+    setCodexStatus(
+      statusEl,
+      pathInput.value.trim()
+        ? `${getString("pref-codex-saved")}\n${pathInput.value.trim()}`
+        : `${getString("pref-codex-saved")}\nAuto-detect enabled.`,
+      "success",
+    );
+  });
+
+  testBtn.addEventListener("command", async () => {
+    const explicitPath = pathInput.value.trim();
+    setCodexStatus(statusEl, getString("pref-codex-testing"));
+    const result = await testCodexBinary(explicitPath || undefined);
+    if (result.ok) {
+      pathInput.value = result.path;
+      setConfiguredCodexPath(result.path);
+      setCodexStatus(
+        statusEl,
+        [
+          `${getString("pref-codex-success")}: ${result.version}`,
+          `Path: ${result.path}`,
+          result.source ? `Source: ${result.source}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        "success",
+      );
+      return;
+    }
+    setCodexStatus(
+      statusEl,
+      `${getString("pref-codex-fail")}: ${result.error || "Unknown error"}`,
+      "fail",
+    );
+  });
+}
+
+function setCodexStatus(
+  statusEl: HTMLElement,
+  text: string,
+  type: "default" | "success" | "fail" = "default",
+) {
+  statusEl.textContent = text;
+  statusEl.style.color =
+    type === "success" ? "#267f00" : type === "fail" ? "#b00020" : "#666";
+}
+
+function bindVaultSettings(doc: Document) {
+  const pathInput = doc.querySelector(
+    `#${prefId("vaultPath")}`,
+  ) as HTMLInputElement | null;
+  const saveBtn = doc.querySelector(
+    `#${prefId("vaultSave")}`,
+  ) as XUL.Button | null;
+  const defaultBtn = doc.querySelector(
+    `#${prefId("vaultDefault")}`,
+  ) as XUL.Button | null;
+  const statusEl = doc.querySelector(
+    `#${prefId("vaultStatus")}`,
+  ) as HTMLElement | null;
+  if (!pathInput || !saveBtn || !defaultBtn || !statusEl) return;
+
+  const configured = getConfiguredVaultPath();
+  pathInput.value = configured || getDefaultVaultPath();
+  setCodexStatus(
+    statusEl,
+    configured
+      ? `Configured: ${configured}`
+      : `${getString("pref-vault-default")}\n${getDefaultVaultPath()}`,
+  );
+
+  saveBtn.addEventListener("command", () => {
+    const value = pathInput.value.trim();
+    setConfiguredVaultPath(value);
+    setCodexStatus(
+      statusEl,
+      `${getString("pref-vault-saved")}\n${value || getDefaultVaultPath()}`,
+      "success",
+    );
+  });
+
+  defaultBtn.addEventListener("command", () => {
+    setConfiguredVaultPath("");
+    pathInput.value = getDefaultVaultPath();
+    setCodexStatus(
+      statusEl,
+      `${getString("pref-vault-default")}\n${getDefaultVaultPath()}`,
+      "success",
+    );
+  });
 }
 
 function bindServiceManager(doc: Document) {

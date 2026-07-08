@@ -6,6 +6,62 @@
   onload="Zotero.__addonInstance__?.hooks?.onPrefsLoad?.(event)"
 >
   <groupbox>
+    <label><html:h2 data-l10n-id="pref-codex-title"></html:h2></label>
+    <description data-l10n-id="pref-codex-description"></description>
+    <hbox align="center">
+      <label data-l10n-id="pref-codex-path" style="min-width: 80px"></label>
+      <html:input
+        id="__addonRef__-codexPath"
+        type="text"
+        style="min-width: 480px"
+        placeholder="/opt/homebrew/bin/codex"
+      ></html:input>
+    </hbox>
+    <hbox align="center">
+      <button
+        id="__addonRef__-codexSave"
+        data-l10n-id="pref-codex-save"
+      ></button>
+      <button
+        id="__addonRef__-codexTest"
+        data-l10n-id="pref-codex-test"
+      ></button>
+    </hbox>
+    <html:div
+      id="__addonRef__-codexStatus"
+      style="font-size: 12px; color: #666; margin-top: 6px; white-space: pre-wrap"
+    ></html:div>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-vault-title"></html:h2></label>
+    <description data-l10n-id="pref-vault-description"></description>
+    <hbox align="center">
+      <label data-l10n-id="pref-vault-path" style="min-width: 80px"></label>
+      <html:input
+        id="__addonRef__-vaultPath"
+        type="text"
+        style="min-width: 480px"
+        placeholder="~/papers"
+      ></html:input>
+    </hbox>
+    <hbox align="center">
+      <button
+        id="__addonRef__-vaultSave"
+        data-l10n-id="pref-vault-save"
+      ></button>
+      <button
+        id="__addonRef__-vaultDefault"
+        data-l10n-id="pref-vault-useDefault"
+      ></button>
+    </hbox>
+    <html:div
+      id="__addonRef__-vaultStatus"
+      style="font-size: 12px; color: #666; margin-top: 6px; white-space: pre-wrap"
+    ></html:div>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2 data-l10n-id="pref-services-title"></html:h2></label>
     <html:div
       id="__addonRef__-services-list"

@@ -37,6 +37,7 @@ export type ChatSession = {
   sessionId: string;
   itemId: number;
   itemKey: string;
+  codexThreadId?: string;
   title: string;
   messages: ChatMessage[];
   summaryText?: string;

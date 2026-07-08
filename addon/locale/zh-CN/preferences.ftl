@@ -1,3 +1,21 @@
+pref-codex-title = Codex CLI
+pref-codex-description = Zotero Agent 使用你本机已配置好的 Codex CLI。路径留空时会自动检测。
+pref-codex-path = 路径
+pref-codex-save = 保存路径
+pref-codex-test = 自动检测 / 测试
+pref-codex-saved = Codex 路径已保存。
+pref-codex-testing = 正在测试 Codex CLI...
+pref-codex-success = Codex 可用
+pref-codex-fail = Codex 测试失败
+
+pref-vault-title = Knowledge Vault
+pref-vault-description = 论文全文、长期记忆、会话记录、git 历史和插件日志都会保存在这里。
+pref-vault-path = 目录
+pref-vault-save = 保存目录
+pref-vault-useDefault = 使用默认目录
+pref-vault-saved = Vault 目录已保存。
+pref-vault-default = 正在使用默认 Vault 目录。
+
 pref-services-title = AI 服务配置
 pref-svc-add = 添加
 pref-svc-remove = 删除

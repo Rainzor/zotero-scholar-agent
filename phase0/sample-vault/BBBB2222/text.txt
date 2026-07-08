@@ -1,0 +1,28 @@
+[page 1]
+BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, Kristina Toutanova. NAACL 2019.
+
+Abstract. We introduce BERT, which stands for Bidirectional Encoder
+Representations from Transformers. Unlike recent language representation
+models, BERT is designed to pre-train deep bidirectional representations from
+unlabeled text by jointly conditioning on both left and right context in all
+layers.
+
+[page 2]
+1 Introduction
+BERT uses the Transformer encoder architecture (Vaswani et al., 2017) but,
+unlike left-to-right language models, conditions on bidirectional context.
+The pre-trained BERT model can be fine-tuned with just one additional output
+layer to create state-of-the-art models for a wide range of tasks.
+
+3 Pre-training BERT
+We pre-train using two unsupervised tasks: the Masked Language Model (MLM),
+which masks 15% of input tokens and predicts them, and Next Sentence
+Prediction (NSP). Unlike the sinusoidal positional encodings of the original
+Transformer, BERT uses learned positional embeddings.
+
+[page 3]
+5 Results
+BERT obtains new state-of-the-art results on eleven natural language
+processing tasks, including pushing the GLUE score to 80.5% and SQuAD v1.1
+question answering Test F1 to 93.2.

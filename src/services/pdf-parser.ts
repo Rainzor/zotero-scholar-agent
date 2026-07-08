@@ -53,7 +53,11 @@ export function getPdfDocumentFromReader(
   try {
     const iframeWin = (reader as any)?._iframeWindow;
     const wrapped = iframeWin?.wrappedJSObject;
-    return wrapped?.PDFViewerApplication?.pdfDocument || null;
+    return (
+      wrapped?.PDFViewerApplication?.pdfDocument ||
+      iframeWin?.PDFViewerApplication?.pdfDocument ||
+      null
+    );
   } catch {
     return null;
   }
