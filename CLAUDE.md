@@ -29,10 +29,9 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 
 | Module              | Responsibility                                                                                                        |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `sidebar.ts`        | Main chat panel (~2000 lines): session management, message rendering, streaming updates, slash commands, image upload |
+| `sidebar.ts`        | Main chat panel: session management, message rendering, Codex streaming updates, Memory view                          |
 | `popup.ts`          | In-reader text-selection popup with "Ask" and "Translate" quick actions                                               |
-| `pdf-context.ts`    | Extracts text from PDF.js DOM text layers; caches via page-cache service                                              |
-| `slash-commands.ts` | Slash command parsing and autocomplete menu (`/init`, `/summary`, `/compact`)                                         |
+| `pdf-context.ts`    | Full-text extraction fallback via Zotero PDFWorker and page cache                                                     |
 | `preferences.ts`    | Settings UI for AI service configuration                                                                              |
 | `reader.ts`         | Reader lifecycle integration                                                                                          |
 
@@ -40,27 +39,22 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 
 | Service              | Responsibility                                                                                                                                                       |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ai-service.ts`      | Abstract AI API client supporting `chat-completions` (OpenAI-compatible), `anthropic`, and `responses` formats; handles streaming, multimodal, and extended thinking |
-| `agent-executor.ts`  | Core agent pipeline: generates paper AGENTS.md overview, plans which PDF pages to load, builds context-aware prompts, streams response                               |
+| `ai-service.ts`      | Abstract AI API client used by non-agent features such as popup translation and preference API checks                                                              |
+| `codex/`             | Codex CLI integration: binary resolution, Mozilla subprocess wrapper, JSONL event parsing, Vault prep, and turn execution                                          |
 | `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/extension/zotero-agent/{itemKey}.json`                                                           |
-| `prompts.ts`         | All system prompts: Q&A, context planning, paper init, translate, explain                                                                                            |
-| `context-builder.ts` | Assembles message history respecting token limits                                                                                                                    |
+| `prompts.ts`         | Popup translation prompt                                                                                                                                            |
 | `page-cache.ts`      | Caches parsed PDF pages to avoid re-parsing                                                                                                                          |
-| `paper-overview.ts`  | Reads/writes AGENTS.md per paper                                                                                                                                     |
+| `pdf-parser.ts`      | PDF.js page parsing used by the Codex Knowledge Vault                                                                                                                |
 
 ### Agent Execution Flow
 
 When a user submits a question in the sidebar (`sidebar.ts::submitQuestion`):
 
-1. Load message history and paper overview (AGENTS.md)
-2. **`agent-executor.ts::executeAgent`**:
-   a. Parse all PDF pages and cache them (once per paper)
-   b. Generate AGENTS.md if missing (calls LLM on full paper text)
-   c. **Context planning**: call LLM with the question + AGENTS.md → JSON list of relevant page numbers
-   d. Load selected pages from cache
-   e. Build final prompt: system prompt + AGENTS.md + page content + chat history
-   f. Stream answer via `AIService.chat()`
-3. Update UI with streaming tokens; render thinking blocks, token usage, page references
+1. Resolve the in-focus Zotero item and PDF attachment.
+2. Prepare the configured Knowledge Vault (`~/papers` by default): per-paper `text.txt`, `memory.md`, session conversation log, root `AGENTS.md`, and git repo.
+3. Run `codex exec --json -C {vault} -s workspace-write ...` via Mozilla Subprocess.
+4. Parse Codex JSONL events into sidebar updates, activity steps, usage, and the assistant answer.
+5. Append the conversation turn, detect whether `memory.md` changed, and git-commit Vault changes.
 
 ### AI Provider Support
 
@@ -80,11 +74,9 @@ Providers are configured in `src/utils/provider-presets.ts`. Supported API forma
   itemId, itemKey, paperTitle,
   activeSessionId,
   sessions: [{
-    sessionId, title,
-    contextMode: "agent" | "none" | "currentPage",
+    sessionId, codexThreadId, title,
+    contextMode: "agent",
     messages: ChatMessage[],
-    summaryText?,     // compacted history
-    summaryUpToIndex?,
     createdAt, updatedAt
   }]
 }

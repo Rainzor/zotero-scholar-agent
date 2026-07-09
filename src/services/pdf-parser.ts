@@ -89,110 +89,11 @@ export async function parsePageStructured(
   }
 }
 
-export function toPlainText(page: StructuredPage): string {
+function toPlainText(page: StructuredPage): string {
   return (page?.blocks || [])
     .map((b) => String(b.text || "").trim())
     .filter(Boolean)
     .join("\n");
-}
-
-export function formatStructuredPagesForPrompt(
-  pages: StructuredPage[],
-): string {
-  return (pages || [])
-    .filter((p) => p.pageNumber > 0 && (p.blocks?.length || p.plainText))
-    .map((p) => {
-      const body = (p.blocks || [])
-        .map((block) => {
-          const headingTag =
-            block.type === "heading" ? `[H${block.headingLevel || 3}] ` : "";
-          return `${headingTag}${block.text}`;
-        })
-        .join("\n");
-      return `=== Page ${p.pageNumber} ===\n${body || p.plainText || ""}`.trim();
-    })
-    .join("\n\n");
-}
-
-export function stripReferencesFromPages(
-  pages: StructuredPage[],
-): StructuredPage[] {
-  let referencesStarted = false;
-  const output: StructuredPage[] = [];
-  for (const page of pages || []) {
-    const safePage: StructuredPage = {
-      pageNumber: Math.max(1, Math.floor(Number(page.pageNumber) || 0)),
-      blocks: Array.isArray(page.blocks) ? page.blocks : [],
-      plainText: String(page.plainText || ""),
-    };
-    if (referencesStarted) {
-      output.push({ ...safePage, blocks: [], plainText: "" });
-      continue;
-    }
-    const markerIndex = safePage.blocks.findIndex((block) =>
-      isReferenceHeading(block),
-    );
-    if (markerIndex < 0) {
-      output.push(safePage);
-      continue;
-    }
-    referencesStarted = true;
-    const keptBlocks = safePage.blocks.slice(0, markerIndex);
-    output.push({
-      ...safePage,
-      blocks: keptBlocks,
-      plainText: toPlainText({ ...safePage, blocks: keptBlocks }),
-    });
-  }
-  return output;
-}
-
-export function findBlocksByKeyword(
-  pages: StructuredPage[],
-  keyword: string,
-): Array<{ pageNumber: number; block: TextBlock }> {
-  const q = String(keyword || "")
-    .trim()
-    .toLowerCase();
-  if (!q) return [];
-  const matches: Array<{ pageNumber: number; block: TextBlock }> = [];
-  for (const page of pages || []) {
-    for (const block of page.blocks || []) {
-      if (
-        String(block.text || "")
-          .toLowerCase()
-          .includes(q)
-      ) {
-        matches.push({ pageNumber: page.pageNumber, block });
-      }
-    }
-  }
-  return matches;
-}
-
-export function getSectionPages(
-  pages: StructuredPage[],
-  sectionTitle: string,
-): StructuredPage[] {
-  const q = String(sectionTitle || "")
-    .trim()
-    .toLowerCase();
-  if (!q) return [];
-  const selected = new Set<number>();
-  for (const page of pages || []) {
-    const hasSection = (page.blocks || []).some(
-      (b) =>
-        b.type === "heading" &&
-        String(b.text || "")
-          .toLowerCase()
-          .includes(q),
-    );
-    if (hasSection) {
-      selected.add(page.pageNumber);
-      selected.add(page.pageNumber + 1);
-    }
-  }
-  return (pages || []).filter((p) => selected.has(p.pageNumber));
 }
 
 function collectRows(items: RawItem[]): LineRow[] {
@@ -291,13 +192,4 @@ function computeMedian(values: number[]): number {
 
 function emptyPage(pageNumber: number): StructuredPage {
   return { pageNumber, blocks: [], plainText: "" };
-}
-
-function isReferenceHeading(block: TextBlock): boolean {
-  if (!block || block.type !== "heading") return false;
-  const text = String(block.text || "")
-    .trim()
-    .toLowerCase();
-  if (!text) return false;
-  return /^(references|bibliography|参考文献)\b/.test(text);
 }

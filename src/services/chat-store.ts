@@ -2,7 +2,6 @@ import type {
   ChatMessage,
   ChatSession,
   ContextMode,
-  SessionContextPdfRef,
 } from "../addon";
 import { estimateTokens } from "../utils/token-estimate";
 
@@ -12,7 +11,6 @@ type PersistedSession = {
   title: string;
   contextMode: ContextMode;
   messages: ChatMessage[];
-  contextPdf?: SessionContextPdfRef;
   summaryText?: string;
   summaryUpToIndex?: number;
   summaryUpdatedAt?: number;
@@ -149,7 +147,6 @@ class ChatStore {
       summaryUpToIndex: 0,
       summaryUpdatedAt: 0,
       contextMode: this.normalizeContextMode(contextMode),
-      contextPdf: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -290,26 +287,6 @@ class ChatStore {
     this.markDirty(itemId);
   }
 
-  setSessionContextPdf(
-    itemId: number,
-    contextPdf: SessionContextPdfRef | null | undefined,
-  ) {
-    const session = this.getSession(itemId);
-    if (!session) return;
-    session.contextPdf = this.normalizeContextPdfRef(contextPdf);
-    session.updatedAt = Date.now();
-    this.markDirty(itemId);
-  }
-
-  clearSessionContextPdf(itemId: number) {
-    const session = this.getSession(itemId);
-    if (!session) return;
-    if (!session.contextPdf) return;
-    session.contextPdf = undefined;
-    session.updatedAt = Date.now();
-    this.markDirty(itemId);
-  }
-
   touchSession(itemId: number, contextMode?: ContextMode) {
     const session = this.getSession(itemId);
     if (!session) return;
@@ -364,7 +341,6 @@ class ChatStore {
         codexThreadId: s.codexThreadId || "",
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
-        contextPdf: this.normalizeContextPdfRef((s as any).contextPdf),
         summaryText: s.summaryText || "",
         summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
         summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
@@ -409,7 +385,6 @@ class ChatStore {
         title: String(s?.title || "Chat"),
         contextMode: this.normalizeContextMode(s?.contextMode),
         messages: Array.isArray(s?.messages) ? s.messages : [],
-        contextPdf: this.normalizeContextPdfRef(s?.contextPdf),
         summaryText: String(s?.summaryText || ""),
         summaryUpToIndex: Math.max(0, Number(s?.summaryUpToIndex) || 0),
         summaryUpdatedAt: Number(s?.summaryUpdatedAt) || 0,
@@ -425,10 +400,7 @@ class ChatStore {
       this.approxTokens(session.messages) > MAX_TOKENS_APPROX;
     if (!overMessageLimit && !overTokenLimit) return;
     const keepTailCount = 20;
-    const tail = session.messages.slice(-keepTailCount).map((m) => {
-      if (!m.images?.length) return m;
-      return { ...m, images: [] };
-    });
+    const tail = session.messages.slice(-keepTailCount);
     const head = session.messages.slice(
       0,
       Math.max(0, session.messages.length - keepTailCount),
@@ -441,7 +413,6 @@ class ChatStore {
       role: "assistant",
       content: this.buildSummary(head, previousSummary),
       timestamp: Date.now(),
-      images: [],
     };
     session.messages = [summaryMessage, ...tail];
     while (
@@ -517,7 +488,6 @@ class ChatStore {
             title: s.title,
             contextMode: s.contextMode,
             messages: s.messages.map((m) => ({ ...m })),
-            contextPdf: this.normalizeContextPdfRef(s.contextPdf),
             summaryText: s.summaryText || "",
             summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
             summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
@@ -608,50 +578,6 @@ class ChatStore {
     if (raw === "currentPage" || raw === "none" || raw === "fullPdf")
       return "agent";
     return "agent";
-  }
-
-  private normalizeContextPdfRef(raw: any): SessionContextPdfRef | undefined {
-    if (!raw || typeof raw !== "object") return undefined;
-    const fileName = String(raw.fileName || "").trim();
-    const fileSize = Math.max(0, Number(raw.fileSize) || 0);
-    const addedAt = Math.max(0, Number(raw.addedAt) || 0) || Date.now();
-    const itemKey = String(raw.itemKey || "").trim().toUpperCase();
-    const hashRaw = String(raw.hash || "").trim();
-    const explicitSource = raw.source === "library" ? "library" : raw.source === "upload" ? "upload" : null;
-
-    let source: SessionContextPdfRef["source"];
-    if (explicitSource) {
-      source = explicitSource;
-    } else if (/^[A-Z0-9]{8}$/.test(itemKey)) {
-      source = "library";
-    } else {
-      source = "upload";
-    }
-
-    if (source === "library") {
-      if (!/^[A-Z0-9]{8}$/.test(itemKey) || !fileName) return undefined;
-      const itemId =
-        typeof raw.itemId === "number" && Number.isFinite(raw.itemId)
-          ? Number(raw.itemId)
-          : undefined;
-      return {
-        source: "library",
-        hash: hashRaw || `lib-${itemKey}`,
-        fileName,
-        fileSize,
-        addedAt,
-        itemKey,
-        itemId,
-      };
-    }
-    if (!hashRaw || !fileName) return undefined;
-    return {
-      source: "upload",
-      hash: hashRaw.toLowerCase(),
-      fileName,
-      fileSize,
-      addedAt,
-    };
   }
 
   private getStorageDir(): string {

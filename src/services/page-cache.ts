@@ -50,17 +50,6 @@ async function ensurePageCacheDir(): Promise<void> {
   });
 }
 
-export async function hasPageCache(itemKey: string): Promise<boolean> {
-  if (memoryCache.has(itemKey)) return true;
-  const ioUtils = getIOUtils();
-  if (!ioUtils) return false;
-  try {
-    return Boolean(await ioUtils.exists(getPageCachePath(itemKey)));
-  } catch {
-    return false;
-  }
-}
-
 export async function loadPageCache(
   itemKey: string,
 ): Promise<PageCacheData | null> {

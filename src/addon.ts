@@ -9,19 +9,10 @@ export type TokenUsage = {
   completionTokens?: number;
   totalTokens?: number;
 };
-export type ContextPdfSource = "upload" | "library";
-export type SessionContextPdfRef = {
-  source: ContextPdfSource;
-  hash: string;
-  fileName: string;
-  fileSize: number;
-  addedAt: number;
-  itemKey?: string;
-  itemId?: number;
-};
-export type PendingContextPdf = SessionContextPdfRef & {
-  status: "uploading" | "parsing" | "overviewing" | "ready" | "error";
-  error?: string;
+export type CodexActivity = {
+  command: string;
+  status?: string;
+  exitCode?: number | null;
 };
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -29,9 +20,10 @@ export type ChatMessage = {
   reasoning?: string;
   timestamp?: number;
   model?: string;
-  images?: string[];
-  contextPdfRef?: { fileName: string; source?: ContextPdfSource };
   usage?: TokenUsage;
+  activities?: CodexActivity[];
+  memoryUpdated?: boolean;
+  committed?: boolean;
 };
 export type ChatSession = {
   sessionId: string;
@@ -44,7 +36,6 @@ export type ChatSession = {
   summaryUpToIndex?: number;
   summaryUpdatedAt?: number;
   contextMode: ContextMode;
-  contextPdf?: SessionContextPdfRef;
   createdAt: number;
   updatedAt: number;
 };
@@ -102,8 +93,6 @@ class Addon {
       prefillInput: string;
       referenceText: string;
       responseQuote: string;
-      pendingImages: string[];
-      pendingContextPdf: PendingContextPdf | null;
     };
   };
   public hooks: typeof hooks;
@@ -128,8 +117,6 @@ class Addon {
         prefillInput: "",
         referenceText: "",
         responseQuote: "",
-        pendingImages: [],
-        pendingContextPdf: null,
       },
     };
     this.hooks = hooks;
