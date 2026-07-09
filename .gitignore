@@ -3,9 +3,9 @@ node_modules
 package-lock.json
 zotero-cmd.json
 .env
-**/test
 build
 .DS_Store
 *.tsbuildinfo
 .scaffold
 phase0/sample-vault/
+coverage/

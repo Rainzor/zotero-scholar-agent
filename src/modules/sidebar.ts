@@ -6,7 +6,6 @@ import type {
   ChatMessage,
   ChatSession,
   CodexActivity,
-  ContextMode,
   TokenUsage,
 } from "../addon";
 import { chatStore } from "../services/chat-store";
@@ -27,14 +26,12 @@ import {
 
 let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
-let activeXHR: XMLHttpRequest | null = null;
 let activeCodexProcess: RunningLineProcess | null = null;
 let isGenerating = false;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
 let referenceSyncRetryTimer: number | null = null;
-const AGENT_CONTEXT_MODE: ContextMode = "agent";
 const SELECTED_TEXT_PREFIX = "Selected Text: ";
 const RESPONSE_QUOTE_PREFIX = "Response Quote: ";
 
@@ -372,10 +369,6 @@ function scheduleReferenceSyncRetry(delayMs = 120) {
 export function unregisterAgentSection() {
   isGenerating = false;
   try {
-    if (activeXHR) {
-      activeXHR.abort();
-      activeXHR = null;
-    }
     if (activeCodexProcess) {
       activeCodexProcess.kill();
       activeCodexProcess = null;
@@ -999,11 +992,7 @@ function bindChatEvents(body: HTMLElement) {
     ?.addEventListener("click", () => {
       const itemId = Number(body.dataset.itemID);
       if (itemId <= 0) return;
-      const session = chatStore.createSession(
-        itemId,
-        undefined,
-        AGENT_CONTEXT_MODE,
-      );
+      const session = chatStore.createSession(itemId);
       if (!session) return;
       body.dataset.chatMode = "chat";
       syncSessionSelector(body, itemId);
@@ -1085,7 +1074,6 @@ function setGenerating(body: HTMLElement, generating: boolean) {
       sendBtn.classList.remove("is-stop");
       sendBtn.textContent = "Send";
       sendBtn.title = "Send";
-      activeXHR = null;
       activeCodexProcess = null;
     }
   }
@@ -1149,14 +1137,6 @@ function hideAgentStatus(body: HTMLElement) {
 }
 
 function abortGeneration(body: HTMLElement) {
-  if (activeXHR) {
-    try {
-      activeXHR.abort();
-    } catch (_e) {
-      /* ignore */
-    }
-    activeXHR = null;
-  }
   if (activeCodexProcess) {
     try {
       activeCodexProcess.kill();
@@ -1292,11 +1272,11 @@ function addAssistantMessage(
   itemId: number,
   content: string,
 ) {
-  chatStore.addMessage(
-    itemId,
-    { role: "assistant", content, model: getModelLabel() },
-    AGENT_CONTEXT_MODE,
-  );
+  chatStore.addMessage(itemId, {
+    role: "assistant",
+    content,
+    model: getModelLabel(),
+  });
   renderMessages(body, itemId);
   syncLayoutState(body, itemId);
 }
@@ -1306,11 +1286,10 @@ function addUserCommandMessage(
   itemId: number,
   commandLabel: string,
 ) {
-  chatStore.addMessage(
-    itemId,
-    { role: "user", content: commandLabel },
-    AGENT_CONTEXT_MODE,
-  );
+  chatStore.addMessage(itemId, {
+    role: "user",
+    content: commandLabel,
+  });
   renderMessages(body, itemId);
   syncLayoutState(body, itemId);
 }
@@ -1371,14 +1350,10 @@ async function submitQuestion(body: HTMLElement) {
     ? `${contextBlocks.join("\n\n")}\n\n${question}`
     : question;
 
-  chatStore.addMessage(
-    itemId,
-    {
-      role: "user",
-      content: displayContent,
-    },
-    AGENT_CONTEXT_MODE,
-  );
+  chatStore.addMessage(itemId, {
+    role: "user",
+    content: displayContent,
+  });
   input.value = "";
   addon.data.chat.referenceText = "";
   addon.data.chat.responseQuote = "";
@@ -1392,7 +1367,7 @@ async function submitQuestion(body: HTMLElement) {
     reasoning: "",
     model: getModelLabel(),
   };
-  chatStore.addMessage(itemId, assistant, AGENT_CONTEXT_MODE);
+  chatStore.addMessage(itemId, assistant);
   renderMessages(body, itemId);
   setGenerating(body, true);
   showAgentStatus(body, "Preparing Codex...");
@@ -1502,7 +1477,7 @@ async function submitQuestion(body: HTMLElement) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
     }
   }
-  chatStore.touchSession(itemId, AGENT_CONTEXT_MODE);
+  chatStore.touchSession(itemId);
   setGenerating(body, false);
   if (isActivePane()) renderMessages(body, itemId);
   maybeGenerateSessionTitleLocal(body, itemId, question);

@@ -1,31 +1,11 @@
-import type {
-  ChatMessage,
-  ChatSession,
-  ContextMode,
-} from "../addon";
+import type { ChatMessage, ChatSession } from "../addon";
 import { estimateTokens } from "../utils/token-estimate";
-
-type PersistedSession = {
-  sessionId: string;
-  codexThreadId?: string;
-  title: string;
-  contextMode: ContextMode;
-  messages: ChatMessage[];
-  summaryText?: string;
-  summaryUpToIndex?: number;
-  summaryUpdatedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-};
-
-type PersistedItemStateV2 = {
-  version: 2;
-  itemId?: number;
-  itemKey: string;
-  paperTitle: string;
-  activeSessionId?: string;
-  sessions: PersistedSession[];
-};
+import {
+  isValidPersistedItem,
+  normalizePersistedItem,
+  serializeItemState,
+  type PersistedItemStateV2,
+} from "./chat-persist";
 
 type ItemSessionState = {
   itemId: number;
@@ -67,16 +47,9 @@ class ChatStore {
       for (const filePath of children) {
         if (!String(filePath).endsWith(".json")) continue;
         const raw = await ioUtils.readUTF8(filePath);
-        const parsed = JSON.parse(raw) as Partial<PersistedItemStateV2>;
-        if (
-          !parsed ||
-          parsed.version !== 2 ||
-          !parsed.itemKey ||
-          !Array.isArray(parsed.sessions)
-        ) {
-          continue;
-        }
-        const migrated = this.normalizePersisted(parsed);
+        const parsed = JSON.parse(raw);
+        if (!isValidPersistedItem(parsed)) continue;
+        const migrated = normalizePersistedItem(parsed);
         this.diskByItemKey.set(migrated.itemKey, migrated);
         if (migrated.itemId && migrated.itemId > 0) {
           this.diskItemIdToKey.set(migrated.itemId, migrated.itemKey);
@@ -127,11 +100,7 @@ class ChatStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  createSession(
-    itemId: number,
-    title?: string,
-    contextMode: ContextMode = "agent",
-  ): ChatSession | null {
+  createSession(itemId: number, title?: string): ChatSession | null {
     if (itemId <= 0) return null;
     const state = this.getOrCreateItemState(itemId);
     const now = Date.now();
@@ -143,10 +112,6 @@ class ChatStore {
       codexThreadId: "",
       title: title?.trim() || this.buildDefaultSessionTitle(index),
       messages: [],
-      summaryText: "",
-      summaryUpToIndex: 0,
-      summaryUpdatedAt: 0,
-      contextMode: this.normalizeContextMode(contextMode),
       createdAt: now,
       updatedAt: now,
     };
@@ -187,21 +152,15 @@ class ChatStore {
     return session ? session.messages : [];
   }
 
-  addMessage(
-    itemId: number,
-    message: ChatMessage,
-    contextMode: ContextMode = "agent",
-  ) {
+  addMessage(itemId: number, message: ChatMessage) {
     if (itemId <= 0) return;
     let session = this.getSession(itemId);
     if (!session) {
-      session = this.createSession(itemId, undefined, contextMode);
+      session = this.createSession(itemId);
       if (!session) return;
     }
     if (!message.timestamp) message.timestamp = Date.now();
     session.messages.push(message);
-    this.maybeAutoTitleSession(session, message);
-    session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.applyCompaction(session);
     this.markDirty(itemId);
@@ -211,9 +170,6 @@ class ChatStore {
     const session = this.getSession(itemId);
     if (!session) return;
     session.messages = [];
-    session.summaryText = "";
-    session.summaryUpToIndex = 0;
-    session.summaryUpdatedAt = Date.now();
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -250,9 +206,6 @@ class ChatStore {
     if (!session) return;
     if (msgIndex < 0 || msgIndex >= session.messages.length) return;
     session.messages.splice(msgIndex, 1);
-    session.summaryText = "";
-    session.summaryUpToIndex = 0;
-    session.summaryUpdatedAt = Date.now();
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -262,36 +215,13 @@ class ChatStore {
     if (!session) return;
     if (fromIndex < 0 || fromIndex >= session.messages.length) return;
     session.messages.splice(fromIndex);
-    session.summaryText = "";
-    session.summaryUpToIndex = 0;
-    session.summaryUpdatedAt = Date.now();
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
 
-  updateSessionSummary(itemId: number, summaryText: string, upToIndex: number) {
+  touchSession(itemId: number) {
     const session = this.getSession(itemId);
     if (!session) return;
-    session.summaryText = summaryText;
-    session.summaryUpToIndex = Math.max(0, upToIndex);
-    session.summaryUpdatedAt = Date.now();
-    session.updatedAt = Date.now();
-    this.markDirty(itemId);
-  }
-
-  updateContextMode(itemId: number, contextMode: ContextMode) {
-    const session = this.getSession(itemId);
-    if (!session) return;
-    session.contextMode = this.normalizeContextMode(contextMode);
-    session.updatedAt = Date.now();
-    this.markDirty(itemId);
-  }
-
-  touchSession(itemId: number, contextMode?: ContextMode) {
-    const session = this.getSession(itemId);
-    if (!session) return;
-    if (contextMode)
-      session.contextMode = this.normalizeContextMode(contextMode);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -341,10 +271,6 @@ class ChatStore {
         codexThreadId: s.codexThreadId || "",
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
-        summaryText: s.summaryText || "",
-        summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
-        summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
-        contextMode: this.normalizeContextMode(s.contextMode),
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
       })),
@@ -366,32 +292,6 @@ class ChatStore {
     };
     this.cacheByItemId.set(itemId, state);
     return state;
-  }
-
-  private normalizePersisted(
-    parsed: Partial<PersistedItemStateV2>,
-  ): PersistedItemStateV2 {
-    return {
-      version: 2,
-      itemId: Number(parsed.itemId) || undefined,
-      itemKey: String(parsed.itemKey || ""),
-      paperTitle: String(parsed.paperTitle || "Untitled"),
-      activeSessionId: String(
-        parsed.activeSessionId || parsed.sessions?.[0]?.sessionId || "",
-      ),
-      sessions: (parsed.sessions || []).map((s: any) => ({
-        sessionId: String(s?.sessionId || this.newSessionId()),
-        codexThreadId: String(s?.codexThreadId || ""),
-        title: String(s?.title || "Chat"),
-        contextMode: this.normalizeContextMode(s?.contextMode),
-        messages: Array.isArray(s?.messages) ? s.messages : [],
-        summaryText: String(s?.summaryText || ""),
-        summaryUpToIndex: Math.max(0, Number(s?.summaryUpToIndex) || 0),
-        summaryUpdatedAt: Number(s?.summaryUpdatedAt) || 0,
-        createdAt: Number(s?.createdAt) || Date.now(),
-        updatedAt: Number(s?.updatedAt) || Date.now(),
-      })),
-    };
   }
 
   private applyCompaction(session: ChatSession) {
@@ -476,25 +376,7 @@ class ChatStore {
       for (const itemId of pending) {
         const state = this.cacheByItemId.get(itemId);
         if (!state) continue;
-        const persisted: PersistedItemStateV2 = {
-          version: 2,
-          itemId: state.itemId,
-          itemKey: state.itemKey,
-          paperTitle: state.paperTitle,
-          activeSessionId: state.activeSessionId || undefined,
-          sessions: state.sessions.map((s) => ({
-            sessionId: s.sessionId,
-            codexThreadId: s.codexThreadId || undefined,
-            title: s.title,
-            contextMode: s.contextMode,
-            messages: s.messages.map((m) => ({ ...m })),
-            summaryText: s.summaryText || "",
-            summaryUpToIndex: Math.max(0, Number(s.summaryUpToIndex) || 0),
-            summaryUpdatedAt: Number(s.summaryUpdatedAt) || 0,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-          })),
-        };
+        const persisted = serializeItemState(state);
         this.diskByItemKey.set(persisted.itemKey, persisted);
         if (persisted.itemId && persisted.itemId > 0) {
           this.diskItemIdToKey.set(persisted.itemId, persisted.itemKey);
@@ -524,10 +406,6 @@ class ChatStore {
     return (
       /^Chat\s+\d+\s+·\s+\d{2}:\d{2}$/.test(title) || /^Chat \d+$/.test(title)
     );
-  }
-
-  private maybeAutoTitleSession(_session: ChatSession, _message: ChatMessage) {
-    // Title generation is now handled asynchronously via LLM after the first assistant reply.
   }
 
   needsAutoTitle(itemId: number): boolean {
@@ -570,14 +448,6 @@ class ChatStore {
     } catch (_e) {
       return { itemKey: String(itemId), title: `Item ${itemId}` };
     }
-  }
-
-  private normalizeContextMode(raw: any): ContextMode {
-    if (raw === "agent") return "agent";
-    // Backward compatibility for old chat/current-page sessions.
-    if (raw === "currentPage" || raw === "none" || raw === "fullPdf")
-      return "agent";
-    return "agent";
   }
 
   private getStorageDir(): string {

@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"thread_phase0_aaaa1111"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"rg -n \"attention\" AAAA1111/text.txt","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"rg -n \"attention\" AAAA1111/text.txt","aggregated_output":"12:The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"AAAA1111 studies sequence transduction with self-attention, avoiding recurrence."}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"The core idea is scaled dot-product attention with multi-head projections."}}
+{"type":"turn.completed","usage":{"input_tokens":51234,"cached_input_tokens":1200,"output_tokens":256,"reasoning_output_tokens":80}}

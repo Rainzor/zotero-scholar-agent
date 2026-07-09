@@ -9,7 +9,7 @@ The single, persistent, plugin-owned git directory (at `~/papers`) that holds on
 _Avoid_: workspace, scratch dir, project folder
 
 **Paper Directory**:
-The per-paper subdirectory `~/papers/{itemKey}/` holding that paper's three files: `text.txt`, `conversation.md`, `memory.md`.
+The per-paper subdirectory `~/papers/{itemKey}/` holding that paper's `text.txt`, `memory.md`, and `conversations/` directory.
 _Avoid_: paper folder, item folder
 
 **Conversation Log** (`conversations/{sessionId}.md`):
@@ -36,9 +36,9 @@ _Avoid_: current item, active paper, selected item
 The contents of the Knowledge Vault on disk — NOT any automatic learning by Codex. Codex has no background cross-session learning; it only reads/searches/updates the Vault when a turn instructs it to. Codex is the engine; the Vault is the memory.
 _Avoid_: Codex memory, learned knowledge, long-term memory (as if automatic)
 
-**Citekey**:
-The BibTeX key (e.g. `vaswani_attention_2023`) used to name a paper's files in the Vault. Distinct from a Zotero item key (e.g. `PXW99EKT`), which is Zotero's internal identifier.
-_Avoid_: key, id (unqualified)
+**Item Key**:
+The Zotero item key (e.g. `PXW99EKT`) used to name each paper directory in the Vault. Stable within a library; not a BibTeX citekey.
+_Avoid_: citekey, key, id (unqualified)
 
 **Codex** (as used here):
 The external OpenAI `codex` CLI, driven headlessly by the plugin, operating with `--cd {vault}`. Assumed already installed and authenticated on the user's machine.
@@ -52,7 +52,7 @@ _Avoid_: the agent, the model, the LLM
 - Transport: **`codex exec --cd ~/papers --json` per user turn**, spawned via Mozilla `Subprocess`, stdout parsed as JSONL incrementally. The official Node/Python SDKs are unavailable inside Zotero's Gecko (non-Node) runtime.
 - Continuity: **one Codex session per sidebar chat thread**, resumed by explicit `thread_id` (captured from the `thread.started` event); `chat-store.ts` remains the UI source of truth.
 - `~/papers/{itemKey}/text.txt` is written **deterministically by the plugin** on paper open (reusing `page-cache.ts`/`pdf-parser.ts`), not by Codex.
-- **Three separated memory layers** (do not conflate): ① Codex Session (short-term reasoning, disposable), ② Conversation Log `conversation.md` (episodic, human-only, appended every turn, not fed to Codex), ③ Memory Note `memory.md` (semantic, Codex reads+writes, powers cross-paper retrieval).
+- **Three separated memory layers** (do not conflate): ① Codex Session (short-term reasoning, disposable), ② Conversation Log `conversations/{sessionId}.md` (episodic, human-only, appended every turn, not fed to Codex), ③ Memory Note `memory.md` (semantic, Codex reads+writes, powers cross-paper retrieval).
 - **Memory Note write trigger (RATIFIED):** Codex updates `memory.md` agentically per `AGENTS.md` rules — only on materially-new learning, rewrite/dedupe rather than blind-append. The plugin auto-commits the Vault to git after each turn, so every memory change is a reviewable, revertible diff.
 - Vault layout:
 
@@ -60,6 +60,7 @@ _Avoid_: the agent, the model, the LLM
 ~/papers/
 ├── AGENTS.md              # memory discipline (Codex auto-reads)
 ├── README.md              # human index: title/author/year → link to {itemKey}/
+├── .logs/                 # plugin diagnostics (gitignored or local)
 └── {itemKey}/
     ├── text.txt           # extracted PDF text (plugin-generated)
     ├── conversations/     # ② episodic logs, one file per session (human-facing)
@@ -69,7 +70,7 @@ _Avoid_: the agent, the model, the LLM
 
 ## Open decisions
 
-- **README maintenance** (minor): who writes/updates the root `README.md` mapping (plugin on paper-add vs Codex). Leaning: plugin writes it deterministically since it has the title/author/year metadata.
+- **README maintenance** (minor): who writes/updates the root `README.md` mapping (plugin on paper-add vs Codex). Leaning: plugin writes it deterministically since it has the title/author/year metadata. *(Current implementation: plugin `updateReadme()`.)*
 - **memory.md schema** (assumed, not objected): default sections (TL;DR / Key contributions / Method / Results / Understanding / Cross-references) that Codex may extend per paper type; cross-paper links use relative links (`../{otherKey}/memory.md`) to form a navigable knowledge graph.
 
 ## Phase 1 decisions

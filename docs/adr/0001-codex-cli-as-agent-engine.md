@@ -10,7 +10,20 @@ The plugin's agent is currently a self-built, single-paper RAG pipeline (`agent-
 
 ## Decision
 
-Replace the custom RAG pipeline with the external OpenAI **Codex CLI** as the reasoning engine, driven headlessly from the sidebar via `codex exec --cd ~/papers --json` (spawned through Mozilla `Subprocess`, stdout parsed as JSONL). Durable memory lives in a dedicated, plugin-owned git **Knowledge Vault** at `~/papers` (`text/`, `notes/`, `index.md`, `AGENTS.md`) — Codex is the engine, the Vault is the memory. Source PDFs stay in Zotero `storage/`; Codex gets `workspace-write` only on the Vault.
+Replace the custom RAG pipeline with the external OpenAI **Codex CLI** as the reasoning engine, driven headlessly from the sidebar via `codex exec --cd ~/papers --json` (spawned through Mozilla `Subprocess`, stdout parsed as JSONL). Durable memory lives in a dedicated, plugin-owned git **Knowledge Vault** at `~/papers`:
+
+```
+~/papers/
+├── AGENTS.md
+├── README.md
+└── {itemKey}/          # Zotero item key, e.g. PXW99EKT
+    ├── text.txt        # plugin-extracted PDF text (read-only for Codex)
+    ├── conversations/  # human transcript logs, one file per sidebar session
+    │   └── {sessionId}.md
+    └── memory.md       # durable semantic memory (Codex read/write)
+```
+
+Codex is the engine; the Vault is the memory. Source PDFs stay in Zotero `storage/`; Codex gets `workspace-write` only on the Vault.
 
 ## Considered options
 

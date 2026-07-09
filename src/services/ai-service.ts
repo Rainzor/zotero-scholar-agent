@@ -1,15 +1,10 @@
 import { getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
 import type { ProviderKey, ApiFormat, AuthType } from "../addon";
-import { getImageMimeType, stripDataUrlPrefix } from "../utils/image-utils";
-
-type ContentPart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail?: string } };
 
 type ChatMessage = {
   role: "user" | "assistant" | "system";
-  content: string | ContentPart[];
+  content: string;
 };
 
 type StreamState = {
@@ -42,23 +37,6 @@ type ServiceConfig = {
 };
 
 export class AIService {
-  static buildMultimodalUserContent(
-    text: string,
-    images: string[],
-  ): string | ContentPart[] {
-    const imageUrls = (images || [])
-      .map((v) => String(v || "").trim())
-      .filter(Boolean);
-    if (imageUrls.length === 0) return text;
-    return [
-      { type: "text", text: text || "" },
-      ...imageUrls.map<ContentPart>((url) => ({
-        type: "image_url",
-        image_url: { url, detail: "high" },
-      })),
-    ];
-  }
-
   static getConfig(): ServiceConfig {
     const svc = getActiveService();
     const preset = getPreset(svc?.provider || "custom");
@@ -155,12 +133,10 @@ export class AIService {
     if (cfg.apiFormat === "anthropic") {
       const systemParts = messages.filter((m) => m.role === "system");
       const nonSystem = messages.filter((m) => m.role !== "system");
-      const systemText = systemParts
-        .map((m) => AIService.toPlainText(m.content))
-        .join("\n");
+      const systemText = systemParts.map((m) => m.content || "").join("\n");
       const anthropicMessages = nonSystem.map((m) => ({
         role: m.role,
-        content: AIService.toAnthropicContent(m.content),
+        content: [{ type: "text", text: m.content || "" }],
       }));
       return JSON.stringify({
         model,
@@ -183,10 +159,13 @@ export class AIService {
           ? { effort: "none" }
           : { effort: "medium", summary: "auto" }
         : undefined;
-      const input = messages.map((m) => ({
-        role: m.role,
-        content: AIService.toResponsesContent(m.role, m.content),
-      }));
+      const input = messages.map((m) => {
+        const textType = m.role === "assistant" ? "output_text" : "input_text";
+        return {
+          role: m.role,
+          content: [{ type: textType, text: m.content || "" }],
+        };
+      });
       return JSON.stringify({
         model,
         input,
@@ -207,60 +186,6 @@ export class AIService {
         ? { thinking: { type: "disabled" } }
         : {}),
     });
-  }
-
-  private static toPlainText(content: string | ContentPart[]): string {
-    if (typeof content === "string") return content;
-    return content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text || "")
-      .join("\n");
-  }
-
-  private static toAnthropicContent(content: string | ContentPart[]): any[] {
-    if (typeof content === "string") {
-      return [{ type: "text", text: content }];
-    }
-    const blocks: any[] = [];
-    for (const part of content) {
-      if (part.type === "text") {
-        blocks.push({ type: "text", text: part.text || "" });
-        continue;
-      }
-      const url = part.image_url?.url || "";
-      if (!url.startsWith("data:image/")) continue;
-      blocks.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: getImageMimeType(url),
-          data: stripDataUrlPrefix(url),
-        },
-      });
-    }
-    return blocks.length ? blocks : [{ type: "text", text: "" }];
-  }
-
-  private static toResponsesContent(
-    role: "user" | "assistant" | "system",
-    content: string | ContentPart[],
-  ): any[] {
-    const textType = role === "assistant" ? "output_text" : "input_text";
-    if (typeof content === "string") {
-      return [{ type: textType, text: content }];
-    }
-    const parts: any[] = [];
-    for (const part of content) {
-      if (part.type === "text") {
-        parts.push({ type: textType, text: part.text || "" });
-      } else {
-        const url = part.image_url?.url || "";
-        if (!url) continue;
-        if (role === "assistant") continue;
-        parts.push({ type: "input_image", image_url: url });
-      }
-    }
-    return parts.length ? parts : [{ type: textType, text: "" }];
   }
 
   private static parseChatCompletionsSSE(

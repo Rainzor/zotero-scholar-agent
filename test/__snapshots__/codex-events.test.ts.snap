@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`applyCodexEvent — phase0-shaped JSONL fixture > replays the recorded turn into the expected stream state 1`] = `
+{
+  "content": "AAAA1111 studies sequence transduction with self-attention, avoiding recurrence.
+
+The core idea is scaled dot-product attention with multi-head projections.",
+  "latestStatus": "Codex turn completed.",
+  "reasoning": "",
+  "threadId": "thread_phase0_aaaa1111",
+  "usage": {
+    "cachedInputTokens": 1200,
+    "completionTokens": 256,
+    "promptTokens": 51234,
+    "reasoningTokens": 80,
+    "totalTokens": 51490,
+  },
+}
+`;

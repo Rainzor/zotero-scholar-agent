@@ -3,7 +3,6 @@ import { createZToolkit } from "./utils/ztoolkit";
 import hooks from "./hooks";
 import api from "./api";
 
-export type ContextMode = "agent" | "none" | "currentPage";
 export type TokenUsage = {
   promptTokens?: number;
   completionTokens?: number;
@@ -32,10 +31,6 @@ export type ChatSession = {
   codexThreadId?: string;
   title: string;
   messages: ChatMessage[];
-  summaryText?: string;
-  summaryUpToIndex?: number;
-  summaryUpdatedAt?: number;
-  contextMode: ContextMode;
   createdAt: number;
   updatedAt: number;
 };

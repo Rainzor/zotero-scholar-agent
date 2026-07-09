@@ -1,0 +1,188 @@
+import type { StructuredPage } from "../pdf-parser";
+
+export type PaperVaultMeta = {
+  itemId: number;
+  itemKey: string;
+  title: string;
+  creators?: string;
+  year?: string;
+};
+
+/** Sanitize a vault path segment (itemKey / sessionId). */
+export function safePathSegment(input: string): string {
+  return String(input || "unknown")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/** Join path parts with `/`, collapsing duplicate separators. */
+export function joinPathParts(...parts: string[]): string {
+  return parts
+    .filter(Boolean)
+    .join("/")
+    .replace(/\/+/g, "/");
+}
+
+/**
+ * Expand `~` / `~/...` using an explicit home directory.
+ * Returns "" for empty input or when `~/` is used without a home.
+ */
+export function normalizeVaultPath(path: string, homeDir = ""): string {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return "";
+  if (trimmed === "~") return homeDir;
+  if (trimmed.startsWith("~/")) {
+    return homeDir ? joinPathParts(homeDir, trimmed.slice(2)) : "";
+  }
+  return trimmed;
+}
+
+export function escapeTable(value: string): string {
+  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+export function unescapeTable(value: string): string {
+  return String(value || "").replace(/\\\|/g, "|").trim();
+}
+
+export function replaceMarkedBlock(
+  text: string,
+  start: string,
+  end: string,
+  replacement: string,
+): string {
+  const startIndex = text.indexOf(start);
+  const endIndex = text.indexOf(end);
+  if (startIndex >= 0 && endIndex > startIndex) {
+    return `${text.slice(0, startIndex)}${replacement}${text.slice(endIndex + end.length)}`;
+  }
+  return `${text.trimEnd()}\n\n${replacement}`;
+}
+
+export function initialMemoryMarkdown(meta: PaperVaultMeta): string {
+  const headingMeta = [meta.creators, meta.year].filter(Boolean).join(", ");
+  return [
+    `# ${meta.title || meta.itemKey}${headingMeta ? ` (${headingMeta})` : ""}`,
+    "",
+    `> itemKey: ${meta.itemKey}`,
+    "",
+    "## TL;DR",
+    "",
+    "## Key contributions",
+    "",
+    "## Method",
+    "",
+    "## Results",
+    "",
+    "## My understanding / open questions",
+    "",
+    "## Cross-references",
+    "",
+  ].join("\n");
+}
+
+export function formatPagesForVault(pages: StructuredPage[]): string {
+  return (pages || [])
+    .filter((page) => page.pageNumber > 0 && String(page.plainText || "").trim())
+    .map(
+      (page) =>
+        `[page ${page.pageNumber}]\n${String(page.plainText || "").trim()}`,
+    )
+    .join("\n\n");
+}
+
+const README_ROW_PATTERN =
+  /^\| ([^|]+) \| ([^|]*) \| ([^|]*) \| \[([^\]]+)\]\(\.\/([^/]+)\/memory\.md\) \|$/gm;
+
+/** Parse paper rows from a Vault README.md table. */
+export function parseReadmePaperRows(readme: string): PaperVaultMeta[] {
+  const entries: PaperVaultMeta[] = [];
+  let match: RegExpExecArray | null;
+  const pattern = new RegExp(README_ROW_PATTERN.source, "gm");
+  while ((match = pattern.exec(readme))) {
+    entries.push({
+      itemId: 0,
+      itemKey: match[5],
+      title: unescapeTable(match[1]),
+      creators: unescapeTable(match[2]),
+      year: unescapeTable(match[3]),
+    });
+  }
+  return entries;
+}
+
+export function buildReadmeTable(entries: PaperVaultMeta[]): string {
+  const markerStart = "<!-- zotero-agent-papers:start -->";
+  const markerEnd = "<!-- zotero-agent-papers:end -->";
+  return [
+    markerStart,
+    "| Title | Authors | Year | Memory |",
+    "|-------|---------|------|--------|",
+    ...entries.map(
+      (entry) =>
+        `| ${escapeTable(entry.title)} | ${escapeTable(entry.creators || "")} | ${escapeTable(entry.year || "")} | [${entry.itemKey}](./${entry.itemKey}/memory.md) |`,
+    ),
+    markerEnd,
+    "",
+  ].join("\n");
+}
+
+export function mergeReadmeEntries(
+  existingReadme: string,
+  current: PaperVaultMeta,
+): PaperVaultMeta[] {
+  const entries = new Map<string, PaperVaultMeta>();
+  for (const row of parseReadmePaperRows(existingReadme)) {
+    entries.set(row.itemKey, row);
+  }
+  entries.set(current.itemKey, current);
+  return Array.from(entries.values()).sort((a, b) =>
+    String(a.title || a.itemKey).localeCompare(String(b.title || b.itemKey)),
+  );
+}
+
+export function buildConversationTurnMarkdown(options: {
+  userMessage: string;
+  assistantMessage: string;
+  timestamp: string;
+  codexThreadId?: string;
+}): string {
+  return [
+    `## ${options.timestamp}${options.codexThreadId ? ` · ${options.codexThreadId}` : ""}`,
+    "",
+    `**You:**`,
+    "",
+    options.userMessage.trim() || "(empty)",
+    "",
+    `**Codex:**`,
+    "",
+    options.assistantMessage.trim() || "(empty)",
+    "",
+  ].join("\n");
+}
+
+export function appendMarkdownBlock(
+  existing: string,
+  block: string,
+): string {
+  const current = String(existing || "").trimEnd();
+  return current ? `${current}\n\n${block}` : block;
+}
+
+/** Build paper-relative vault paths from a vault root + itemKey. */
+export function buildPaperVaultPaths(vaultDir: string, itemKey: string) {
+  const paperDir = joinPathParts(vaultDir, safePathSegment(itemKey));
+  const conversationsDir = joinPathParts(paperDir, "conversations");
+  return {
+    vaultDir,
+    paperDir,
+    textPath: joinPathParts(paperDir, "text.txt"),
+    memoryPath: joinPathParts(paperDir, "memory.md"),
+    conversationsDir,
+    conversationPath: (sessionId: string) =>
+      joinPathParts(
+        conversationsDir,
+        `${safePathSegment(sessionId)}.md`,
+      ),
+  };
+}

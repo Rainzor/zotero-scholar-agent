@@ -9,7 +9,3 @@ zoteroagent-itemPaneSection-fullHeight =
     .tooltiptext = 全高度显示
 zoteroagent-chat-mode-analyze = 分析文献
 zoteroagent-chat-mode-chat = 对话提问
-zoteroagent-chat-context-none = 一般对话
-zoteroagent-chat-context-selectedText = 选中段落
-zoteroagent-chat-context-currentPage = 所在页文本
-zoteroagent-chat-context-fullPdf = 整篇PDF

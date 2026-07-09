@@ -1,4 +1,3 @@
-import type { ContextMode } from "./addon";
 import {
   showAgentPanel,
   syncReferenceCardDirect,
@@ -10,7 +9,7 @@ function refreshPanels() {
   updateSidebarPanels();
 }
 
-function setPrefillInput(text: string, _mode?: ContextMode) {
+function setPrefillInput(text: string) {
   addon.data.chat.prefillInput = text;
   showAgentPanel();
   updateSidebarPanels();
@@ -39,8 +38,8 @@ function listSessions(itemId: number) {
   return chatStore.listSessions(itemId);
 }
 
-function createSession(itemId: number, title?: string, mode?: ContextMode) {
-  return chatStore.createSession(itemId, title, mode || "agent");
+function createSession(itemId: number, title?: string) {
+  return chatStore.createSession(itemId, title);
 }
 
 function setActiveSession(itemId: number, sessionId: string) {

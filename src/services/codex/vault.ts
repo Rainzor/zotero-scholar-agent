@@ -1,21 +1,25 @@
-import type { ChatMessage } from "../../addon";
 import { getFullText } from "../../modules/pdf-context";
 import { getPref, setPref } from "../../utils/prefs";
 import { buildPageCacheData, loadPageCache, savePageCache } from "../page-cache";
-import {
-  getPdfDocumentFromReader,
-  parseAllPages,
-  type StructuredPage,
-} from "../pdf-parser";
+import { getPdfDocumentFromReader, parseAllPages } from "../pdf-parser";
 import { runLineProcess } from "./subprocess";
+import {
+  appendMarkdownBlock,
+  buildConversationTurnMarkdown,
+  buildPaperVaultPaths,
+  buildReadmeTable,
+  formatPagesForVault,
+  initialMemoryMarkdown,
+  joinPathParts,
+  mergeReadmeEntries,
+  normalizeVaultPath,
+  parseReadmePaperRows,
+  replaceMarkedBlock,
+  safePathSegment,
+  type PaperVaultMeta,
+} from "./vault-format";
 
-export type PaperVaultMeta = {
-  itemId: number;
-  itemKey: string;
-  title: string;
-  creators?: string;
-  year?: string;
-};
+export type { PaperVaultMeta } from "./vault-format";
 
 export type EnsurePaperVaultOptions = PaperVaultMeta & {
   pdfItemId: number;
@@ -70,25 +74,30 @@ export function getDefaultVaultPath(): string {
 }
 
 export function getConfiguredVaultPath(): string {
-  return normalizePath(String(getPref(CODEX_VAULT_PATH_PREF) || ""));
+  return normalizeVaultPath(
+    String(getPref(CODEX_VAULT_PATH_PREF) || ""),
+    getHomeDir(),
+  );
 }
 
 export function setConfiguredVaultPath(path: string) {
-  setPref(CODEX_VAULT_PATH_PREF, normalizePath(path));
+  setPref(
+    CODEX_VAULT_PATH_PREF,
+    normalizeVaultPath(path, getHomeDir()),
+  );
 }
 
 export async function getPaperVaultPaths(
   itemKey: string,
 ): Promise<PaperVaultPaths> {
   const vaultDir = await getVaultDir();
-  const paperDir = joinPath(vaultDir, safePathSegment(itemKey));
-  const conversationsDir = joinPath(paperDir, "conversations");
+  const paths = buildPaperVaultPaths(vaultDir, itemKey);
   return {
-    vaultDir,
-    paperDir,
-    textPath: joinPath(paperDir, "text.txt"),
-    memoryPath: joinPath(paperDir, "memory.md"),
-    conversationsDir,
+    vaultDir: paths.vaultDir,
+    paperDir: paths.paperDir,
+    textPath: paths.textPath,
+    memoryPath: paths.memoryPath,
+    conversationsDir: paths.conversationsDir,
   };
 }
 
@@ -118,18 +127,8 @@ export async function listVaultPapers(): Promise<PaperVaultMeta[]> {
   const entries = new Map<string, PaperVaultMeta>();
 
   const readme = await readTextIfExists(joinPath(vaultDir, "README.md"));
-  const rowPattern =
-    /^\| ([^|]+) \| ([^|]*) \| ([^|]*) \| \[([^\]]+)\]\(\.\/([^/]+)\/memory\.md\) \|$/gm;
-  let match: RegExpExecArray | null;
-  while ((match = rowPattern.exec(readme))) {
-    const itemKey = match[5];
-    entries.set(itemKey, {
-      itemId: 0,
-      itemKey,
-      title: unescapeTable(match[1]),
-      creators: unescapeTable(match[2]),
-      year: unescapeTable(match[3]),
-    });
+  for (const row of parseReadmePaperRows(readme)) {
+    entries.set(row.itemKey, row);
   }
 
   for (const key of await listPaperDirs(vaultDir)) {
@@ -201,7 +200,10 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.paperDir);
   await ensureDirectory(paths.conversationsDir);
   await writeIfMissing(joinPath(paths.vaultDir, "AGENTS.md"), ROOT_AGENTS_MD);
-  await writeIfMissing(joinPath(paths.paperDir, "memory.md"), initialMemory(options));
+  await writeIfMissing(
+    joinPath(paths.paperDir, "memory.md"),
+    initialMemoryMarkdown(options),
+  );
   await ensureGitRepo(paths.vaultDir);
   await ensureGitignore(paths.vaultDir);
 
@@ -234,21 +236,14 @@ export async function appendConversationTurn(options: {
     paths.conversationsDir,
     `${safePathSegment(options.sessionId)}.md`,
   );
-  const timestamp = new Date().toISOString();
-  const block = [
-    `## ${timestamp}${options.codexThreadId ? ` · ${options.codexThreadId}` : ""}`,
-    "",
-    `**You:**`,
-    "",
-    options.userMessage.trim() || "(empty)",
-    "",
-    `**Codex:**`,
-    "",
-    options.assistantMessage.trim() || "(empty)",
-    "",
-  ].join("\n");
-  const existing = (await readTextIfExists(filePath)).trimEnd();
-  await getIOUtils().writeUTF8(filePath, existing ? `${existing}\n\n${block}` : block);
+  const block = buildConversationTurnMarkdown({
+    userMessage: options.userMessage,
+    assistantMessage: options.assistantMessage,
+    timestamp: new Date().toISOString(),
+    codexThreadId: options.codexThreadId,
+  });
+  const existing = await readTextIfExists(filePath);
+  await getIOUtils().writeUTF8(filePath, appendMarkdownBlock(existing, block));
 }
 
 export async function appendVaultLog(
@@ -389,95 +384,18 @@ function getCandidateReaders(): any[] {
   return candidates;
 }
 
-function formatPagesForVault(pages: StructuredPage[]): string {
-  return (pages || [])
-    .filter((page) => page.pageNumber > 0 && String(page.plainText || "").trim())
-    .map((page) => `[page ${page.pageNumber}]\n${String(page.plainText || "").trim()}`)
-    .join("\n\n");
-}
-
 async function updateReadme(meta: PaperVaultMeta) {
   const vaultDir = await getVaultDir();
   const readmePath = joinPath(vaultDir, "README.md");
   const existing = await readTextIfExists(readmePath);
   const markerStart = "<!-- zotero-agent-papers:start -->";
   const markerEnd = "<!-- zotero-agent-papers:end -->";
-  const entries = await collectReadmeEntries(vaultDir, meta);
-  const table = [
-    markerStart,
-    "| Title | Authors | Year | Memory |",
-    "|-------|---------|------|--------|",
-    ...entries.map(
-      (entry) =>
-        `| ${escapeTable(entry.title)} | ${escapeTable(entry.creators || "")} | ${escapeTable(entry.year || "")} | [${entry.itemKey}](./${entry.itemKey}/memory.md) |`,
-    ),
-    markerEnd,
-    "",
-  ].join("\n");
+  const entries = mergeReadmeEntries(existing, meta);
+  const table = buildReadmeTable(entries);
   const base = existing.trim()
     ? replaceMarkedBlock(existing, markerStart, markerEnd, table)
     : `# My Papers\n\n${table}`;
   await getIOUtils().writeUTF8(readmePath, base.endsWith("\n") ? base : `${base}\n`);
-}
-
-async function collectReadmeEntries(
-  vaultDir: string,
-  current: PaperVaultMeta,
-): Promise<PaperVaultMeta[]> {
-  const entries = new Map<string, PaperVaultMeta>();
-  const existing = await readTextIfExists(joinPath(vaultDir, "README.md"));
-  const rowPattern = /^\| ([^|]+) \| ([^|]*) \| ([^|]*) \| \[([^\]]+)\]\(\.\/([^/]+)\/memory\.md\) \|$/gm;
-  let match: RegExpExecArray | null;
-  while ((match = rowPattern.exec(existing))) {
-    const itemKey = match[5];
-    entries.set(itemKey, {
-      itemId: 0,
-      itemKey,
-      title: unescapeTable(match[1]),
-      creators: unescapeTable(match[2]),
-      year: unescapeTable(match[3]),
-    });
-  }
-  entries.set(current.itemKey, current);
-  return Array.from(entries.values()).sort((a, b) =>
-    String(a.title || a.itemKey).localeCompare(String(b.title || b.itemKey)),
-  );
-}
-
-function replaceMarkedBlock(
-  text: string,
-  start: string,
-  end: string,
-  replacement: string,
-): string {
-  const startIndex = text.indexOf(start);
-  const endIndex = text.indexOf(end);
-  if (startIndex >= 0 && endIndex > startIndex) {
-    return `${text.slice(0, startIndex)}${replacement}${text.slice(endIndex + end.length)}`;
-  }
-  return `${text.trimEnd()}\n\n${replacement}`;
-}
-
-function initialMemory(meta: PaperVaultMeta): string {
-  const headingMeta = [meta.creators, meta.year].filter(Boolean).join(", ");
-  return [
-    `# ${meta.title || meta.itemKey}${headingMeta ? ` (${headingMeta})` : ""}`,
-    "",
-    `> itemKey: ${meta.itemKey}`,
-    "",
-    "## TL;DR",
-    "",
-    "## Key contributions",
-    "",
-    "## Method",
-    "",
-    "## Results",
-    "",
-    "## My understanding / open questions",
-    "",
-    "## Cross-references",
-    "",
-  ].join("\n");
 }
 
 async function ensureGitRepo(vaultDir: string) {
@@ -564,36 +482,8 @@ function getHomeDir(): string {
   return "";
 }
 
-function normalizePath(path: string): string {
-  const trimmed = String(path || "").trim();
-  if (!trimmed) return "";
-  if (trimmed === "~") return getHomeDir();
-  if (trimmed.startsWith("~/")) {
-    const home = getHomeDir();
-    return home ? joinPath(home, trimmed.slice(2)) : "";
-  }
-  return trimmed;
-}
-
 function joinPath(...parts: string[]): string {
   const pathUtils = (globalThis as any).PathUtils;
   if (pathUtils?.join) return pathUtils.join(...parts.filter(Boolean));
-  return parts
-    .filter(Boolean)
-    .join("/")
-    .replace(/\/+/g, "/");
-}
-
-function safePathSegment(input: string): string {
-  return String(input || "unknown")
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
-function escapeTable(value: string): string {
-  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, " ");
-}
-
-function unescapeTable(value: string): string {
-  return String(value || "").replace(/\\\|/g, "|").trim();
+  return joinPathParts(...parts);
 }
