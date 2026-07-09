@@ -7,6 +7,7 @@ import {
   appendMarkdownBlock,
   buildConversationTurnMarkdown,
   buildPaperVaultPaths,
+  buildPaperRecordProjection,
   buildReadmeTable,
   formatPagesForVault,
   initialMemoryMarkdown,
@@ -16,10 +17,12 @@ import {
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
+  type SemanticRelationship,
   type PaperVaultMeta,
 } from "./vault-format";
 
 export type { PaperVaultMeta } from "./vault-format";
+export type { SemanticRelationship } from "./vault-format";
 
 export type EnsurePaperVaultOptions = PaperVaultMeta & {
   pdfItemId: number;
@@ -33,6 +36,7 @@ export type PaperVaultPaths = {
   paperDir: string;
   textPath: string;
   memoryPath: string;
+  recordPath: string;
   conversationsDir: string;
 };
 
@@ -45,7 +49,8 @@ Zotero item key (for example \`PXW99EKT/\`) holds one paper.
 
 ## Files per paper
 - \`text.txt\` — extracted PDF full text. READ-ONLY, never edit.
-- \`memory.md\` — durable, distilled knowledge about the paper. READ before answering; UPDATE after.
+- \`memory.md\` — durable, human-readable Paper Knowledge Record. READ before answering; UPDATE after.
+- \`record.json\` — generated Structured Projection for scripts/search. DO NOT edit.
 - \`conversations/*.md\` — human transcript logs. DO NOT read or edit; the plugin manages them.
 
 ## The paper currently in focus is given to you in each prompt.
@@ -55,13 +60,19 @@ Zotero item key (for example \`PXW99EKT/\`) holds one paper.
 2. Use \`text.txt\` for detail the memory does not cover.
 3. For cross-paper questions, search across all \`*/memory.md\` files first, then \`*/text.txt\` if needed.
 
-## How to update memory (\`memory.md\`) — the ONLY durable memory
+## How to update memory (\`memory.md\`) — the Knowledge Surface
 - Update ONLY when you learned something materially new this turn.
 - REWRITE and DEDUPE. Never blindly append. Keep it tight and factual.
-- Keep these default sections, adapting only when the paper type needs it:
-  \`# Title (Authors, Year)\`, \`## TL;DR\`, \`## Key contributions\`, \`## Method\`,
-  \`## Results\`, \`## My understanding / open questions\`, \`## Cross-references\`.
-- Link related papers with RELATIVE links: \`[Paper title](../OTHERKEY/memory.md)\`.
+- Preserve this default structure: \`## Abstract\`, \`## Contribution\`, \`## Problem\`,
+  \`## Method\`, \`## Insight\`, \`## Results\`, \`## Takeaways\`,
+  \`## Reader Thinking\`, \`## Library Connections\`, \`## Evidence Pointers\`.
+- \`Abstract\` should be the paper's original or near-original abstract. Do not invent one.
+- Keep \`Insight\` paper-grounded. User ideas belong in \`Reader Thinking\`.
+- Under \`## Library Connections / ### Semantic Relationships\`, use this exact line format:
+  \`- [extends] [Paper title](../OTHERKEY/memory.md): rationale. Evidence: [page 4]\`
+- Allowed relationship types: \`cites\`, \`extends\`, \`contradicts\`, \`supports\`,
+  \`uses_same_method\`, \`uses_same_dataset\`, \`uses_same_metric\`,
+  \`solves_limitation_of\`, \`can_combine_with\`, \`inspired_question\`.
 - Never modify another paper's memory unless the user explicitly asks.
 `;
 
@@ -97,6 +108,7 @@ export async function getPaperVaultPaths(
     paperDir: paths.paperDir,
     textPath: paths.textPath,
     memoryPath: paths.memoryPath,
+    recordPath: paths.recordPath,
     conversationsDir: paths.conversationsDir,
   };
 }
@@ -110,6 +122,39 @@ export type VaultSearchHit = {
 export async function readPaperMemory(itemKey: string): Promise<string> {
   const paths = await getPaperVaultPaths(itemKey);
   return readTextIfExists(paths.memoryPath);
+}
+
+export async function readPaperCompactContext(
+  paper: PaperVaultMeta,
+): Promise<string> {
+  const memory = await readPaperMemory(paper.itemKey);
+  const trimmed = memory.trim();
+  if (!trimmed) {
+    return `# ${paper.title || paper.itemKey}\n\n> itemKey: ${paper.itemKey}\n\n(No memory.md content yet.)`;
+  }
+  return truncateForPrompt(trimmed, 12000);
+}
+
+export async function refreshPaperRecordProjection(
+  meta: PaperVaultMeta,
+): Promise<SemanticRelationship[]> {
+  const paths = await getPaperVaultPaths(meta.itemKey);
+  const memoryMarkdown = await readTextIfExists(paths.memoryPath);
+  const existing = await readExistingProjection(paths.recordPath);
+  const generatedAt = new Date().toISOString();
+  const projection = buildPaperRecordProjection({
+    meta,
+    memoryMarkdown,
+    generatedAt,
+  });
+  if (existing && projectionsEquivalent(existing, projection)) {
+    return existing.relationships || [];
+  }
+  await getIOUtils().writeUTF8(
+    paths.recordPath,
+    `${JSON.stringify(projection, null, 2)}\n`,
+  );
+  return projection.relationships;
 }
 
 export async function paperMemoryExists(itemKey: string): Promise<boolean> {
@@ -190,6 +235,79 @@ function basename(path: string): string {
   return parts.length ? parts[parts.length - 1] : "";
 }
 
+function truncateForPrompt(text: string, maxChars: number): string {
+  const clean = String(text || "").trim();
+  if (clean.length <= maxChars) return clean;
+  const head = clean.slice(0, Math.max(0, maxChars - 160)).trimEnd();
+  return `${head}\n\n[Truncated for prompt. Codex may read this paper's text.txt if the question needs more detail.]`;
+}
+
+async function readExistingProjection(path: string): Promise<{
+  itemId?: number;
+  itemKey?: string;
+  title?: string;
+  creators?: string;
+  year?: string;
+  relationships?: SemanticRelationship[];
+} | null> {
+  try {
+    const raw = await readTextIfExists(path);
+    if (!raw.trim()) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function projectionsEquivalent(
+  existing: {
+    itemId?: number;
+    itemKey?: string;
+    title?: string;
+    creators?: string;
+    year?: string;
+    relationships?: SemanticRelationship[];
+  },
+  next: {
+    itemId?: number;
+    itemKey?: string;
+    title?: string;
+    creators?: string;
+    year?: string;
+    relationships: SemanticRelationship[];
+  },
+): boolean {
+  return (
+    Number(existing.itemId || 0) === Number(next.itemId || 0) &&
+    String(existing.itemKey || "") === String(next.itemKey || "") &&
+    String(existing.title || "") === String(next.title || "") &&
+    String(existing.creators || "") === String(next.creators || "") &&
+    String(existing.year || "") === String(next.year || "") &&
+    stableRelationships(existing.relationships || []) ===
+      stableRelationships(next.relationships || [])
+  );
+}
+
+function stableRelationships(relationships: SemanticRelationship[]): string {
+  return JSON.stringify(
+    (relationships || [])
+      .map((rel) => ({
+        sourceItemKey: rel.sourceItemKey,
+        targetItemKey: rel.targetItemKey,
+        type: rel.type,
+        rationale: rel.rationale,
+        evidence: rel.evidence || "",
+      }))
+      .sort((a, b) =>
+        `${a.sourceItemKey}\u0000${a.targetItemKey}\u0000${a.type}\u0000${a.rationale}`.localeCompare(
+          `${b.sourceItemKey}\u0000${b.targetItemKey}\u0000${b.type}\u0000${b.rationale}`,
+        ),
+      ),
+  );
+}
+
 export async function ensurePaperVault(
   options: EnsurePaperVaultOptions,
 ): Promise<PaperVaultPaths> {
@@ -199,7 +317,7 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.vaultDir);
   await ensureDirectory(paths.paperDir);
   await ensureDirectory(paths.conversationsDir);
-  await writeIfMissing(joinPath(paths.vaultDir, "AGENTS.md"), ROOT_AGENTS_MD);
+  await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
     initialMemoryMarkdown(options),
@@ -220,6 +338,7 @@ export async function ensurePaperVault(
   }
 
   await updateReadme(options);
+  await refreshPaperRecordProjection(options);
   return paths;
 }
 
@@ -436,6 +555,20 @@ async function resolveGitBinary(): Promise<string> {
 async function writeIfMissing(path: string, content: string) {
   if (await safeExists(path)) return;
   await getIOUtils().writeUTF8(path, content);
+}
+
+async function ensureRootAgents(path: string) {
+  const existing = await readTextIfExists(path);
+  if (!existing.trim()) {
+    await getIOUtils().writeUTF8(path, ROOT_AGENTS_MD);
+    return;
+  }
+  if (
+    existing.startsWith("# Knowledge Vault — Operating Rules") &&
+    existing !== ROOT_AGENTS_MD
+  ) {
+    await getIOUtils().writeUTF8(path, ROOT_AGENTS_MD);
+  }
 }
 
 async function readTextIfExists(path: string): Promise<string> {

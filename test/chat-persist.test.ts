@@ -18,9 +18,9 @@ describe("isValidPersistedItem", () => {
 
   it("rejects legacy or incomplete blobs", () => {
     expect(isValidPersistedItem(null)).toBe(false);
-    expect(isValidPersistedItem({ version: 1, itemKey: "x", sessions: [] })).toBe(
-      false,
-    );
+    expect(
+      isValidPersistedItem({ version: 1, itemKey: "x", sessions: [] }),
+    ).toBe(false);
     expect(isValidPersistedItem({ version: 2, sessions: [] })).toBe(false);
   });
 });
@@ -41,6 +41,11 @@ describe("normalizePersistedItem", () => {
             contextMode: "currentPage" as any,
             summaryText: "old summary",
             summaryUpToIndex: 3,
+            contextDigest: "# Context Digest\n\n## Coverage",
+            contextDigestUpToMessageIndex: 4,
+            contextDigestUpdatedAt: 12345,
+            contextDigestTokenEstimate: 12,
+            contextDigestSource: "codex-default",
             messages: [{ role: "user", content: "hi" }],
             createdAt: 100,
             updatedAt: 200,
@@ -60,6 +65,11 @@ describe("normalizePersistedItem", () => {
         {
           sessionId: "chat-1",
           codexThreadId: "",
+          contextDigest: "# Context Digest\n\n## Coverage",
+          contextDigestUpToMessageIndex: 4,
+          contextDigestUpdatedAt: 12345,
+          contextDigestTokenEstimate: 12,
+          contextDigestSource: "codex-default",
           title: "Chat 1",
           contextMode: "agent",
           messages: [{ role: "user", content: "hi" }],
@@ -97,8 +107,28 @@ describe("serializeItemState", () => {
         {
           sessionId: "s1",
           codexThreadId: "thread_x",
+          contextDigest: "# Context Digest\n\n## Coverage",
+          contextDigestUpToMessageIndex: 0,
+          contextDigestUpdatedAt: 123,
+          contextDigestTokenEstimate: 8,
+          contextDigestSource: "deterministic",
           title: "Main",
-          messages: [{ role: "assistant", content: "ok" }],
+          messages: [
+            {
+              role: "assistant",
+              content: "ok",
+              contextPapers: [{ itemKey: "P2", title: "Paper 2" }],
+              relationshipUpdates: [
+                {
+                  sourceItemKey: "KEY7",
+                  targetItemKey: "P2",
+                  type: "extends",
+                  rationale: "builds on the same problem framing.",
+                  updatedAt: "2026-07-09T00:00:00.000Z",
+                },
+              ],
+            },
+          ],
           createdAt: 1,
           updatedAt: 2,
         },
@@ -106,10 +136,31 @@ describe("serializeItemState", () => {
     });
     expect(serialized.sessions[0].contextMode).toBe("agent");
     expect(serialized.sessions[0].codexThreadId).toBe("thread_x");
+    expect(serialized.sessions[0].contextDigest).toContain("# Context Digest");
 
     const again = normalizePersistedItem(serialized, { now: 3 });
+    expect(again.sessions[0]).toMatchObject({
+      contextDigest: "# Context Digest\n\n## Coverage",
+      contextDigestUpToMessageIndex: 0,
+      contextDigestUpdatedAt: 123,
+      contextDigestTokenEstimate: 8,
+      contextDigestSource: "deterministic",
+    });
     expect(again.sessions[0].messages).toEqual([
-      { role: "assistant", content: "ok" },
+      {
+        role: "assistant",
+        content: "ok",
+        contextPapers: [{ itemKey: "P2", title: "Paper 2" }],
+        relationshipUpdates: [
+          {
+            sourceItemKey: "KEY7",
+            targetItemKey: "P2",
+            type: "extends",
+            rationale: "builds on the same problem framing.",
+            updatedAt: "2026-07-09T00:00:00.000Z",
+          },
+        ],
+      },
     ]);
   });
 });

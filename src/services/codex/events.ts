@@ -1,8 +1,20 @@
 export type CodexUsage = {
   input_tokens?: number;
+  inputTokens?: number;
+  prompt_tokens?: number;
+  promptTokens?: number;
   cached_input_tokens?: number;
+  cachedInputTokens?: number;
   output_tokens?: number;
+  outputTokens?: number;
+  completion_tokens?: number;
+  completionTokens?: number;
   reasoning_output_tokens?: number;
+  reasoningOutputTokens?: number;
+  reasoning_tokens?: number;
+  reasoningTokens?: number;
+  total_tokens?: number;
+  totalTokens?: number;
 };
 
 export type CodexCommandItem = {
@@ -46,6 +58,11 @@ export type CodexStreamState = {
     totalTokens?: number;
     reasoningTokens?: number;
     cachedInputTokens?: number;
+    contextWindowTokens?: number;
+    effectiveContextWindowTokens?: number;
+    contextUsedPercent?: number;
+    contextSource?: "codex-config" | "codex-catalog" | "manual" | "unknown";
+    modelSlug?: string;
   };
   latestStatus?: string;
 };
@@ -152,24 +169,51 @@ function appendMessageText(existing: string, next: string): string {
 
 function mapUsage(usage?: CodexUsage): CodexStreamState["usage"] | undefined {
   if (!usage) return undefined;
-  const input = Number(usage.input_tokens);
-  const cached = Number(usage.cached_input_tokens);
-  const output = Number(usage.output_tokens);
-  const reasoning = Number(usage.reasoning_output_tokens);
-  const promptTokens = Number.isFinite(input) ? input : undefined;
-  const completionTokens = Number.isFinite(output) ? output : undefined;
+  const promptTokens = firstFiniteNumber(
+    usage.input_tokens,
+    usage.inputTokens,
+    usage.prompt_tokens,
+    usage.promptTokens,
+  );
+  const cached = firstFiniteNumber(
+    usage.cached_input_tokens,
+    usage.cachedInputTokens,
+  );
+  const completionTokens = firstFiniteNumber(
+    usage.output_tokens,
+    usage.outputTokens,
+    usage.completion_tokens,
+    usage.completionTokens,
+  );
+  const reasoning = firstFiniteNumber(
+    usage.reasoning_output_tokens,
+    usage.reasoningOutputTokens,
+    usage.reasoning_tokens,
+    usage.reasoningTokens,
+  );
+  const total = firstFiniteNumber(usage.total_tokens, usage.totalTokens);
   return {
     promptTokens,
     completionTokens,
     totalTokens:
-      typeof promptTokens === "number" || typeof completionTokens === "number"
+      typeof total === "number"
+        ? total
+        : typeof promptTokens === "number" || typeof completionTokens === "number"
         ? (promptTokens || 0) + (completionTokens || 0)
         : undefined,
-    reasoningTokens: Number.isFinite(reasoning) ? reasoning : undefined,
-    cachedInputTokens: Number.isFinite(cached) ? cached : undefined,
+    reasoningTokens: reasoning,
+    cachedInputTokens: cached,
   };
 }
 
 function isUsageLike(value: unknown): value is CodexUsage {
   return Boolean(value && typeof value === "object");
+}
+
+function firstFiniteNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }

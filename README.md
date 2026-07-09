@@ -5,10 +5,12 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 ## 功能概览
 
 - 在 PDF Reader 侧栏中直接向 Codex 提问当前论文。
-- 自动为当前论文准备 `text.txt`、`memory.md` 和会话日志。
+- 自动为当前论文准备 `text.txt`、`memory.md`、`record.json` 和会话日志。
 - 在同一篇论文下创建、切换、重命名、删除多个独立聊天会话。
-- 通过 Memory 视图查看当前论文记忆、浏览 Vault 中的论文、跨论文搜索 `memory.md`。
-- 在 Codex 回复中查看命令执行活动、memory 更新和 vault 保存状态。
+- 通过 Memory 视图查看当前论文的 Knowledge Surface、浏览 Vault 中的论文、跨论文搜索 `memory.md`。
+- 在对话中用 `@` 提及 Vault 中的其他论文，让 Codex 基于多篇 Paper Knowledge Records 进行比较和关联。
+- Codex 可在当前论文的 `memory.md` 中写入 Semantic Relationships，插件会生成 `record.json` 供脚本、索引和图谱使用。
+- 在 Codex 回复中查看命令执行活动、Knowledge 更新、关系审查和 Vault 保存状态。
 - 选中文本后通过 Reader 弹窗执行 `Ask` 或 `Translate` 快捷操作。
 
 ## Knowledge Vault
@@ -24,6 +26,7 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
   {itemKey}/
     text.txt
     memory.md
+    record.json
     conversations/
       {sessionId}.md
 ```
@@ -32,7 +35,14 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 
 - **Codex Session**：由 Codex `thread_id` 管理，用于同一个侧栏会话内的短期推理连续性。
 - **Conversation Log**：`conversations/{sessionId}.md`，按会话隔离的人类可读对话记录，不作为长期检索记忆。
-- **Memory Note**：`memory.md`，Codex 读取和更新的长期语义记忆，也是跨论文搜索的唯一目标。
+- **Paper Knowledge Record**：一篇论文的可演化研究档案；当前以 `memory.md` 作为人读优先的 Knowledge Surface。
+- **Structured Projection**：`record.json`，由插件从 `memory.md` 生成，服务脚本、搜索、反向链接和图谱。
+
+默认 `memory.md` 结构包括 `Abstract`、`Contribution`、`Problem`、`Method`、`Insight`、`Results`、`Takeaways`、`Reader Thinking`、`Library Connections` 和 `Evidence Pointers`。跨论文关系使用 typed Semantic Relationship，例如：
+
+```markdown
+- [extends] [Paper title](../OTHERKEY/memory.md): rationale. Evidence: [page 4]
+```
 
 ## 配置
 
@@ -63,8 +73,9 @@ npm test
 
 ### 核心目录
 
-- `src/modules/sidebar.ts`：侧栏 UI、多会话、Codex 流式输出、Memory 视图。
+- `src/modules/sidebar.ts`：侧栏 UI、多会话、`@` paper mention、Codex 流式输出、Memory 视图。
 - `src/services/codex/`：Codex CLI 路径解析、JSONL 事件解析、subprocess 执行、Vault 管理。
+- `src/services/codex/vault-format.ts`：Knowledge Surface 模板、Semantic Relationship 解析和 `record.json` projection helpers。
 - `src/services/chat-store.ts`：每篇论文的多会话元数据和消息持久化。
 - `src/modules/pdf-context.ts`：PDF 全文提取 fallback。
 - `src/services/pdf-parser.ts`：用于 Vault 的 PDF.js 页面文本解析。
@@ -74,7 +85,7 @@ npm test
 
 ## 已移除的旧功能
 
-当前主线已移除旧自研 RAG 聊天管线、`/init`、`/summary`、`/compact` slash commands、context-PDF 附件、图片上传、`@` mention 附加库中文献，以及聊天区 provider 选择器。
+当前主线已移除旧自研 RAG 聊天管线、`/init`、`/summary`、`/compact` slash commands、context-PDF 附件、图片上传，以及聊天区 provider 选择器。`@` mention 已以 Vault Papers only 的方式重新引入，用于显式引入其他 Paper Knowledge Records。
 
 ## 许可证
 

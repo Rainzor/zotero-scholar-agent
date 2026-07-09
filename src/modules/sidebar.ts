@@ -2,10 +2,22 @@ import { config } from "../../package.json";
 import { getLocaleID } from "../utils/locale";
 import { renderMarkdown } from "../utils/markdown";
 import { estimateTokens } from "../utils/token-estimate";
+import {
+  buildCodexUsageTitle,
+  formatCodexUsageLine,
+} from "../utils/token-usage";
+import {
+  CONTEXT_DIGEST_WARNING_PERCENT,
+  buildCodexResearchPrompt,
+  generateContextDigest,
+  shouldAutoCompactFromUsage,
+  shouldWarnFromUsage,
+} from "../services/context-digest";
 import type {
   ChatMessage,
   ChatSession,
   CodexActivity,
+  PaperContext,
   TokenUsage,
 } from "../addon";
 import { chatStore } from "../services/chat-store";
@@ -15,12 +27,15 @@ import {
   commitVaultChanges,
   ensurePaperVault,
   listVaultPapers,
+  readPaperCompactContext,
   readPaperMemory,
+  refreshPaperRecordProjection,
   runCodexTurn,
   searchVaultMemory,
   type CodexEvent,
   type PaperVaultMeta,
   type RunningLineProcess,
+  type SemanticRelationship,
   type VaultSearchHit,
 } from "../services/codex";
 
@@ -28,6 +43,7 @@ let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
 let activeCodexProcess: RunningLineProcess | null = null;
 let isGenerating = false;
+let mentionRequestSeq = 0;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
@@ -513,6 +529,7 @@ function switchChatView(body: HTMLElement, mode: "chat" | "memory") {
     setDisplay("#zoteroagent-chat-messages", "none");
     setDisplay("#zoteroagent-input-area", "none");
     setDisplay("#zoteroagent-session-row", "none");
+    setDisplay("#zoteroagent-context-digest-bar", "none");
     setDisplay("#zoteroagent-memory-panel", "flex");
   } else {
     setDisplay("#zoteroagent-memory-panel", "none");
@@ -553,7 +570,9 @@ async function renderMemoryBrowse(body: HTMLElement) {
   try {
     papers = await listVaultPapers();
   } catch (error) {
-    host.appendChild(memoryNotice(doc, `Failed to read vault: ${String(error)}`));
+    host.appendChild(
+      memoryNotice(doc, `Failed to read vault: ${String(error)}`),
+    );
     return;
   }
 
@@ -596,7 +615,11 @@ async function renderMemoryBrowse(body: HTMLElement) {
     row.appendChild(title);
     if (sub.textContent) row.appendChild(sub);
     row.addEventListener("click", () => {
-      void renderMemoryDetail(body, paper.itemKey, paper.title || paper.itemKey);
+      void renderMemoryDetail(
+        body,
+        paper.itemKey,
+        paper.title || paper.itemKey,
+      );
     });
     list.appendChild(row);
   }
@@ -856,6 +879,14 @@ function ensureChatUI(body: HTMLElement) {
   sessionRow.appendChild(renameSessionBtn);
   sessionRow.appendChild(deleteSessionBtn);
 
+  const contextDigestBar = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  contextDigestBar.id = "zoteroagent-context-digest-bar";
+  contextDigestBar.className = "zoteroagent-context-digest-bar";
+  contextDigestBar.style.display = "none";
+
   const inputArea = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   inputArea.id = "zoteroagent-input-area";
   inputArea.className = "zoteroagent-input-area";
@@ -875,6 +906,21 @@ function ensureChatUI(body: HTMLElement) {
   textarea.rows = 3;
   textarea.placeholder = "Ask about this paper...";
 
+  const contextChips = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  contextChips.id = "zoteroagent-context-chips";
+  contextChips.className = "zoteroagent-context-chips";
+
+  const mentionPanel = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  mentionPanel.id = "zoteroagent-mention-panel";
+  mentionPanel.className = "zoteroagent-mention-panel";
+  mentionPanel.style.display = "none";
+
   const actionsRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   actionsRow.id = "zoteroagent-actions-row";
   actionsRow.className = "zoteroagent-actions-row";
@@ -893,7 +939,9 @@ function ensureChatUI(body: HTMLElement) {
   actionsRight.appendChild(sendBtn);
   actionsRow.appendChild(actionsRight);
 
+  composeArea.appendChild(contextChips);
   composeArea.appendChild(textarea);
+  composeArea.appendChild(mentionPanel);
   composeArea.appendChild(actionsRow);
 
   inputArea.appendChild(composeArea);
@@ -922,6 +970,7 @@ function ensureChatUI(body: HTMLElement) {
   headerWrap.className = "zoteroagent-header-wrap";
   headerWrap.appendChild(viewTabs);
   headerWrap.appendChild(sessionRow);
+  headerWrap.appendChild(contextDigestBar);
   headerWrap.appendChild(historyPanel);
 
   const memoryPanel = buildMemoryPanel(doc);
@@ -971,10 +1020,23 @@ function bindChatEvents(body: HTMLElement) {
     .querySelector("#zoteroagent-chat-input")
     ?.addEventListener("keydown", (event) => {
       const ke = event as KeyboardEvent;
+      if (handleMentionKeyDown(body, ke)) return;
       if (ke.key === "Enter" && !ke.shiftKey) {
         event.preventDefault();
         void submitQuestion(body);
       }
+    });
+  body
+    .querySelector("#zoteroagent-chat-input")
+    ?.addEventListener("input", () => {
+      void updateMentionAutocomplete(body);
+    });
+  body
+    .querySelector("#zoteroagent-chat-input")
+    ?.addEventListener("blur", () => {
+      body.ownerDocument.defaultView?.setTimeout(() => {
+        hideMentionAutocomplete(body);
+      }, 150);
     });
   body
     .querySelector("#zoteroagent-session-select")
@@ -1162,6 +1224,7 @@ function getItemKey(itemId: number): string {
 }
 
 function getPaperMeta(itemId: number): {
+  itemId: number;
   itemKey: string;
   title: string;
   creators: string;
@@ -1171,13 +1234,17 @@ function getPaperMeta(itemId: number): {
     const item = Zotero.Items.get(itemId) as any;
     const creators = (item?.getCreators?.() || [])
       .map((creator: any) =>
-        [creator?.firstName, creator?.lastName].filter(Boolean).join(" ").trim(),
+        [creator?.firstName, creator?.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim(),
       )
       .filter(Boolean)
       .slice(0, 3)
       .join(", ");
     const date = String(item?.getField?.("date") || "");
     return {
+      itemId,
       itemKey: String(item?.key || itemId),
       title: String(
         item?.getField?.("title") ||
@@ -1189,12 +1256,117 @@ function getPaperMeta(itemId: number): {
     };
   } catch (_e) {
     return {
+      itemId,
       itemKey: String(itemId),
       title: `Item ${itemId}`,
       creators: "",
       year: "",
     };
   }
+}
+
+function normalizePaperContexts(
+  papers: PaperContext[],
+  inFocusItemKey: string,
+): PaperContext[] {
+  const seen = new Set<string>();
+  const result: PaperContext[] = [];
+  for (const paper of papers || []) {
+    const itemKey = String(paper.itemKey || "").trim();
+    if (!itemKey || itemKey === inFocusItemKey || seen.has(itemKey)) continue;
+    seen.add(itemKey);
+    result.push({
+      itemKey,
+      title: String(paper.title || itemKey),
+      creators: paper.creators || "",
+      year: paper.year || "",
+    });
+  }
+  return result;
+}
+
+async function buildMentionedPaperContexts(
+  papers: PaperContext[],
+): Promise<Array<PaperContext & { memory: string }>> {
+  const contexts: Array<PaperContext & { memory: string }> = [];
+  for (const paper of papers) {
+    contexts.push({
+      ...paper,
+      memory: await readPaperCompactContext({
+        itemId: 0,
+        itemKey: paper.itemKey,
+        title: paper.title,
+        creators: paper.creators,
+        year: paper.year,
+      }),
+    });
+  }
+  return contexts;
+}
+
+function getRecentMessagesForPrompt(
+  session: ChatSession | null,
+  messages: ChatMessage[],
+): ChatMessage[] {
+  const digestUpTo =
+    typeof session?.contextDigestUpToMessageIndex === "number"
+      ? session.contextDigestUpToMessageIndex
+      : -1;
+  return messages.slice(Math.max(0, digestUpTo + 1));
+}
+
+async function compactSessionContext(
+  body: HTMLElement,
+  itemId: number,
+  trigger: "manual" | "auto",
+) {
+  const session = chatStore.getSession(itemId);
+  if (!session || session.messages.length === 0) return;
+  if (body.dataset.contextDigestBusy === "true") return;
+  body.dataset.contextDigestBusy = "true";
+  renderContextDigestStatus(body, itemId, "Compacting hidden context...");
+  const paperMeta = getPaperMeta(itemId);
+  const isActivePane = () =>
+    isSafeBody(body) && Number(body.dataset.itemID) === itemId;
+  try {
+    const digest = await generateContextDigest({
+      itemKey: paperMeta.itemKey,
+      title: paperMeta.title,
+      messages: session.messages,
+      previousDigest: session.contextDigest,
+      previousDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
+      onStatus: (text) => {
+        if (trigger === "auto" && isActivePane()) showAgentStatus(body, text);
+        if (isActivePane()) renderContextDigestStatus(body, itemId, text);
+      },
+    });
+    chatStore.updateContextDigest(itemId, digest, session.sessionId);
+  } catch (error) {
+    ztoolkit.log("[Agent] Context digest compaction error:", error);
+  } finally {
+    delete body.dataset.contextDigestBusy;
+    if (isActivePane()) renderContextDigestStatus(body, itemId);
+  }
+}
+
+function relationshipIdentity(rel: SemanticRelationship): string {
+  return [
+    rel.sourceItemKey,
+    rel.targetItemKey,
+    rel.type,
+    rel.rationale,
+    rel.evidence || "",
+  ].join("\u0000");
+}
+
+function diffRelationships(
+  before: SemanticRelationship[],
+  after: SemanticRelationship[],
+): SemanticRelationship[] {
+  const beforeKeys = new Set((before || []).map(relationshipIdentity));
+  return (after || []).filter(
+    (rel) => !beforeKeys.has(relationshipIdentity(rel)),
+  );
 }
 
 function resolvePdfAttachmentItemId(
@@ -1342,6 +1514,14 @@ async function submitQuestion(body: HTMLElement) {
 
   const refText = addon.data.chat.referenceText;
   const responseQuote = addon.data.chat.responseQuote;
+  const paperMeta = getPaperMeta(itemId);
+  const mentionedPapers = normalizePaperContexts(
+    addon.data.chat.mentionedPapers,
+    paperMeta.itemKey,
+  );
+  const priorVisibleMessages = chatStore
+    .getMessages(itemId)
+    .map((message) => ({ ...message }));
   const contextBlocks: string[] = [];
   if (refText) contextBlocks.push(`${SELECTED_TEXT_PREFIX}${refText}`);
   if (responseQuote)
@@ -1353,11 +1533,14 @@ async function submitQuestion(body: HTMLElement) {
   chatStore.addMessage(itemId, {
     role: "user",
     content: displayContent,
+    contextPapers: mentionedPapers,
   });
   input.value = "";
   addon.data.chat.referenceText = "";
   addon.data.chat.responseQuote = "";
+  addon.data.chat.mentionedPapers = [];
   syncContextChips(body);
+  hideMentionAutocomplete(body);
   body.dataset.chatMode = "chat";
   syncLayoutState(body, itemId);
 
@@ -1366,6 +1549,7 @@ async function submitQuestion(body: HTMLElement) {
     content: "",
     reasoning: "",
     model: getModelLabel(),
+    contextPapers: mentionedPapers,
   };
   chatStore.addMessage(itemId, assistant);
   renderMessages(body, itemId);
@@ -1394,7 +1578,10 @@ async function submitQuestion(body: HTMLElement) {
     ? `${quotedBlocks.join("\n\n")}\n\n${question}`
     : question;
   const session = chatStore.getSession(itemId);
-  const paperMeta = getPaperMeta(itemId);
+  const recentMessages = getRecentMessagesForPrompt(
+    session,
+    priorVisibleMessages,
+  );
 
   try {
     let lastRefresh = 0;
@@ -1411,12 +1598,18 @@ async function submitQuestion(body: HTMLElement) {
       },
     });
     const memoryBefore = await readPaperMemory(paperMeta.itemKey);
-    const prompt = buildCodexPrompt({
+    const relationshipsBefore = await refreshPaperRecordProjection(paperMeta);
+    const mentionedContexts =
+      await buildMentionedPaperContexts(mentionedPapers);
+    const prompt = buildCodexResearchPrompt({
       itemKey: paperMeta.itemKey,
       title: paperMeta.title,
       creators: paperMeta.creators,
       year: paperMeta.year,
       question: aiQuestion,
+      mentionedPapers: mentionedContexts,
+      contextDigest: session?.contextDigest,
+      recentMessages,
     });
     const activities: CodexActivity[] = [];
     const activityById = new Map<string, CodexActivity>();
@@ -1451,7 +1644,11 @@ async function submitQuestion(body: HTMLElement) {
     if (result.usage) assistant.usage = result.usage;
     if (activities.length) assistant.activities = activities.slice();
     if (result.threadId) {
-      chatStore.updateCodexThreadId(itemId, result.threadId, session?.sessionId);
+      chatStore.updateCodexThreadId(
+        itemId,
+        result.threadId,
+        session?.sessionId,
+      );
     }
     await appendConversationTurn({
       itemKey: paperMeta.itemKey,
@@ -1462,9 +1659,17 @@ async function submitQuestion(body: HTMLElement) {
     });
     const memoryAfter = await readPaperMemory(paperMeta.itemKey);
     assistant.memoryUpdated = memoryAfter.trim() !== memoryBefore.trim();
+    const relationshipsAfter = await refreshPaperRecordProjection(paperMeta);
+    assistant.relationshipUpdates = diffRelationships(
+      relationshipsBefore,
+      relationshipsAfter,
+    );
     assistant.committed = await commitVaultChanges(
       `turn: ${paperMeta.itemKey} ${session?.sessionId || ""}`.trim(),
     );
+    if (shouldAutoCompactFromUsage(assistant.usage)) {
+      await compactSessionContext(body, itemId, "auto");
+    }
   } catch (e: any) {
     await appendVaultLog("chat-turn-error", e?.message || String(e), {
       itemId,
@@ -1481,24 +1686,6 @@ async function submitQuestion(body: HTMLElement) {
   setGenerating(body, false);
   if (isActivePane()) renderMessages(body, itemId);
   maybeGenerateSessionTitleLocal(body, itemId, question);
-}
-
-function buildCodexPrompt(options: {
-  itemKey: string;
-  title: string;
-  creators: string;
-  year: string;
-  question: string;
-}): string {
-  const meta = [
-    `In-focus paper: ${options.itemKey}`,
-    `Title: ${options.title || options.itemKey}`,
-    options.creators ? `Authors: ${options.creators}` : "",
-    options.year ? `Year: ${options.year}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `${meta}\n\nUser question:\n${options.question.trim()}`;
 }
 
 function maybeGenerateSessionTitleLocal(
@@ -1738,13 +1925,7 @@ function createMessageHeader(
 }
 
 function formatUsageLine(usage: TokenUsage): string {
-  const total =
-    usage.totalTokens ??
-    (usage.promptTokens || 0) + (usage.completionTokens || 0);
-  if (!total) return "";
-  const inp = usage.promptTokens || 0;
-  const out = usage.completionTokens || 0;
-  return `Tokens: ${total} ↑${inp} ↓${out}`;
+  return formatCodexUsageLine(usage);
 }
 
 function buildUsageDisplayText(msg: ChatMessage): string {
@@ -1772,6 +1953,9 @@ function createMessageMetaRow(
   const usageEl = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   usageEl.className = "zoteroagent-msg-usage";
   usageEl.textContent = buildUsageDisplayText(msg);
+  if (msg.role === "assistant" && msg.usage) {
+    usageEl.title = buildCodexUsageTitle(msg.usage);
+  }
   const actions = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
   actions.className = "zoteroagent-message-actions";
   if (msg.role === "user") {
@@ -1938,7 +2122,7 @@ function commitEdit(
 
 function updateStreamingMessage(
   body: HTMLElement,
-  state: { content: string; reasoning: string },
+  state: { content: string; reasoning: string; usage?: TokenUsage },
 ) {
   try {
     if (!isSafeBody(body)) return;
@@ -2075,6 +2259,13 @@ function updateStreamingMessage(
       }
     }
     msgWrapper.dataset.rawContent = state.content || "";
+    const usageEl = msgWrapper.querySelector(
+      ".zoteroagent-msg-usage",
+    ) as HTMLElement | null;
+    if (usageEl && state.usage) {
+      usageEl.textContent = formatUsageLine(state.usage);
+      usageEl.title = buildCodexUsageTitle(state.usage);
+    }
 
     if (isNearBottom(container)) {
       container.scrollTop = container.scrollHeight;
@@ -2108,7 +2299,11 @@ function buildActivityBlock(
     const status = String(activity.status || "").toLowerCase();
     const badge = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
     badge.className = `zoteroagent-activity-badge ${
-      status === "failed" ? "is-failed" : status === "in_progress" ? "is-running" : "is-ok"
+      status === "failed"
+        ? "is-failed"
+        : status === "in_progress"
+          ? "is-running"
+          : "is-ok"
     }`;
     badge.textContent =
       status === "failed" ? "fail" : status === "in_progress" ? "run" : "ok";
@@ -2123,9 +2318,62 @@ function buildActivityBlock(
   return details;
 }
 
+function buildRelationshipReviewBlock(
+  doc: Document,
+  relationships: SemanticRelationship[],
+): HTMLElement {
+  const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
+  details.className = "zoteroagent-relationship-review";
+  const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
+  summary.className = "zoteroagent-relationship-review-summary";
+  summary.textContent = `Knowledge review · ${relationships.length} relationship${
+    relationships.length === 1 ? "" : "s"
+  }`;
+  details.appendChild(summary);
+
+  const list = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  list.className = "zoteroagent-relationship-review-list";
+  for (const rel of relationships) {
+    const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+    row.className = "zoteroagent-relationship-review-row";
+    const type = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    type.className = "zoteroagent-relationship-type";
+    type.textContent = rel.type;
+    const text = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    text.className = "zoteroagent-relationship-text";
+    text.textContent = `${rel.targetItemKey}: ${rel.rationale}${
+      rel.evidence ? ` Evidence: ${rel.evidence}` : ""
+    }`;
+    row.appendChild(type);
+    row.appendChild(text);
+    list.appendChild(row);
+  }
+  details.appendChild(list);
+  return details;
+}
+
 function buildTurnFooter(doc: Document, msg: ChatMessage): HTMLElement {
   const footer = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
   footer.className = "zoteroagent-turn-footer";
+  if (msg.contextPapers?.length) {
+    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    chip.className = "zoteroagent-turn-chip is-context";
+    chip.textContent = `Used ${msg.contextPapers.length} @ paper${
+      msg.contextPapers.length === 1 ? "" : "s"
+    }`;
+    footer.appendChild(chip);
+  }
+  if (msg.relationshipUpdates?.length) {
+    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    chip.className = "zoteroagent-turn-chip is-relationship";
+    chip.textContent = `${msg.relationshipUpdates.length} relationship${
+      msg.relationshipUpdates.length === 1 ? "" : "s"
+    }`;
+    chip.title = msg.relationshipUpdates
+      .map((rel) => `[${rel.type}] ${rel.targetItemKey}: ${rel.rationale}`)
+      .join("\n");
+    footer.appendChild(chip);
+  }
   if (msg.memoryUpdated) {
     const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
     chip.className = "zoteroagent-turn-chip is-memory";
@@ -2142,7 +2390,9 @@ function buildTurnFooter(doc: Document, msg: ChatMessage): HTMLElement {
 }
 
 function truncateMiddle(text: string, max: number): string {
-  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  const clean = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (clean.length <= max) return clean;
   const head = Math.ceil((max - 3) / 2);
   const tail = Math.floor((max - 3) / 2);
@@ -2199,6 +2449,11 @@ function renderMessages(body: HTMLElement, itemId: number) {
         if (msg.activities?.length) {
           main.appendChild(buildActivityBlock(doc, msg.activities));
         }
+        if (msg.relationshipUpdates?.length) {
+          main.appendChild(
+            buildRelationshipReviewBlock(doc, msg.relationshipUpdates),
+          );
+        }
         wrapper.dataset.rawContent = msg.content || "";
       }
 
@@ -2217,7 +2472,13 @@ function renderMessages(body: HTMLElement, itemId: number) {
 
       main.appendChild(inner);
 
-      if (msg.role === "assistant" && (msg.memoryUpdated || msg.committed)) {
+      if (
+        msg.role === "assistant" &&
+        (msg.memoryUpdated ||
+          msg.committed ||
+          msg.contextPapers?.length ||
+          msg.relationshipUpdates?.length)
+      ) {
         main.appendChild(buildTurnFooter(doc, msg));
       }
 
@@ -2272,6 +2533,184 @@ function syncPrefill(body: HTMLElement) {
       ) as HTMLTextAreaElement | null
     )?.focus();
   }
+}
+
+type MentionTrigger = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+function getMentionTrigger(input: HTMLTextAreaElement): MentionTrigger | null {
+  const cursor = input.selectionStart ?? input.value.length;
+  if ((input.selectionEnd ?? cursor) !== cursor) return null;
+  const beforeCursor = input.value.slice(0, cursor);
+  const match = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
+  if (!match) return null;
+  return {
+    start: beforeCursor.length - String(match[2] || "").length - 1,
+    end: cursor,
+    query: String(match[2] || "").toLowerCase(),
+  };
+}
+
+function getMentionPanel(body: HTMLElement): HTMLElement | null {
+  return body.querySelector("#zoteroagent-mention-panel") as HTMLElement | null;
+}
+
+function hideMentionAutocomplete(body: HTMLElement) {
+  const panel = getMentionPanel(body);
+  if (!panel) return;
+  panel.style.display = "none";
+  panel.dataset.activeIndex = "0";
+  while (panel.firstChild) panel.firstChild.remove();
+}
+
+async function updateMentionAutocomplete(body: HTMLElement) {
+  const input = body.querySelector(
+    "#zoteroagent-chat-input",
+  ) as HTMLTextAreaElement | null;
+  const panel = getMentionPanel(body);
+  if (!input || !panel) return;
+  const trigger = getMentionTrigger(input);
+  if (!trigger) {
+    hideMentionAutocomplete(body);
+    return;
+  }
+
+  const requestId = ++mentionRequestSeq;
+  const currentItemId = Number(body.dataset.itemID) || 0;
+  const currentKey =
+    currentItemId > 0 ? getPaperMeta(currentItemId).itemKey : "";
+  const selected = new Set(
+    normalizePaperContexts(addon.data.chat.mentionedPapers, currentKey).map(
+      (paper) => paper.itemKey,
+    ),
+  );
+
+  let papers: PaperVaultMeta[] = [];
+  try {
+    papers = await listVaultPapers();
+  } catch (error) {
+    ztoolkit.log("[Agent] Failed to list vault papers for mentions:", error);
+  }
+  if (requestId !== mentionRequestSeq) return;
+
+  const filtered = papers
+    .filter(
+      (paper) => paper.itemKey !== currentKey && !selected.has(paper.itemKey),
+    )
+    .filter((paper) => {
+      if (!trigger.query) return true;
+      const haystack = [
+        paper.itemKey,
+        paper.title,
+        paper.creators || "",
+        paper.year || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trigger.query);
+    })
+    .slice(0, 8);
+
+  while (panel.firstChild) panel.firstChild.remove();
+  if (!filtered.length) {
+    hideMentionAutocomplete(body);
+    return;
+  }
+
+  const doc = body.ownerDocument;
+  filtered.forEach((paper, index) => {
+    const row = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    row.type = "button";
+    row.className = `zoteroagent-mention-item${index === 0 ? " is-active" : ""}`;
+    row.dataset.index = String(index);
+    row.dataset.itemKey = paper.itemKey;
+
+    const title = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    title.className = "zoteroagent-mention-title";
+    title.textContent = paper.title || paper.itemKey;
+    const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    meta.className = "zoteroagent-mention-meta";
+    meta.textContent = [paper.creators, paper.year, paper.itemKey]
+      .filter(Boolean)
+      .join(" · ");
+    row.appendChild(title);
+    row.appendChild(meta);
+    row.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      selectMentionPaper(body, paper, trigger);
+    });
+    panel.appendChild(row);
+  });
+  panel.dataset.activeIndex = "0";
+  panel.style.display = "flex";
+}
+
+function handleMentionKeyDown(
+  body: HTMLElement,
+  event: KeyboardEvent,
+): boolean {
+  const panel = getMentionPanel(body);
+  if (!panel || panel.style.display === "none") return false;
+  const rows = Array.from(
+    panel.querySelectorAll(".zoteroagent-mention-item"),
+  ) as HTMLButtonElement[];
+  if (!rows.length) return false;
+  const current = Number(panel.dataset.activeIndex || "0") || 0;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideMentionAutocomplete(body);
+    return true;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const next = (current + delta + rows.length) % rows.length;
+    setActiveMentionRow(panel, rows, next);
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    rows[current]?.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true }),
+    );
+    return true;
+  }
+  return false;
+}
+
+function setActiveMentionRow(
+  panel: HTMLElement,
+  rows: HTMLButtonElement[],
+  index: number,
+) {
+  rows.forEach((row, idx) => row.classList.toggle("is-active", idx === index));
+  panel.dataset.activeIndex = String(index);
+}
+
+function selectMentionPaper(
+  body: HTMLElement,
+  paper: PaperContext,
+  trigger: MentionTrigger,
+) {
+  const input = body.querySelector(
+    "#zoteroagent-chat-input",
+  ) as HTMLTextAreaElement | null;
+  const currentItemId = Number(body.dataset.itemID) || 0;
+  const currentKey =
+    currentItemId > 0 ? getPaperMeta(currentItemId).itemKey : "";
+  addon.data.chat.mentionedPapers = normalizePaperContexts(
+    [...addon.data.chat.mentionedPapers, paper],
+    currentKey,
+  );
+  if (input) {
+    input.setRangeText("", trigger.start, trigger.end, "end");
+    input.focus();
+  }
+  syncContextChips(body);
+  hideMentionAutocomplete(body);
 }
 
 function parseQuotedPageContext(raw: string): {
@@ -2363,6 +2802,61 @@ function createContextChip(
   return chip;
 }
 
+function createPaperContextChip(
+  body: HTMLElement,
+  paper: PaperContext,
+): HTMLElement {
+  const doc = body.ownerDocument;
+  const chip = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  chip.className = "zoteroagent-context-chip paper-context";
+
+  const icon = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+  icon.className = "zoteroagent-context-chip-icon";
+  icon.textContent = "@";
+
+  const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+  label.className = "zoteroagent-context-chip-label";
+  label.textContent = paper.title || paper.itemKey;
+
+  const metaText = [paper.creators, paper.year, paper.itemKey]
+    .filter(Boolean)
+    .join(" · ");
+  if (metaText) {
+    const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    meta.className = "zoteroagent-context-chip-meta";
+    meta.textContent = paper.itemKey;
+    chip.appendChild(icon);
+    chip.appendChild(label);
+    chip.appendChild(meta);
+  } else {
+    chip.appendChild(icon);
+    chip.appendChild(label);
+  }
+
+  const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  dismiss.type = "button";
+  dismiss.className = "zoteroagent-context-chip-dismiss";
+  dismiss.textContent = "×";
+  dismiss.title = "Remove paper context";
+  dismiss.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    addon.data.chat.mentionedPapers = addon.data.chat.mentionedPapers.filter(
+      (entry) => entry.itemKey !== paper.itemKey,
+    );
+    syncContextChips(body);
+    void updateMentionAutocomplete(body);
+  });
+  chip.appendChild(dismiss);
+
+  const content = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  content.className = "zoteroagent-context-chip-content";
+  content.textContent = metaText || paper.itemKey;
+  chip.appendChild(content);
+
+  return chip;
+}
+
 function syncContextChips(body: HTMLElement) {
   const wrap = body.querySelector(
     "#zoteroagent-context-chips",
@@ -2372,7 +2866,14 @@ function syncContextChips(body: HTMLElement) {
 
   const refText = String(addon.data.chat.referenceText || "").trim();
   const responseQuote = String(addon.data.chat.responseQuote || "").trim();
-  if (!refText && !responseQuote) {
+  const itemId = Number(body.dataset.itemID) || 0;
+  const currentKey = itemId > 0 ? getPaperMeta(itemId).itemKey : "";
+  const mentionedPapers = normalizePaperContexts(
+    addon.data.chat.mentionedPapers,
+    currentKey,
+  );
+  addon.data.chat.mentionedPapers = mentionedPapers;
+  if (!refText && !responseQuote && !mentionedPapers.length) {
     wrap.style.display = "none";
     return;
   }
@@ -2380,6 +2881,9 @@ function syncContextChips(body: HTMLElement) {
   if (refText) wrap.appendChild(createContextChip(body, "text", refText));
   if (responseQuote)
     wrap.appendChild(createContextChip(body, "response", responseQuote));
+  for (const paper of mentionedPapers) {
+    wrap.appendChild(createPaperContextChip(body, paper));
+  }
   wrap.style.display = "flex";
 }
 
@@ -2603,6 +3107,87 @@ function syncSessionSelector(body: HTMLElement, itemId: number) {
     const activeSession = chatStore.getSession(itemId);
     titleEl.textContent = activeSession?.title || "New chat";
   }
+  renderContextDigestStatus(body, itemId);
+}
+
+function renderContextDigestStatus(
+  body: HTMLElement,
+  itemId: number,
+  transientText?: string,
+) {
+  const bar = body.querySelector(
+    "#zoteroagent-context-digest-bar",
+  ) as HTMLElement | null;
+  if (!bar) return;
+  while (bar.firstChild) bar.firstChild.remove();
+  const session = chatStore.getSession(itemId);
+  if (!session || session.messages.length < 2) {
+    bar.style.display = "none";
+    return;
+  }
+
+  const doc = bar.ownerDocument;
+  const latestUsage = findLatestAssistantUsage(session.messages);
+  const hasDigest = Boolean(session.contextDigest?.trim());
+  const warn = shouldWarnFromUsage(latestUsage);
+  const busy = body.dataset.contextDigestBusy === "true";
+  bar.style.display = "flex";
+
+  const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  row.className = "zoteroagent-context-digest-row";
+
+  const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+  chip.className = `zoteroagent-context-digest-chip ${
+    hasDigest ? "is-compacted" : warn ? "is-warning" : ""
+  }`;
+  if (transientText) {
+    chip.textContent = transientText;
+  } else if (hasDigest) {
+    const covered = (session.contextDigestUpToMessageIndex ?? -1) + 1;
+    chip.textContent = `Context compacted · covers ${Math.max(0, covered)} turns`;
+  } else if (warn) {
+    const pct =
+      typeof latestUsage?.contextUsedPercent === "number"
+        ? latestUsage.contextUsedPercent.toFixed(1).replace(/\.0$/, "")
+        : String(CONTEXT_DIGEST_WARNING_PERCENT);
+    chip.textContent = `Context near limit · ${pct}%`;
+  } else {
+    chip.textContent = "Context ready";
+  }
+  row.appendChild(chip);
+
+  const button = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  button.className = "zoteroagent-context-digest-action";
+  button.textContent = busy ? "Compacting..." : "Compact";
+  button.disabled = busy || isGenerating;
+  button.title = "Generate a hidden Context Digest for future Codex turns";
+  button.addEventListener("click", () => {
+    void compactSessionContext(body, itemId, "manual");
+  });
+  row.appendChild(button);
+  bar.appendChild(row);
+
+  if (hasDigest) {
+    const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
+    details.className = "zoteroagent-context-digest-debug";
+    const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
+    summary.textContent = "Hidden Context Digest";
+    details.appendChild(summary);
+    const pre = doc.createElementNS(XHTML_NS, "pre") as HTMLElement;
+    pre.textContent = session.contextDigest || "";
+    details.appendChild(pre);
+    bar.appendChild(details);
+  }
+}
+
+function findLatestAssistantUsage(
+  messages: ChatMessage[],
+): TokenUsage | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "assistant" && message.usage) return message.usage;
+  }
+  return undefined;
 }
 
 function renderHistoryPanel(body: HTMLElement, itemId: number) {
@@ -2658,7 +3243,7 @@ function renderHistoryPanel(body: HTMLElement, itemId: number) {
   }
 }
 
-function syncLayoutState(body: HTMLElement, _itemId: number) {
+function syncLayoutState(body: HTMLElement, itemId: number) {
   const sessionRow = body.querySelector(
     "#zoteroagent-session-row",
   ) as HTMLElement | null;
@@ -2673,6 +3258,7 @@ function syncLayoutState(body: HTMLElement, _itemId: number) {
   messages.style.display = "flex";
   messages.style.flexDirection = "column";
   inputArea.style.display = "flex";
+  if (itemId > 0) renderContextDigestStatus(body, itemId);
 }
 
 function parseUserContent(content: string): {
@@ -2779,9 +3365,40 @@ function renderUserContextCard(
   return card;
 }
 
+function renderUserPaperContextCard(
+  doc: Document,
+  papers: PaperContext[] | undefined,
+): HTMLElement | null {
+  const list = (papers || []).filter((paper) => paper.itemKey);
+  if (!list.length) return null;
+  const card = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  card.className = "zoteroagent-msg-paper-context";
+
+  const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+  label.className = "zoteroagent-msg-paper-label";
+  label.textContent = "Mentioned Papers";
+  card.appendChild(label);
+
+  const body = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  body.className = "zoteroagent-msg-paper-list";
+  for (const paper of list) {
+    const pill = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    pill.className = "zoteroagent-msg-paper-pill";
+    pill.textContent = `@${paper.title || paper.itemKey}`;
+    pill.title = [paper.creators, paper.year, paper.itemKey]
+      .filter(Boolean)
+      .join(" · ");
+    body.appendChild(pill);
+  }
+  card.appendChild(body);
+  return card;
+}
+
 function renderUserMessage(container: HTMLElement, msg: ChatMessage) {
   const doc = container.ownerDocument;
   const parsed = parseUserContent(msg.content);
+  const paperContext = renderUserPaperContextCard(doc, msg.contextPapers);
+  if (paperContext) container.appendChild(paperContext);
 
   if (parsed.textContext || parsed.responseQuote) {
     const textCard = renderUserContextCard(doc, "text", parsed.textContext);

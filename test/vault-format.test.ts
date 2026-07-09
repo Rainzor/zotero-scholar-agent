@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendMarkdownBlock,
+  buildPaperRecordProjection,
   buildConversationTurnMarkdown,
   buildPaperVaultPaths,
   buildReadmeTable,
@@ -10,6 +11,7 @@ import {
   joinPathParts,
   mergeReadmeEntries,
   normalizeVaultPath,
+  parseSemanticRelationships,
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
@@ -40,6 +42,7 @@ describe("path helpers", () => {
     expect(paths.paperDir).toBe("/vault/PXW99EKT");
     expect(paths.textPath).toBe("/vault/PXW99EKT/text.txt");
     expect(paths.memoryPath).toBe("/vault/PXW99EKT/memory.md");
+    expect(paths.recordPath).toBe("/vault/PXW99EKT/record.json");
     expect(paths.conversationsDir).toBe("/vault/PXW99EKT/conversations");
     expect(paths.conversationPath("chat-1")).toBe(
       "/vault/PXW99EKT/conversations/chat-1.md",
@@ -63,8 +66,63 @@ describe("markdown / README helpers", () => {
     });
     expect(md).toContain("# Attention Is All You Need (Vaswani et al., 2017)");
     expect(md).toContain("> itemKey: AAAA1111");
-    expect(md).toContain("## TL;DR");
-    expect(md).toContain("## Cross-references");
+    expect(md).toContain("## Abstract");
+    expect(md).toContain("## Contribution");
+    expect(md).toContain("## Method");
+    expect(md).toContain("## Insight");
+    expect(md).toContain("## Library Connections");
+    expect(md).toContain("### Semantic Relationships");
+    expect(md).toContain("## Evidence Pointers");
+  });
+
+  it("parses semantic relationship lines for the structured projection", () => {
+    const relationships = parseSemanticRelationships(
+      [
+        "### Semantic Relationships",
+        "- [extends] [Paper B](../BBBB2222/memory.md): improves the sparse attention pattern. Evidence: [page 4]",
+        "- [unknown] [Paper C](../CCCC3333/memory.md): ignored.",
+        "- [supports] [Paper D](../DDDD4444/memory.md): similar result.",
+      ].join("\n"),
+      "AAAA1111",
+      "2026-07-09T00:00:00.000Z",
+    );
+    expect(relationships).toEqual([
+      {
+        sourceItemKey: "AAAA1111",
+        targetItemKey: "BBBB2222",
+        type: "extends",
+        rationale: "improves the sparse attention pattern.",
+        evidence: "[page 4]",
+        updatedAt: "2026-07-09T00:00:00.000Z",
+      },
+      {
+        sourceItemKey: "AAAA1111",
+        targetItemKey: "DDDD4444",
+        type: "supports",
+        rationale: "similar result.",
+        evidence: undefined,
+        updatedAt: "2026-07-09T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("builds a generated paper record projection", () => {
+    const projection = buildPaperRecordProjection({
+      meta: {
+        itemId: 1,
+        itemKey: "AAAA1111",
+        title: "Paper A",
+        creators: "Alice",
+        year: "2024",
+      },
+      memoryMarkdown:
+        "- [can_combine_with] [Paper B](../BBBB2222/memory.md): complementary retrieval step.",
+      generatedAt: "2026-07-09T00:00:00.000Z",
+    });
+    expect(projection.schemaVersion).toBe(1);
+    expect(projection.itemKey).toBe("AAAA1111");
+    expect(projection.relationships).toHaveLength(1);
+    expect(projection.relationships[0].type).toBe("can_combine_with");
   });
 
   it("formats conversation turns and appends blocks", () => {

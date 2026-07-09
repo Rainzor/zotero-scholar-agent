@@ -1,9 +1,12 @@
 pref-codex-title = Codex CLI
 pref-codex-description = Zotero Agent uses your locally configured Codex CLI. Leave the path empty to auto-detect it.
 pref-codex-path = Path
-pref-codex-save = Save Path
+pref-codex-model = Model
+pref-codex-cheapModel = Cheap Model
+pref-codex-contextWindow = Context Window
+pref-codex-save = Save Codex Settings
 pref-codex-test = Auto Detect / Test
-pref-codex-saved = Codex path saved.
+pref-codex-saved = Codex settings saved.
 pref-codex-testing = Testing Codex CLI...
 pref-codex-success = Codex OK
 pref-codex-fail = Codex test failed

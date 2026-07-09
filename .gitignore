@@ -9,3 +9,4 @@ build
 .scaffold
 phase0/sample-vault/
 coverage/
+reference/

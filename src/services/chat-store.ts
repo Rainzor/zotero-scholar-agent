@@ -1,5 +1,5 @@
 import type { ChatMessage, ChatSession } from "../addon";
-import { estimateTokens } from "../utils/token-estimate";
+import type { ContextDigestState } from "./context-digest";
 import {
   isValidPersistedItem,
   normalizePersistedItem,
@@ -21,10 +21,6 @@ export type ChatSessionSummary = {
   updatedAt: number;
   messageCount: number;
 };
-
-const MAX_MESSAGES = 100;
-const MAX_TOKENS_APPROX = 50000;
-const SUMMARY_MARKER = "[Session Summary]";
 
 class ChatStore {
   private readonly cacheByItemId = new Map<number, ItemSessionState>();
@@ -162,7 +158,6 @@ class ChatStore {
     if (!message.timestamp) message.timestamp = Date.now();
     session.messages.push(message);
     session.updatedAt = Date.now();
-    this.applyCompaction(session);
     this.markDirty(itemId);
   }
 
@@ -170,6 +165,7 @@ class ChatStore {
     const session = this.getSession(itemId);
     if (!session) return;
     session.messages = [];
+    this.clearSessionDigest(session);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -206,6 +202,7 @@ class ChatStore {
     if (!session) return;
     if (msgIndex < 0 || msgIndex >= session.messages.length) return;
     session.messages.splice(msgIndex, 1);
+    this.clearSessionDigest(session);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -215,6 +212,7 @@ class ChatStore {
     if (!session) return;
     if (fromIndex < 0 || fromIndex >= session.messages.length) return;
     session.messages.splice(fromIndex);
+    this.clearSessionDigest(session);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -233,6 +231,45 @@ class ChatStore {
     const session = state.sessions.find((s) => s.sessionId === targetId);
     if (!session) return;
     session.codexThreadId = String(threadId || "").trim();
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  updateContextDigest(
+    itemId: number,
+    digest: ContextDigestState,
+    sessionId?: string,
+  ) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const session = state.sessions.find((s) => s.sessionId === targetId);
+    if (!session) return;
+    session.contextDigest = String(digest.contextDigest || "").trim();
+    session.contextDigestUpToMessageIndex =
+      typeof digest.contextDigestUpToMessageIndex === "number"
+        ? digest.contextDigestUpToMessageIndex
+        : undefined;
+    session.contextDigestUpdatedAt =
+      typeof digest.contextDigestUpdatedAt === "number"
+        ? digest.contextDigestUpdatedAt
+        : undefined;
+    session.contextDigestTokenEstimate =
+      typeof digest.contextDigestTokenEstimate === "number"
+        ? digest.contextDigestTokenEstimate
+        : undefined;
+    session.contextDigestSource = digest.contextDigestSource;
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
+  clearContextDigest(itemId: number, sessionId?: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const session = state.sessions.find((s) => s.sessionId === targetId);
+    if (!session) return;
+    this.clearSessionDigest(session);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }
@@ -269,6 +306,11 @@ class ChatStore {
         itemId,
         itemKey: persisted.itemKey,
         codexThreadId: s.codexThreadId || "",
+        contextDigest: s.contextDigest || "",
+        contextDigestUpToMessageIndex: s.contextDigestUpToMessageIndex,
+        contextDigestUpdatedAt: s.contextDigestUpdatedAt,
+        contextDigestTokenEstimate: s.contextDigestTokenEstimate,
+        contextDigestSource: s.contextDigestSource,
         title: s.title,
         messages: s.messages.map((m) => ({ ...m })),
         createdAt: s.createdAt,
@@ -294,66 +336,12 @@ class ChatStore {
     return state;
   }
 
-  private applyCompaction(session: ChatSession) {
-    const overMessageLimit = session.messages.length > MAX_MESSAGES;
-    const overTokenLimit =
-      this.approxTokens(session.messages) > MAX_TOKENS_APPROX;
-    if (!overMessageLimit && !overTokenLimit) return;
-    const keepTailCount = 20;
-    const tail = session.messages.slice(-keepTailCount);
-    const head = session.messages.slice(
-      0,
-      Math.max(0, session.messages.length - keepTailCount),
-    );
-    if (head.length === 0) return;
-    const previousSummary = session.messages.find(
-      (m) => m.role === "assistant" && m.content.startsWith(SUMMARY_MARKER),
-    )?.content;
-    const summaryMessage: ChatMessage = {
-      role: "assistant",
-      content: this.buildSummary(head, previousSummary),
-      timestamp: Date.now(),
-    };
-    session.messages = [summaryMessage, ...tail];
-    while (
-      session.messages.length > 10 &&
-      this.approxTokens(session.messages) > MAX_TOKENS_APPROX
-    ) {
-      session.messages.splice(1, 2);
-    }
-  }
-
-  private approxTokens(messages: ChatMessage[]): number {
-    return messages.reduce((sum, m) => {
-      return (
-        sum +
-        estimateTokens(m.content || "") +
-        estimateTokens(m.reasoning || "")
-      );
-    }, 0);
-  }
-
-  private buildSummary(
-    messages: ChatMessage[],
-    previousSummary?: string,
-  ): string {
-    const lines: string[] = [];
-    if (previousSummary) {
-      lines.push(previousSummary.replace(/\s+$/g, ""));
-      lines.push("");
-      lines.push("Latest condensed history:");
-    } else {
-      lines.push(`${SUMMARY_MARKER} Earlier conversation has been compacted.`);
-    }
-    for (const msg of messages) {
-      const role = msg.role === "user" ? "User" : "Assistant";
-      const content = (msg.content || "").replace(/\s+/g, " ").trim();
-      if (!content) continue;
-      lines.push(
-        `- ${role}: ${content.length > 180 ? `${content.slice(0, 180)}...` : content}`,
-      );
-    }
-    return lines.join("\n");
+  private clearSessionDigest(session: ChatSession) {
+    delete session.contextDigest;
+    delete session.contextDigestUpToMessageIndex;
+    delete session.contextDigestUpdatedAt;
+    delete session.contextDigestTokenEstimate;
+    delete session.contextDigestSource;
   }
 
   private markDirty(itemId: number) {

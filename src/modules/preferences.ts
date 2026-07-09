@@ -9,8 +9,14 @@ import {
 import { AIService } from "../services/ai-service";
 import {
   getConfiguredCodexPath,
+  getConfiguredCodexCheapModelSlug,
+  getConfiguredCodexContextWindow,
+  getConfiguredCodexModelSlug,
   getConfiguredVaultPath,
   getDefaultVaultPath,
+  setConfiguredCodexCheapModelSlug,
+  setConfiguredCodexContextWindow,
+  setConfiguredCodexModelSlug,
   setConfiguredVaultPath,
   setConfiguredCodexPath,
   testCodexBinary,
@@ -68,29 +74,74 @@ function bindCodexSettings(doc: Document) {
   const saveBtn = doc.querySelector(
     `#${prefId("codexSave")}`,
   ) as XUL.Button | null;
+  const modelInput = doc.querySelector(
+    `#${prefId("codexModelSlug")}`,
+  ) as HTMLInputElement | null;
+  const contextWindowInput = doc.querySelector(
+    `#${prefId("codexContextWindow")}`,
+  ) as HTMLInputElement | null;
+  const cheapModelInput = doc.querySelector(
+    `#${prefId("codexCheapModelSlug")}`,
+  ) as HTMLInputElement | null;
   const testBtn = doc.querySelector(
     `#${prefId("codexTest")}`,
   ) as XUL.Button | null;
   const statusEl = doc.querySelector(
     `#${prefId("codexStatus")}`,
   ) as HTMLElement | null;
-  if (!pathInput || !saveBtn || !testBtn || !statusEl) return;
+  if (
+    !pathInput ||
+    !saveBtn ||
+    !modelInput ||
+    !contextWindowInput ||
+    !cheapModelInput ||
+    !testBtn ||
+    !statusEl
+  )
+    return;
 
   pathInput.value = getConfiguredCodexPath();
+  modelInput.value = getConfiguredCodexModelSlug();
+  contextWindowInput.value = getConfiguredCodexContextWindow()?.toString() || "";
+  cheapModelInput.value = getConfiguredCodexCheapModelSlug();
   setCodexStatus(
     statusEl,
-    pathInput.value
-      ? `Configured: ${pathInput.value}`
-      : "No explicit path configured. Auto-detection will be used.",
+    [
+      pathInput.value
+        ? `Configured path: ${pathInput.value}`
+        : "No explicit path configured. Auto-detection will be used.",
+      modelInput.value ? `Model override: ${modelInput.value}` : "",
+      contextWindowInput.value
+        ? `Context window override: ${contextWindowInput.value}`
+        : "Context window auto-detection enabled.",
+      cheapModelInput.value ? `Cheap model: ${cheapModelInput.value}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
 
   saveBtn.addEventListener("command", () => {
     setConfiguredCodexPath(pathInput.value.trim());
+    setConfiguredCodexModelSlug(modelInput.value.trim());
+    setConfiguredCodexContextWindow(contextWindowInput.value.trim());
+    setConfiguredCodexCheapModelSlug(cheapModelInput.value.trim());
     setCodexStatus(
       statusEl,
-      pathInput.value.trim()
-        ? `${getString("pref-codex-saved")}\n${pathInput.value.trim()}`
-        : `${getString("pref-codex-saved")}\nAuto-detect enabled.`,
+      [
+        getString("pref-codex-saved"),
+        pathInput.value.trim()
+          ? `Path: ${pathInput.value.trim()}`
+          : "Path auto-detect enabled.",
+        modelInput.value.trim() ? `Model: ${modelInput.value.trim()}` : "",
+        contextWindowInput.value.trim()
+          ? `Context window: ${contextWindowInput.value.trim()}`
+          : "Context window auto-detection enabled.",
+        cheapModelInput.value.trim()
+          ? `Cheap model: ${cheapModelInput.value.trim()}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
       "success",
     );
   });

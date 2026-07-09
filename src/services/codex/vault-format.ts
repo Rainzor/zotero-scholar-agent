@@ -8,6 +8,37 @@ export type PaperVaultMeta = {
   year?: string;
 };
 
+export const SEMANTIC_RELATIONSHIP_TYPES = [
+  "cites",
+  "extends",
+  "contradicts",
+  "supports",
+  "uses_same_method",
+  "uses_same_dataset",
+  "uses_same_metric",
+  "solves_limitation_of",
+  "can_combine_with",
+  "inspired_question",
+] as const;
+
+export type SemanticRelationshipType =
+  (typeof SEMANTIC_RELATIONSHIP_TYPES)[number];
+
+export type SemanticRelationship = {
+  sourceItemKey: string;
+  targetItemKey: string;
+  type: SemanticRelationshipType;
+  rationale: string;
+  evidence?: string;
+  updatedAt: string;
+};
+
+export type PaperRecordProjection = PaperVaultMeta & {
+  schemaVersion: 1;
+  generatedAt: string;
+  relationships: SemanticRelationship[];
+};
+
 /** Sanitize a vault path segment (itemKey / sessionId). */
 export function safePathSegment(input: string): string {
   return String(input || "unknown")
@@ -66,17 +97,35 @@ export function initialMemoryMarkdown(meta: PaperVaultMeta): string {
     "",
     `> itemKey: ${meta.itemKey}`,
     "",
-    "## TL;DR",
+    "## Abstract",
     "",
-    "## Key contributions",
+    "## Contribution",
+    "",
+    "## Problem",
     "",
     "## Method",
     "",
+    "## Insight",
+    "",
     "## Results",
     "",
-    "## My understanding / open questions",
+    "## Takeaways",
     "",
-    "## Cross-references",
+    "## Reader Thinking",
+    "",
+    "### Questions",
+    "",
+    "### Critiques",
+    "",
+    "### Ideas / Inspirations",
+    "",
+    "## Library Connections",
+    "",
+    "### Explicit Citations",
+    "",
+    "### Semantic Relationships",
+    "",
+    "## Evidence Pointers",
     "",
   ].join("\n");
 }
@@ -178,11 +227,85 @@ export function buildPaperVaultPaths(vaultDir: string, itemKey: string) {
     paperDir,
     textPath: joinPathParts(paperDir, "text.txt"),
     memoryPath: joinPathParts(paperDir, "memory.md"),
+    recordPath: joinPathParts(paperDir, "record.json"),
     conversationsDir,
     conversationPath: (sessionId: string) =>
       joinPathParts(
         conversationsDir,
         `${safePathSegment(sessionId)}.md`,
       ),
+  };
+}
+
+export function isSemanticRelationshipType(
+  value: string,
+): value is SemanticRelationshipType {
+  return (SEMANTIC_RELATIONSHIP_TYPES as readonly string[]).includes(value);
+}
+
+const RELATIONSHIP_LINE_PATTERN =
+  /^-\s+\[([a-z_]+)\]\s+\[([^\]]+)\]\(\.\.\/([^/]+)\/memory\.md\):\s*(.+)$/gm;
+
+export function parseSemanticRelationships(
+  memoryMarkdown: string,
+  sourceItemKey: string,
+  updatedAt: string,
+): SemanticRelationship[] {
+  const relationships: SemanticRelationship[] = [];
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+  const pattern = new RegExp(RELATIONSHIP_LINE_PATTERN.source, "gm");
+  while ((match = pattern.exec(memoryMarkdown || ""))) {
+    const type = String(match[1] || "").trim();
+    if (!isSemanticRelationshipType(type)) continue;
+    const targetItemKey = safePathSegment(match[3] || "");
+    if (!targetItemKey || targetItemKey === "unknown") continue;
+    const parsed = splitRelationshipRationale(match[4] || "");
+    const key = `${sourceItemKey}\u0000${targetItemKey}\u0000${type}\u0000${parsed.rationale}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    relationships.push({
+      sourceItemKey,
+      targetItemKey,
+      type,
+      rationale: parsed.rationale,
+      evidence: parsed.evidence || undefined,
+      updatedAt,
+    });
+  }
+  return relationships;
+}
+
+function splitRelationshipRationale(raw: string): {
+  rationale: string;
+  evidence: string;
+} {
+  const text = String(raw || "").trim();
+  const marker = /\s+Evidence:\s*/i;
+  const parts = text.split(marker);
+  return {
+    rationale: String(parts[0] || "").trim(),
+    evidence: parts.slice(1).join(" Evidence: ").trim(),
+  };
+}
+
+export function buildPaperRecordProjection(options: {
+  meta: PaperVaultMeta;
+  memoryMarkdown: string;
+  generatedAt: string;
+}): PaperRecordProjection {
+  return {
+    schemaVersion: 1,
+    generatedAt: options.generatedAt,
+    itemId: options.meta.itemId,
+    itemKey: options.meta.itemKey,
+    title: options.meta.title,
+    creators: options.meta.creators,
+    year: options.meta.year,
+    relationships: parseSemanticRelationships(
+      options.memoryMarkdown,
+      options.meta.itemKey,
+      options.generatedAt,
+    ),
   };
 }

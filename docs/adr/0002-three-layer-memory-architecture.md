@@ -4,6 +4,8 @@ status: accepted
 
 # Three-layer memory architecture for the Knowledge Vault
 
+> Terminology note: ADR-0003 refines "Memory Note" into Paper Knowledge Record (domain object), Knowledge Surface (`memory.md`), and Structured Projection (`record.json`). This ADR remains accepted for the three-layer separation.
+
 ## Context
 
 The product goal is cross-paper knowledge accumulation — the agent should get more useful the more the user reads. Codex has no automatic learning (see ADR-0001), so memory must be designed as files. The naive design — dump each chat transcript into a per-paper file and feed it back to Codex — fails: transcripts are verbose, full of dead ends, and would pollute cross-paper retrieval, while also conflating "what we said" with "what was actually learned."

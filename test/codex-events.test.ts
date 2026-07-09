@@ -95,6 +95,27 @@ describe("applyCodexEvent — phase0-shaped JSONL fixture", () => {
     });
     expect(state.content).toBe("First\n\nSecond");
   });
+
+  it("maps alternate Codex usage field names into context usage", () => {
+    let state = createCodexStreamState();
+    state = applyCodexEvent(state, {
+      type: "turn.completed",
+      usage: {
+        inputTokens: 1000,
+        cachedInputTokens: 750,
+        outputTokens: 120,
+        reasoningOutputTokens: 30,
+        totalTokens: 1120,
+      },
+    });
+    expect(state.usage).toEqual({
+      promptTokens: 1000,
+      completionTokens: 120,
+      totalTokens: 1120,
+      reasoningTokens: 30,
+      cachedInputTokens: 750,
+    });
+  });
 });
 
 describe("item type guards", () => {

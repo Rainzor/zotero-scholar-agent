@@ -1,9 +1,12 @@
 pref-codex-title = Codex CLI
 pref-codex-description = Zotero Agent 使用你本机已配置好的 Codex CLI。路径留空时会自动检测。
 pref-codex-path = 路径
-pref-codex-save = 保存路径
+pref-codex-model = 模型
+pref-codex-cheapModel = 便宜模型
+pref-codex-contextWindow = 上下文窗口
+pref-codex-save = 保存 Codex 设置
 pref-codex-test = 自动检测 / 测试
-pref-codex-saved = Codex 路径已保存。
+pref-codex-saved = Codex 设置已保存。
 pref-codex-testing = 正在测试 Codex CLI...
 pref-codex-success = Codex 可用
 pref-codex-fail = Codex 测试失败

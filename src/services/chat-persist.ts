@@ -1,8 +1,14 @@
 import type { ChatMessage } from "../addon";
+import type { ContextDigestSource } from "./context-digest";
 
 export type PersistedSession = {
   sessionId: string;
   codexThreadId?: string;
+  contextDigest?: string;
+  contextDigestUpToMessageIndex?: number;
+  contextDigestUpdatedAt?: number;
+  contextDigestTokenEstimate?: number;
+  contextDigestSource?: ContextDigestSource;
   title: string;
   /** Always "agent" in current architecture; kept for on-disk compatibility. */
   contextMode: "agent";
@@ -57,9 +63,28 @@ export function normalizePersistedSession(
 ): PersistedSession {
   const now = options?.now ?? Date.now();
   const makeId = options?.newId ?? (() => newSessionId(now));
+  const digest = String(raw?.contextDigest || "").trim();
+  const digestUpTo = Number(raw?.contextDigestUpToMessageIndex);
+  const digestUpdatedAt = Number(raw?.contextDigestUpdatedAt);
+  const digestTokenEstimate = Number(raw?.contextDigestTokenEstimate);
+  const digestSource = normalizeDigestSource(raw?.contextDigestSource);
   return {
     sessionId: String(raw?.sessionId || makeId()),
     codexThreadId: String(raw?.codexThreadId || ""),
+    contextDigest: digest || undefined,
+    contextDigestUpToMessageIndex:
+      digest && Number.isFinite(digestUpTo) && digestUpTo >= 0
+        ? Math.floor(digestUpTo)
+        : undefined,
+    contextDigestUpdatedAt:
+      digest && Number.isFinite(digestUpdatedAt) && digestUpdatedAt > 0
+        ? digestUpdatedAt
+        : undefined,
+    contextDigestTokenEstimate:
+      digest && Number.isFinite(digestTokenEstimate) && digestTokenEstimate > 0
+        ? Math.floor(digestTokenEstimate)
+        : undefined,
+    contextDigestSource: digest ? digestSource : undefined,
     title: String(raw?.title || "Chat"),
     contextMode: "agent",
     messages: Array.isArray(raw?.messages)
@@ -78,6 +103,11 @@ export function serializeItemState(state: {
   sessions: Array<{
     sessionId: string;
     codexThreadId?: string;
+    contextDigest?: string;
+    contextDigestUpToMessageIndex?: number;
+    contextDigestUpdatedAt?: number;
+    contextDigestTokenEstimate?: number;
+    contextDigestSource?: ContextDigestSource;
     title: string;
     messages: ChatMessage[];
     createdAt: number;
@@ -93,6 +123,20 @@ export function serializeItemState(state: {
     sessions: state.sessions.map((s) => ({
       sessionId: s.sessionId,
       codexThreadId: s.codexThreadId || undefined,
+      contextDigest: s.contextDigest?.trim() || undefined,
+      contextDigestUpToMessageIndex:
+        typeof s.contextDigestUpToMessageIndex === "number"
+          ? s.contextDigestUpToMessageIndex
+          : undefined,
+      contextDigestUpdatedAt:
+        typeof s.contextDigestUpdatedAt === "number"
+          ? s.contextDigestUpdatedAt
+          : undefined,
+      contextDigestTokenEstimate:
+        typeof s.contextDigestTokenEstimate === "number"
+          ? s.contextDigestTokenEstimate
+          : undefined,
+      contextDigestSource: s.contextDigestSource,
       title: s.title,
       contextMode: "agent",
       messages: s.messages.map((m) => ({ ...m })),
@@ -113,4 +157,15 @@ export function isValidPersistedItem(
     p.itemKey.length > 0 &&
     Array.isArray(p.sessions)
   );
+}
+
+function normalizeDigestSource(
+  value: unknown,
+): ContextDigestSource | undefined {
+  const source = String(value || "");
+  return source === "codex-cheap" ||
+    source === "codex-default" ||
+    source === "deterministic"
+    ? source
+    : undefined;
 }

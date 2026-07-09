@@ -1,5 +1,7 @@
 import { config } from "../package.json";
 import { createZToolkit } from "./utils/ztoolkit";
+import type { ContextDigestSource } from "./services/context-digest";
+import type { SemanticRelationship } from "./services/codex/vault-format";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -7,11 +9,24 @@ export type TokenUsage = {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  contextWindowTokens?: number;
+  effectiveContextWindowTokens?: number;
+  contextUsedPercent?: number;
+  contextSource?: "codex-config" | "codex-catalog" | "manual" | "unknown";
+  modelSlug?: string;
 };
 export type CodexActivity = {
   command: string;
   status?: string;
   exitCode?: number | null;
+};
+export type PaperContext = {
+  itemKey: string;
+  title: string;
+  creators?: string;
+  year?: string;
 };
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -23,12 +38,19 @@ export type ChatMessage = {
   activities?: CodexActivity[];
   memoryUpdated?: boolean;
   committed?: boolean;
+  contextPapers?: PaperContext[];
+  relationshipUpdates?: SemanticRelationship[];
 };
 export type ChatSession = {
   sessionId: string;
   itemId: number;
   itemKey: string;
   codexThreadId?: string;
+  contextDigest?: string;
+  contextDigestUpToMessageIndex?: number;
+  contextDigestUpdatedAt?: number;
+  contextDigestTokenEstimate?: number;
+  contextDigestSource?: ContextDigestSource;
   title: string;
   messages: ChatMessage[];
   createdAt: number;
@@ -88,6 +110,7 @@ class Addon {
       prefillInput: string;
       referenceText: string;
       responseQuote: string;
+      mentionedPapers: PaperContext[];
     };
   };
   public hooks: typeof hooks;
@@ -112,6 +135,7 @@ class Addon {
         prefillInput: "",
         referenceText: "",
         responseQuote: "",
+        mentionedPapers: [],
       },
     };
     this.hooks = hooks;

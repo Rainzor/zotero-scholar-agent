@@ -138,6 +138,95 @@
   padding: 0 4px;
 }
 
+/* ===== Hidden Context Digest Bar ===== */
+.zoteroagent-context-digest-bar {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #eeeeee;
+  background: #fcfcfc;
+}
+
+.zoteroagent-context-digest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.zoteroagent-context-digest-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoteroagent-context-digest-chip.is-compacted {
+  color: #2563eb;
+}
+
+.zoteroagent-context-digest-chip.is-warning {
+  color: #b45309;
+}
+
+.zoteroagent-context-digest-action {
+  flex-shrink: 0;
+  height: 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4b5563;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoteroagent-context-digest-action:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.zoteroagent-context-digest-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.zoteroagent-context-digest-debug {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.zoteroagent-context-digest-debug summary {
+  padding: 6px 8px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.zoteroagent-context-digest-debug pre {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-top: 1px solid #eeeeee;
+  color: #374151;
+  background: #f9fafb;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 /* ===== History Panel ===== */
 .zoteroagent-history-panel {
   position: absolute;
@@ -673,6 +762,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  padding: 8px 10px 0;
 }
 
 .zoteroagent-context-chip {
@@ -707,6 +797,10 @@
 
 .zoteroagent-context-chip.response-quote {
   border-left: 3px solid #9b59b6;
+}
+
+.zoteroagent-context-chip.paper-context {
+  border-left: 3px solid #2563eb;
 }
 
 .zoteroagent-context-chip-icon {
@@ -778,6 +872,59 @@
 
 .zoteroagent-context-chip:hover > .zoteroagent-context-chip-content {
   display: block;
+}
+
+.zoteroagent-mention-panel {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 52px;
+  z-index: 90;
+  display: none;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+
+.zoteroagent-mention-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zoteroagent-mention-item:hover,
+.zoteroagent-mention-item.is-active {
+  background: #eef4ff;
+}
+
+.zoteroagent-mention-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.zoteroagent-mention-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #6b7280;
 }
 
 /* ===== Reference in message history ===== */
@@ -902,6 +1049,44 @@
   font-weight: 500;
 }
 
+.zoteroagent-msg-paper-context {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-left: 3px solid #2563eb;
+  border-radius: 0 6px 6px 0;
+}
+
+.zoteroagent-msg-paper-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1d4ed8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.zoteroagent-msg-paper-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.zoteroagent-msg-paper-pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  color: #1e3a8a;
+  font-size: 11px;
+}
+
 /* ===== Input Area ===== */
 .zoteroagent-input-area {
   display: none;
@@ -919,6 +1104,7 @@
 
 /* ---- Compose Area (card) ---- */
 .zoteroagent-compose-area {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -933,7 +1119,7 @@
   transition:
     border-color 200ms ease,
     box-shadow 200ms ease;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .zoteroagent-compose-area:focus-within {
@@ -1495,6 +1681,58 @@
   white-space: pre-wrap;
 }
 
+.zoteroagent-relationship-review {
+  margin: 2px 0 8px;
+  border: 1px solid #ccfbf1;
+  border-radius: 8px;
+  background: #f0fdfa;
+  overflow: hidden;
+}
+
+.zoteroagent-relationship-review-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f766e;
+}
+
+.zoteroagent-relationship-review-summary::-webkit-details-marker {
+  display: none;
+}
+
+.zoteroagent-relationship-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 10px 8px;
+}
+
+.zoteroagent-relationship-review-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.zoteroagent-relationship-type {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.zoteroagent-relationship-text {
+  min-width: 0;
+  color: #134e4a;
+  word-break: break-word;
+}
+
 /* ===== Turn Footer (trust signals) ===== */
 .zoteroagent-turn-footer {
   display: flex;
@@ -1515,6 +1753,18 @@
   color: #2563eb;
   background: rgba(37, 99, 235, 0.1);
   border-color: rgba(37, 99, 235, 0.25);
+}
+
+.zoteroagent-turn-chip.is-context {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.zoteroagent-turn-chip.is-relationship {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.1);
+  border-color: rgba(15, 118, 110, 0.25);
 }
 
 .zoteroagent-turn-chip.is-commit {
