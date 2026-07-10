@@ -2138,26 +2138,37 @@ function updateStreamingMessage(
 }
 
 function enhancePageEvidenceChips(root: HTMLElement, body: HTMLElement) {
-  const doc = root.ownerDocument;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = (node as Text).parentElement;
-      if (!parent || shouldSkipPageEvidenceNode(parent)) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return /\[page\s+[0-9]+\]/i.test(node.textContent || "")
-        ? NodeFilter.FILTER_ACCEPT
-        : NodeFilter.FILTER_SKIP;
-    },
-  });
-  const nodes: Text[] = [];
-  let current = walker.nextNode();
-  while (current) {
-    nodes.push(current as Text);
-    current = walker.nextNode();
-  }
-  for (const node of nodes) {
-    replacePageEvidenceTextNode(node, body);
+  // Page chips are a cosmetic enhancement layered on top of already-rendered
+  // message content. It must never throw: a failure here previously bubbled to
+  // renderMessages' outer catch and blanked the whole transcript. Resolve
+  // NodeFilter from the document's window (the bare global is not reliably in
+  // scope inside the Zotero chrome bundle) and swallow any DOM error.
+  try {
+    const doc = root.ownerDocument;
+    const nodeFilter: typeof NodeFilter =
+      (doc.defaultView as any)?.NodeFilter || (globalThis as any).NodeFilter;
+    const walker = doc.createTreeWalker(root, nodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = (node as Text).parentElement;
+        if (!parent || shouldSkipPageEvidenceNode(parent)) {
+          return nodeFilter.FILTER_REJECT;
+        }
+        return /\[page\s+[0-9]+\]/i.test(node.textContent || "")
+          ? nodeFilter.FILTER_ACCEPT
+          : nodeFilter.FILTER_SKIP;
+      },
+    });
+    const nodes: Text[] = [];
+    let current = walker.nextNode();
+    while (current) {
+      nodes.push(current as Text);
+      current = walker.nextNode();
+    }
+    for (const node of nodes) {
+      replacePageEvidenceTextNode(node, body);
+    }
+  } catch (e) {
+    ztoolkit.log("[Agent] enhancePageEvidenceChips skipped:", e);
   }
 }
 
@@ -2382,82 +2393,90 @@ function renderMessages(body: HTMLElement, itemId: number) {
     const doc = body.ownerDocument;
     for (let i = 0; i < sessions.length; i++) {
       const msg = sessions[i];
-      const wrapper = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-      wrapper.className = `zoteroagent-message ${msg.role === "user" ? "user" : "assistant"}`;
-      wrapper.dataset.msgIndex = String(i);
+      // Isolate each message: a render failure in one turn (e.g. a bad
+      // activity payload or chip enhancement) must not blank the messages
+      // after it. Previously a single throw escaped to the outer catch and
+      // dropped the rest of the transcript.
+      try {
+        const wrapper = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+        wrapper.className = `zoteroagent-message ${msg.role === "user" ? "user" : "assistant"}`;
+        wrapper.dataset.msgIndex = String(i);
 
-      const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-      row.className = "zoteroagent-message-row";
+        const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+        row.className = "zoteroagent-message-row";
 
-      const avatar = createMessageAvatar(doc, msg);
-      const main = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-      main.className = "zoteroagent-message-main";
+        const avatar = createMessageAvatar(doc, msg);
+        const main = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+        main.className = "zoteroagent-message-main";
 
-      main.appendChild(createMessageHeader(doc, msg));
+        main.appendChild(createMessageHeader(doc, msg));
 
-      if (msg.role === "assistant") {
-        if (msg.reasoning) {
-          const thinkBlock = doc.createElementNS(
-            XHTML_NS,
-            "details",
-          ) as HTMLElement;
-          thinkBlock.className = "zoteroagent-thinking";
-          const summary = doc.createElementNS(XHTML_NS, "summary");
-          summary.className = "zoteroagent-thinking-summary";
-          summary.textContent = "Deeply thought";
-          thinkBlock.appendChild(summary);
-          const thinkContent = doc.createElementNS(XHTML_NS, "div");
-          thinkContent.className = "zoteroagent-thinking-content";
-          thinkContent.textContent = msg.reasoning;
-          thinkBlock.appendChild(thinkContent);
-          main.appendChild(thinkBlock);
+        if (msg.role === "assistant") {
+          if (msg.reasoning) {
+            const thinkBlock = doc.createElementNS(
+              XHTML_NS,
+              "details",
+            ) as HTMLElement;
+            thinkBlock.className = "zoteroagent-thinking";
+            const summary = doc.createElementNS(XHTML_NS, "summary");
+            summary.className = "zoteroagent-thinking-summary";
+            summary.textContent = "Deeply thought";
+            thinkBlock.appendChild(summary);
+            const thinkContent = doc.createElementNS(XHTML_NS, "div");
+            thinkContent.className = "zoteroagent-thinking-content";
+            thinkContent.textContent = msg.reasoning;
+            thinkBlock.appendChild(thinkContent);
+            main.appendChild(thinkBlock);
+          }
+          if (msg.activities?.length) {
+            main.appendChild(buildActivityBlock(doc, msg.activities));
+          }
+          if (msg.relationshipUpdates?.length) {
+            main.appendChild(
+              buildRelationshipReviewBlock(doc, msg.relationshipUpdates, body),
+            );
+          }
+          wrapper.dataset.rawContent = msg.content || "";
         }
-        if (msg.activities?.length) {
-          main.appendChild(buildActivityBlock(doc, msg.activities));
+
+        const inner = doc.createElementNS(XHTML_NS, "div");
+        inner.className = "zoteroagent-message-content";
+
+        if (msg.role === "assistant") {
+          try {
+            inner.innerHTML = renderMarkdown(msg.content);
+          } catch (_e) {
+            inner.textContent = msg.content;
+          }
+          main.appendChild(inner);
+          enhancePageEvidenceChips(inner as HTMLElement, body);
+        } else {
+          renderUserMessage(inner, msg);
+          main.appendChild(inner);
         }
-        if (msg.relationshipUpdates?.length) {
-          main.appendChild(
-            buildRelationshipReviewBlock(doc, msg.relationshipUpdates, body),
-          );
+
+        if (
+          msg.role === "assistant" &&
+          (msg.memoryUpdated ||
+            msg.committed ||
+            msg.contextPapers?.length ||
+            msg.relationshipUpdates?.length)
+        ) {
+          main.appendChild(buildTurnFooter(doc, msg));
         }
-        wrapper.dataset.rawContent = msg.content || "";
-      }
 
-      const inner = doc.createElementNS(XHTML_NS, "div");
-      inner.className = "zoteroagent-message-content";
-
-      if (msg.role === "assistant") {
-        try {
-          inner.innerHTML = renderMarkdown(msg.content);
-        } catch (_e) {
-          inner.textContent = msg.content;
+        if (msg.timestamp) {
+          main.appendChild(createMessageMetaRow(doc, msg, body, itemId));
         }
-        enhancePageEvidenceChips(inner as HTMLElement, body);
-      } else {
-        renderUserMessage(inner, msg);
+
+        row.appendChild(avatar);
+        row.appendChild(main);
+        wrapper.appendChild(row);
+
+        container.appendChild(wrapper);
+      } catch (e) {
+        ztoolkit.log("[Agent] renderMessages: skipped message", i, e);
       }
-
-      main.appendChild(inner);
-
-      if (
-        msg.role === "assistant" &&
-        (msg.memoryUpdated ||
-          msg.committed ||
-          msg.contextPapers?.length ||
-          msg.relationshipUpdates?.length)
-      ) {
-        main.appendChild(buildTurnFooter(doc, msg));
-      }
-
-      if (msg.timestamp) {
-        main.appendChild(createMessageMetaRow(doc, msg, body, itemId));
-      }
-
-      row.appendChild(avatar);
-      row.appendChild(main);
-      wrapper.appendChild(row);
-
-      container.appendChild(wrapper);
     }
 
     syncSessionSelector(body, itemId);
