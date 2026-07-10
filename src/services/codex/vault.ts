@@ -9,14 +9,23 @@ import {
   buildPaperVaultPaths,
   buildPaperRecordProjection,
   buildReadmeTable,
+  buildTextMeta,
   formatPagesForVault,
+  formatWorkerTextForVault,
+  hasPageEvidenceMarkers,
   initialMemoryMarkdown,
+  normalizeTextMeta,
   joinPathParts,
   mergeReadmeEntries,
   normalizeVaultPath,
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
+  shouldAttemptTextParserMigration,
+  shouldReplaceTextWithPageMarkedVersion,
+  TEXT_PARSER_VERSION,
+  type TextMeta,
+  type TextParserSource,
   type SemanticRelationship,
   type PaperVaultMeta,
 } from "./vault-format";
@@ -35,6 +44,7 @@ export type PaperVaultPaths = {
   vaultDir: string;
   paperDir: string;
   textPath: string;
+  textMetaPath: string;
   memoryPath: string;
   recordPath: string;
   conversationsDir: string;
@@ -107,6 +117,7 @@ export async function getPaperVaultPaths(
     vaultDir: paths.vaultDir,
     paperDir: paths.paperDir,
     textPath: paths.textPath,
+    textMetaPath: paths.textMetaPath,
     memoryPath: paths.memoryPath,
     recordPath: paths.recordPath,
     conversationsDir: paths.conversationsDir,
@@ -117,6 +128,11 @@ export type VaultSearchHit = {
   itemKey: string;
   title: string;
   matches: { line: number; text: string }[];
+};
+
+type TextExtractionResult = {
+  text: string;
+  source: TextParserSource;
 };
 
 export async function readPaperMemory(itemKey: string): Promise<string> {
@@ -328,18 +344,121 @@ export async function ensurePaperVault(
   const textExists = ioUtils && (await safeExists(paths.textPath));
   if (options.forceTextRefresh || !textExists) {
     options.onStatus?.("Extracting paper text...");
-    const text = await buildTextForPaper(options);
-    if (!text.trim()) {
+    const result = await buildTextForPaper(options);
+    if (!result.text.trim()) {
       throw new Error(
         "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.",
       );
     }
-    await getIOUtils().writeUTF8(paths.textPath, text);
+    await writeTextAndMeta(paths.textPath, paths.textMetaPath, result);
+  } else {
+    await migrateTextIfParserOutdated(options, paths);
   }
 
   await updateReadme(options);
   await refreshPaperRecordProjection(options);
   return paths;
+}
+
+async function migrateTextIfParserOutdated(
+  options: EnsurePaperVaultOptions,
+  paths: PaperVaultPaths,
+) {
+  const existing = await readTextIfExists(paths.textPath);
+  const meta = await readTextMeta(paths.textMetaPath, existing);
+  if (!shouldAttemptTextParserMigration(meta)) {
+    if (!(await safeExists(paths.textMetaPath))) {
+      await writeTextMeta(paths.textMetaPath, meta);
+    }
+    return;
+  }
+  options.onStatus?.("Refreshing paper text parser version...");
+  const result = await buildTextForPaper(options);
+  const status = !result.text.trim()
+    ? "empty"
+    : hasPageEvidenceMarkers(result.text)
+      ? "ok"
+      : "no-page-markers";
+  if (!result.text.trim()) {
+    await writeTextMeta(
+      paths.textMetaPath,
+      buildTextMeta({
+        text: existing,
+        source: meta.source,
+        generatedAt: meta.generatedAt,
+        textParserVersion: meta.textParserVersion,
+        attemptedTextParserVersion: TEXT_PARSER_VERSION,
+        lastAttemptedAt: new Date().toISOString(),
+        lastAttemptStatus: status,
+      }),
+    );
+    return;
+  }
+
+  if (
+    !existing.trim() ||
+    shouldReplaceTextWithPageMarkedVersion(existing, result.text) ||
+    existing.trim() !== result.text.trim()
+  ) {
+    await writeTextAndMeta(paths.textPath, paths.textMetaPath, result);
+  } else {
+    await writeTextMeta(
+      paths.textMetaPath,
+      buildTextMeta({
+        text: existing,
+        source: result.source,
+        generatedAt: new Date().toISOString(),
+        textParserVersion: TEXT_PARSER_VERSION,
+        attemptedTextParserVersion: TEXT_PARSER_VERSION,
+        lastAttemptedAt: new Date().toISOString(),
+        lastAttemptStatus: status,
+      }),
+    );
+  }
+  await appendVaultLog(
+    "pdf-text-parser-migration",
+    `Refreshed text.txt parser metadata for ${options.itemKey}`,
+    {
+      itemKey: options.itemKey,
+      pdfItemId: options.pdfItemId,
+      fromVersion: meta.textParserVersion,
+      toVersion: TEXT_PARSER_VERSION,
+      source: result.source,
+      hasPageMarkers: hasPageEvidenceMarkers(result.text),
+    },
+  );
+}
+
+async function writeTextAndMeta(
+  textPath: string,
+  metaPath: string,
+  result: TextExtractionResult,
+) {
+  await getIOUtils().writeUTF8(textPath, result.text);
+  await writeTextMeta(
+    metaPath,
+    buildTextMeta({
+      text: result.text,
+      source: result.source,
+      generatedAt: new Date().toISOString(),
+    }),
+  );
+}
+
+async function readTextMeta(metaPath: string, fallbackText: string): Promise<TextMeta> {
+  const raw = await readTextIfExists(metaPath);
+  if (!raw.trim()) {
+    return normalizeTextMeta(null, fallbackText, new Date().toISOString());
+  }
+  try {
+    return normalizeTextMeta(JSON.parse(raw), fallbackText, new Date().toISOString());
+  } catch {
+    return normalizeTextMeta(null, fallbackText, new Date().toISOString());
+  }
+}
+
+async function writeTextMeta(metaPath: string, meta: TextMeta) {
+  await getIOUtils().writeUTF8(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
 }
 
 export async function appendConversationTurn(options: {
@@ -414,11 +533,11 @@ export async function commitVaultChanges(message: string): Promise<boolean> {
 
 async function buildTextForPaper(
   options: EnsurePaperVaultOptions,
-): Promise<string> {
+): Promise<TextExtractionResult> {
   const cached = await loadPageCache(options.itemKey);
   if (cached?.pages?.length) {
     const cachedText = formatPagesForVault(cached.pages);
-    if (cachedText.trim()) return cachedText;
+    if (cachedText.trim()) return { text: cachedText, source: "pdfjs" };
     ztoolkit.log(`[Codex Vault] Ignoring empty page cache for ${options.itemKey}`);
     await appendVaultLog("pdf-text-empty-cache", `Ignoring empty page cache for ${options.itemKey}`, {
       itemKey: options.itemKey,
@@ -433,7 +552,7 @@ async function buildTextForPaper(
     const parsedText = formatPagesForVault(pages);
     if (parsedText.trim()) {
       await savePageCache(options.itemKey, buildPageCacheData(pages));
-      return parsedText;
+      return { text: parsedText, source: "pdfjs" };
     }
     ztoolkit.log(
       `[Codex Vault] PDF.js parse returned no text for ${options.itemKey} (${pages.length} pages)`,
@@ -441,7 +560,12 @@ async function buildTextForPaper(
     await appendVaultLog(
       "pdf-text-empty-pdfjs",
       `PDF.js parse returned no text for ${options.itemKey}`,
-      { itemKey: options.itemKey, pdfItemId: options.pdfItemId, pages: pages.length },
+      {
+        itemKey: options.itemKey,
+        pdfItemId: options.pdfItemId,
+        pages: pages.length,
+        emptyPages: pages.filter((page) => !String(page.plainText || "").trim()).length,
+      },
     );
   } else {
     ztoolkit.log(
@@ -456,8 +580,15 @@ async function buildTextForPaper(
 
   if (options.pdfItemId > 0) {
     const fullText = await getFullText(options.pdfItemId);
-    const workerText = String(fullText || "").trim();
-    if (workerText) return workerText;
+    const workerText = formatWorkerTextForVault(fullText);
+    if (workerText) {
+      return {
+        text: workerText,
+        source: hasPageEvidenceMarkers(workerText)
+          ? "pdfworker-formfeed"
+          : "pdfworker-plain",
+      };
+    }
     ztoolkit.log(
       `[Codex Vault] PDFWorker returned no text for ${options.itemKey}, pdfItemId=${options.pdfItemId}`,
     );
@@ -467,7 +598,7 @@ async function buildTextForPaper(
       { itemKey: options.itemKey, pdfItemId: options.pdfItemId },
     );
   }
-  return "";
+  return { text: "", source: "pdfworker-plain" };
 }
 
 function getPdfDocumentFromAnyReader(pdfItemId: number): any | null {

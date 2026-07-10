@@ -5,16 +5,24 @@ import {
   buildConversationTurnMarkdown,
   buildPaperVaultPaths,
   buildReadmeTable,
+  buildTextMeta,
   escapeTable,
   formatPagesForVault,
+  formatWorkerTextForVault,
+  hasPageEvidenceMarkers,
+  inferTextMetaFromContent,
   initialMemoryMarkdown,
   joinPathParts,
   mergeReadmeEntries,
   normalizeVaultPath,
+  normalizeTextMeta,
   parseSemanticRelationships,
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
+  shouldAttemptTextParserMigration,
+  shouldReplaceTextWithPageMarkedVersion,
+  TEXT_PARSER_VERSION,
   unescapeTable,
 } from "../src/services/codex/vault-format";
 
@@ -41,6 +49,7 @@ describe("path helpers", () => {
     const paths = buildPaperVaultPaths("/vault", "PXW99EKT");
     expect(paths.paperDir).toBe("/vault/PXW99EKT");
     expect(paths.textPath).toBe("/vault/PXW99EKT/text.txt");
+    expect(paths.textMetaPath).toBe("/vault/PXW99EKT/text.meta.json");
     expect(paths.memoryPath).toBe("/vault/PXW99EKT/memory.md");
     expect(paths.recordPath).toBe("/vault/PXW99EKT/record.json");
     expect(paths.conversationsDir).toBe("/vault/PXW99EKT/conversations");
@@ -187,5 +196,112 @@ describe("markdown / README helpers", () => {
         { pageNumber: 3, plainText: "world", blocks: [] },
       ]),
     ).toBe("[page 1]\nhello\n\n[page 3]\nworld");
+  });
+
+  it("formats PDFWorker form-feed text with page markers", () => {
+    expect(formatWorkerTextForVault(" page one \f page two \f\f page three ")).toBe(
+      "[page 1]\npage one\n\n[page 2]\npage two\n\n[page 4]\npage three",
+    );
+  });
+
+  it("preserves page numbers when PDFWorker text starts with a form-feed", () => {
+    expect(formatWorkerTextForVault("\fsecond page\fthird page")).toBe(
+      "[page 2]\nsecond page\n\n[page 3]\nthird page",
+    );
+  });
+
+  it("keeps PDFWorker text unchanged when no form-feed is present", () => {
+    expect(formatWorkerTextForVault(" plain worker text ")).toBe(
+      "plain worker text",
+    );
+  });
+
+  it("detects page evidence markers", () => {
+    expect(hasPageEvidenceMarkers("[page 1]\ntext")).toBe(true);
+    expect(hasPageEvidenceMarkers("[page 0]\ntext")).toBe(false);
+    expect(hasPageEvidenceMarkers("page 1\ntext")).toBe(false);
+  });
+
+  it("only replaces existing text when candidate adds page markers", () => {
+    expect(
+      shouldReplaceTextWithPageMarkedVersion(
+        "plain text",
+        "[page 1]\nplain text",
+      ),
+    ).toBe(true);
+    expect(
+      shouldReplaceTextWithPageMarkedVersion(
+        "[page 1]\nplain text",
+        "[page 1]\nplain text",
+      ),
+    ).toBe(false);
+    expect(
+      shouldReplaceTextWithPageMarkedVersion("plain text", "new plain text"),
+    ).toBe(false);
+  });
+
+  it("builds text parser metadata", () => {
+    expect(
+      buildTextMeta({
+        text: "[page 1]\nhello",
+        source: "pdfworker-formfeed",
+        generatedAt: "2026-07-10T00:00:00.000Z",
+      }),
+    ).toEqual({
+      textParserVersion: TEXT_PARSER_VERSION,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      source: "pdfworker-formfeed",
+      hasPageMarkers: true,
+    });
+  });
+
+  it("infers old text metadata from existing content", () => {
+    expect(
+      inferTextMetaFromContent("plain text", "2026-07-10T00:00:00.000Z"),
+    ).toMatchObject({
+      textParserVersion: 1,
+      source: "inferred",
+      hasPageMarkers: false,
+    });
+    expect(
+      inferTextMetaFromContent("[page 1]\ntext", "2026-07-10T00:00:00.000Z"),
+    ).toMatchObject({
+      textParserVersion: TEXT_PARSER_VERSION,
+      hasPageMarkers: true,
+    });
+  });
+
+  it("normalizes invalid text metadata with content fallback", () => {
+    expect(
+      normalizeTextMeta(
+        { textParserVersion: "bad", source: "bad" },
+        "[page 1]\ntext",
+        "2026-07-10T00:00:00.000Z",
+      ),
+    ).toMatchObject({
+      textParserVersion: TEXT_PARSER_VERSION,
+      source: "inferred",
+      hasPageMarkers: true,
+    });
+  });
+
+  it("suppresses repeated parser migrations after an attempted version", () => {
+    expect(
+      shouldAttemptTextParserMigration({
+        textParserVersion: 1,
+        generatedAt: "2026-07-10T00:00:00.000Z",
+        source: "inferred",
+        hasPageMarkers: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAttemptTextParserMigration({
+        textParserVersion: 1,
+        generatedAt: "2026-07-10T00:00:00.000Z",
+        source: "inferred",
+        hasPageMarkers: false,
+        attemptedTextParserVersion: TEXT_PARSER_VERSION,
+      }),
+    ).toBe(false);
   });
 });
