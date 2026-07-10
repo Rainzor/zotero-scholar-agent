@@ -1610,6 +1610,64 @@
   padding: 10px 12px;
 }
 
+.zoteroagent-paper-signals {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #eceff3;
+  background: #fafbfc;
+}
+
+.zoteroagent-paper-signals-label {
+  margin-right: 4px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.zoteroagent-rating-star {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: #d99a00;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoteroagent-cold-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eceff3;
+  background: #f8fafc;
+}
+
+.zoteroagent-cold-start-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.zoteroagent-cold-start-action {
+  flex: 0 0 auto;
+  height: 28px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .zoteroagent-memory-content {
   font-size: 13px;
   line-height: 1.5;
@@ -1754,6 +1812,44 @@
   border-radius: 8px;
   background: #f0fdfa;
   overflow: hidden;
+}
+
+.zoteroagent-quality-review {
+  margin: 4px 0 8px;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.zoteroagent-quality-review.is-failed {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.zoteroagent-quality-review.is-needs-review {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.zoteroagent-quality-review-summary {
+  padding: 7px 9px;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoteroagent-quality-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 9px 8px;
+}
+
+.zoteroagent-quality-review-row {
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .zoteroagent-relationship-review-summary {

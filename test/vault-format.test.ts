@@ -124,11 +124,46 @@ describe("markdown / README helpers", () => {
         year: "2024",
       },
       memoryMarkdown:
-        "- [can_combine_with] [Paper B](../BBBB2222/memory.md): complementary retrieval step.",
+        `---
+rating: 4
+zoteroCollections:
+  - key: C1
+    name: Video
+    path: Research / Video
+zoteroTags:
+  - diffusion
+paperKeywords:
+  - text-to-video
+codexKeywords:
+  - causal distillation
+---
+
+- [can_combine_with] [Paper B](../BBBB2222/memory.md): complementary retrieval step.`,
       generatedAt: "2026-07-09T00:00:00.000Z",
+      quality: {
+        status: "passed",
+        checkedAt: "2026-07-09T00:00:00.000Z",
+        hardFailures: [],
+        warnings: [],
+        coreSections: { missing: [], placeholder: [] },
+        abstract: { status: "unchanged" },
+        relationships: { candidates: 1, parsed: 1 },
+        growth: { reviewRequired: false },
+      },
     });
-    expect(projection.schemaVersion).toBe(1);
+    expect(projection.schemaVersion).toBe(2);
     expect(projection.itemKey).toBe("AAAA1111");
+    expect(projection.signals).toEqual({
+      rating: 4,
+      zoteroCollections: [
+        { key: "C1", name: "Video", path: "Research / Video" },
+      ],
+      keywords: [
+        { value: "diffusion", source: "zotero" },
+        { value: "text-to-video", source: "paper" },
+        { value: "causal distillation", source: "codex" },
+      ],
+    });
     expect(projection.relationships).toHaveLength(1);
     expect(projection.relationships[0].type).toBe("can_combine_with");
   });

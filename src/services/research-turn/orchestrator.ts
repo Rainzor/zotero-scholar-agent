@@ -30,6 +30,10 @@ import {
   type ResearchPromptMode,
 } from "./prompt";
 import { diffRelationships } from "./relationships";
+import {
+  evaluateKnowledgeSurface,
+  type KnowledgeQualityReport,
+} from "../knowledge-quality";
 
 export type ResearchTurnRequest = {
   paper: PaperVaultMeta;
@@ -68,6 +72,7 @@ export type ResearchTurnOutcome = {
   relationshipUpdates: SemanticRelationship[];
   committed: boolean;
   resumedFreshThread: boolean;
+  quality: KnowledgeQualityReport;
 };
 
 export type ResearchTurnDeps = {
@@ -190,7 +195,16 @@ async function runResearchTurnInner(
     codexThreadId: result.threadId,
   });
   const memoryAfter = await deps.readPaperMemory(paper.itemKey);
-  const relationshipsAfter = await deps.refreshPaperRecordProjection(paper);
+  const quality = evaluateKnowledgeSurface({
+    before: memoryBefore,
+    after: memoryAfter,
+    sourceAbstract: paper.abstract,
+    itemKey: paper.itemKey,
+  });
+  const relationshipsAfter = await deps.refreshPaperRecordProjection(
+    paper,
+    quality,
+  );
   const committed = await deps.commitVaultChanges(
     `turn: ${paper.itemKey} ${request.session.sessionId}`.trim(),
   );
@@ -208,6 +222,7 @@ async function runResearchTurnInner(
     ),
     committed,
     resumedFreshThread,
+    quality,
   };
 }
 

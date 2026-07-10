@@ -77,6 +77,8 @@ export {
   refreshPaperRecordProjection,
   searchVaultMemory,
   setConfiguredVaultPath,
+  updatePaperRating,
+  writePaperMemory,
   type EnsurePaperVaultOptions,
   type PaperVaultMeta,
   type PaperVaultPaths,

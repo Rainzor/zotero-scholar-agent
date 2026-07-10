@@ -2,6 +2,7 @@ import { config } from "../package.json";
 import { createZToolkit } from "./utils/ztoolkit";
 import type { ContextDigestSource } from "./services/context-digest";
 import type { SemanticRelationship } from "./services/codex/vault-format";
+import type { KnowledgeQualityReport } from "./services/knowledge-quality";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -40,6 +41,7 @@ export type ChatMessage = {
   committed?: boolean;
   contextPapers?: PaperContext[];
   relationshipUpdates?: SemanticRelationship[];
+  quality?: KnowledgeQualityReport;
 };
 export type ChatSession = {
   sessionId: string;

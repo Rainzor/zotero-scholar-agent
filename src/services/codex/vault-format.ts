@@ -1,9 +1,21 @@
+import {
+  parseKnowledgeSurface,
+  type PaperSignalMetadata,
+  type ZoteroCollectionSignal,
+} from "../knowledge-surface";
+import type { KnowledgeQualityReport } from "../knowledge-quality";
+
 export type PaperVaultMeta = {
   itemId: number;
   itemKey: string;
   title: string;
   creators?: string;
   year?: string;
+  abstract?: string;
+  zoteroCollections?: ZoteroCollectionSignal[];
+  zoteroTags?: string[];
+  paperKeywords?: string[];
+  rating?: number | null;
 };
 
 export const SEMANTIC_RELATIONSHIP_TYPES = [
@@ -32,10 +44,21 @@ export type SemanticRelationship = {
 };
 
 export type PaperRecordProjection = PaperVaultMeta & {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
+  signals: {
+    rating: number | null;
+    zoteroCollections: ZoteroCollectionSignal[];
+    keywords: Array<{
+      value: string;
+      source: "zotero" | "paper" | "codex";
+    }>;
+  };
+  quality: KnowledgeQualityReport;
   relationships: SemanticRelationship[];
 };
+
+export type PaperSignalProjection = PaperRecordProjection["signals"];
 
 export const TEXT_PARSER_VERSION = 2;
 
@@ -416,19 +439,46 @@ export function buildPaperRecordProjection(options: {
   meta: PaperVaultMeta;
   memoryMarkdown: string;
   generatedAt: string;
+  quality: KnowledgeQualityReport;
 }): PaperRecordProjection {
+  const surface = parseKnowledgeSurface(options.memoryMarkdown);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: options.generatedAt,
     itemId: options.meta.itemId,
     itemKey: options.meta.itemKey,
     title: options.meta.title,
     creators: options.meta.creators,
     year: options.meta.year,
+    signals: buildPaperSignalProjection(surface.signals),
+    quality: options.quality,
     relationships: parseSemanticRelationships(
       options.memoryMarkdown,
       options.meta.itemKey,
       options.generatedAt,
     ),
+  };
+}
+
+export function buildPaperSignalProjection(
+  signals: PaperSignalMetadata,
+): PaperSignalProjection {
+  return {
+    rating: signals.rating,
+    zoteroCollections: signals.zoteroCollections,
+    keywords: [
+      ...signals.zoteroTags.map((value) => ({
+        value,
+        source: "zotero" as const,
+      })),
+      ...signals.paperKeywords.map((value) => ({
+        value,
+        source: "paper" as const,
+      })),
+      ...signals.codexKeywords.map((value) => ({
+        value,
+        source: "codex" as const,
+      })),
+    ],
   };
 }

@@ -1,4 +1,13 @@
 import { getFullText } from "../../modules/pdf-context";
+import {
+  parseKnowledgeSurface,
+  updateKnowledgeSurfaceSignals,
+  type PaperSignalUpdate,
+} from "../knowledge-surface";
+import {
+  evaluateKnowledgeSurface,
+  type KnowledgeQualityReport,
+} from "../knowledge-quality";
 import { getPref, setPref } from "../../utils/prefs";
 import { runLineProcess } from "./subprocess";
 import {
@@ -24,8 +33,13 @@ import {
   type TextMeta,
   type TextParserSource,
   type SemanticRelationship,
+  type PaperRecordProjection,
   type PaperVaultMeta,
 } from "./vault-format";
+import {
+  mergeVaultGitignore,
+  normalizeVaultManifest,
+} from "./vault-manifest";
 
 export type { PaperVaultMeta } from "./vault-format";
 export type { SemanticRelationship } from "./vault-format";
@@ -67,6 +81,8 @@ Zotero item key (for example \`PXW99EKT/\`) holds one paper.
 3. For cross-paper questions, search across all \`*/memory.md\` files first, then \`*/text.txt\` if needed.
 
 ## How to update memory (\`memory.md\`) — the Knowledge Surface
+- Preserve YAML frontmatter exactly. The plugin owns rating, Zotero mirrors,
+  paper keywords, and accepted Codex keywords; never edit these fields.
 - Update ONLY when you learned something materially new this turn.
 - REWRITE and DEDUPE. Never blindly append. Keep it tight and factual.
 - Preserve this default structure: \`## Abstract\`, \`## Contribution\`, \`## Problem\`,
@@ -136,6 +152,32 @@ export async function readPaperMemory(itemKey: string): Promise<string> {
   return readTextIfExists(paths.memoryPath);
 }
 
+export async function writePaperMemory(
+  itemKey: string,
+  markdown: string,
+): Promise<void> {
+  const paths = await getPaperVaultPaths(itemKey);
+  await getIOUtils().writeUTF8(
+    paths.memoryPath,
+    String(markdown || "").endsWith("\n")
+      ? String(markdown || "")
+      : `${String(markdown || "")}\n`,
+  );
+}
+
+export async function updatePaperRating(
+  paper: PaperVaultMeta,
+  rating: number | null,
+): Promise<void> {
+  const paths = await getPaperVaultPaths(paper.itemKey);
+  const existing = await readTextIfExists(paths.memoryPath);
+  const updated = updateKnowledgeSurfaceSignals(existing, { rating });
+  if (updated === existing) return;
+  await getIOUtils().writeUTF8(paths.memoryPath, updated);
+  await refreshPaperRecordProjection(paper);
+  await commitVaultChanges(`rating: ${paper.itemKey}`);
+}
+
 export async function readPaperCompactContext(
   paper: PaperVaultMeta,
 ): Promise<string> {
@@ -149,15 +191,25 @@ export async function readPaperCompactContext(
 
 export async function refreshPaperRecordProjection(
   meta: PaperVaultMeta,
+  quality?: KnowledgeQualityReport,
 ): Promise<SemanticRelationship[]> {
   const paths = await getPaperVaultPaths(meta.itemKey);
   const memoryMarkdown = await readTextIfExists(paths.memoryPath);
   const existing = await readExistingProjection(paths.recordPath);
   const generatedAt = new Date().toISOString();
+  const qualityReport =
+    quality ||
+    evaluateKnowledgeSurface({
+      after: memoryMarkdown,
+      sourceAbstract: meta.abstract,
+      itemKey: meta.itemKey,
+      checkedAt: generatedAt,
+    });
   const projection = buildPaperRecordProjection({
     meta,
     memoryMarkdown,
     generatedAt,
+    quality: qualityReport,
   });
   if (existing && projectionsEquivalent(existing, projection)) {
     return existing.relationships || [];
@@ -191,6 +243,11 @@ export async function listVaultPapers(): Promise<PaperVaultMeta[]> {
   for (const key of await listPaperDirs(vaultDir)) {
     if (entries.has(key)) continue;
     entries.set(key, { itemId: 0, itemKey: key, title: key });
+  }
+
+  for (const paper of entries.values()) {
+    const memory = await readPaperMemory(paper.itemKey);
+    paper.rating = parseKnowledgeSurface(memory).signals.rating;
   }
 
   return Array.from(entries.values()).sort((a, b) =>
@@ -255,11 +312,14 @@ function truncateForPrompt(text: string, maxChars: number): string {
 }
 
 async function readExistingProjection(path: string): Promise<{
+  schemaVersion?: number;
   itemId?: number;
   itemKey?: string;
   title?: string;
   creators?: string;
   year?: string;
+  signals?: PaperRecordProjection["signals"];
+  quality?: KnowledgeQualityReport;
   relationships?: SemanticRelationship[];
 } | null> {
   try {
@@ -275,31 +335,48 @@ async function readExistingProjection(path: string): Promise<{
 
 function projectionsEquivalent(
   existing: {
+    schemaVersion?: number;
     itemId?: number;
     itemKey?: string;
     title?: string;
     creators?: string;
     year?: string;
+    signals?: PaperRecordProjection["signals"];
+    quality?: KnowledgeQualityReport;
     relationships?: SemanticRelationship[];
   },
   next: {
+    schemaVersion: number;
     itemId?: number;
     itemKey?: string;
     title?: string;
     creators?: string;
     year?: string;
+    signals: PaperRecordProjection["signals"];
+    quality: KnowledgeQualityReport;
     relationships: SemanticRelationship[];
   },
 ): boolean {
   return (
+    Number(existing.schemaVersion || 0) === Number(next.schemaVersion) &&
     Number(existing.itemId || 0) === Number(next.itemId || 0) &&
     String(existing.itemKey || "") === String(next.itemKey || "") &&
     String(existing.title || "") === String(next.title || "") &&
     String(existing.creators || "") === String(next.creators || "") &&
     String(existing.year || "") === String(next.year || "") &&
+    JSON.stringify(existing.signals || null) === JSON.stringify(next.signals) &&
+    stableQuality(existing.quality) === stableQuality(next.quality) &&
     stableRelationships(existing.relationships || []) ===
       stableRelationships(next.relationships || [])
   );
+}
+
+function stableQuality(quality?: KnowledgeQualityReport): string {
+  if (!quality) return "";
+  return JSON.stringify({
+    ...quality,
+    checkedAt: "",
+  });
 }
 
 function stableRelationships(relationships: SemanticRelationship[]): string {
@@ -330,10 +407,16 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.paperDir);
   await ensureDirectory(paths.conversationsDir);
   await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
+  await ensureVaultManifest(paths.vaultDir);
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
     initialMemoryMarkdown(options),
   );
+  await syncPaperSignalMetadata(paths.memoryPath, {
+    zoteroCollections: options.zoteroCollections,
+    zoteroTags: options.zoteroTags,
+    paperKeywords: options.paperKeywords,
+  });
   await ensureGitRepo(paths.vaultDir);
   await ensureGitignore(paths.vaultDir);
 
@@ -578,7 +661,48 @@ async function ensureGitRepo(vaultDir: string) {
 }
 
 async function ensureGitignore(vaultDir: string) {
-  await writeIfMissing(joinPath(vaultDir, ".gitignore"), "*/code/\n");
+  const path = joinPath(vaultDir, ".gitignore");
+  const existing = await readTextIfExists(path);
+  const merged = mergeVaultGitignore(existing);
+  if (merged !== existing) {
+    await getIOUtils().writeUTF8(path, merged);
+  }
+}
+
+async function ensureVaultManifest(vaultDir: string) {
+  const path = joinPath(vaultDir, "vault.json");
+  const raw = await readTextIfExists(path);
+  let parsed: unknown = null;
+  try {
+    parsed = raw.trim() ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  const manifest = normalizeVaultManifest(parsed);
+  const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (serialized !== raw) {
+    await getIOUtils().writeUTF8(path, serialized);
+  }
+}
+
+async function syncPaperSignalMetadata(
+  memoryPath: string,
+  update: PaperSignalUpdate,
+) {
+  const definedUpdate: PaperSignalUpdate = {};
+  if (update.zoteroCollections) {
+    definedUpdate.zoteroCollections = update.zoteroCollections;
+  }
+  if (update.zoteroTags) definedUpdate.zoteroTags = update.zoteroTags;
+  if (update.paperKeywords) {
+    definedUpdate.paperKeywords = update.paperKeywords;
+  }
+  if (!Object.keys(definedUpdate).length) return;
+  const existing = await readTextIfExists(memoryPath);
+  const updated = updateKnowledgeSurfaceSignals(existing, definedUpdate);
+  if (updated !== existing) {
+    await getIOUtils().writeUTF8(memoryPath, updated);
+  }
 }
 
 async function runGit(
