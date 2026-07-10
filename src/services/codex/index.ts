@@ -46,6 +46,7 @@ export {
   getConfiguredCodexCheapModelSlug,
   getConfiguredCodexContextWindow,
   getConfiguredCodexModelSlug,
+  listCodexModels,
   parseCodexModelCatalog,
   parseTopLevelTomlString,
   resolveCodexModelForExecution,

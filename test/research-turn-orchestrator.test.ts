@@ -132,6 +132,7 @@ describe("runResearchTurn", () => {
         session: {
           sessionId: "chat-1",
           codexThreadId: "thread-existing",
+          modelSlug: "gpt-5.6-terra",
           contextDigest: "# Context Digest",
         },
         priorVisibleMessages: [{ role: "user", content: "prior" }],
@@ -140,6 +141,8 @@ describe("runResearchTurn", () => {
       deps({
         runCodexTurn: async (input) => {
           expect(input.threadId).toBe("thread-existing");
+          expect(input.model).toBe("gpt-5.6-terra");
+          expect(input.fallbackToDefaultModel).toBe(false);
           expect(input.prompt).toContain("Thread context mode: resume");
           expect(input.prompt).not.toContain("# Context Digest");
           expect(input.prompt).not.toContain("prior");
@@ -271,6 +274,32 @@ describe("runResearchTurn", () => {
     ).rejects.toThrow("timeout");
     expect(logs).not.toContain("codex-resume-fallback");
     expect(logs).toContain("chat-turn-error");
+  });
+
+  it("does not retry a resumed turn when the failure is not thread-specific", async () => {
+    let runCount = 0;
+    await expect(
+      runResearchTurn(
+        request({
+          session: {
+            sessionId: "chat-1",
+            codexThreadId: "thread-existing",
+            modelSlug: "removed-model",
+          },
+        }),
+        {},
+        deps({
+          runCodexTurn: async () => {
+            runCount += 1;
+            throw new CodexTurnError({
+              message: "Selected Codex model is unavailable.",
+              retryFreshThread: false,
+            });
+          },
+        }),
+      ),
+    ).rejects.toThrow("unavailable");
+    expect(runCount).toBe(1);
   });
 
   it("does not retry non-Codex failures even when resuming", async () => {

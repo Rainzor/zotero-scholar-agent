@@ -106,6 +106,7 @@ export class ChatStore {
       itemId,
       itemKey: state.itemKey,
       codexThreadId: "",
+      modelSlug: "",
       title: title?.trim() || this.buildDefaultSessionTitle(index),
       messages: [],
       createdAt: now,
@@ -235,6 +236,17 @@ export class ChatStore {
     this.markDirty(itemId);
   }
 
+  updateSessionModel(itemId: number, modelSlug: string, sessionId?: string) {
+    const state = this.getItemState(itemId);
+    if (!state) return;
+    const targetId = sessionId || state.activeSessionId || "";
+    const session = state.sessions.find((s) => s.sessionId === targetId);
+    if (!session) return;
+    session.modelSlug = String(modelSlug || "").trim();
+    session.updatedAt = Date.now();
+    this.markDirty(itemId);
+  }
+
   updateContextDigest(
     itemId: number,
     digest: ContextDigestState,
@@ -307,6 +319,7 @@ export class ChatStore {
         itemId,
         itemKey: persisted.itemKey,
         codexThreadId: s.codexThreadId || "",
+        modelSlug: s.modelSlug || "",
         contextDigest: s.contextDigest || "",
         contextDigestUpToMessageIndex: s.contextDigestUpToMessageIndex,
         contextDigestUpdatedAt: s.contextDigestUpdatedAt,

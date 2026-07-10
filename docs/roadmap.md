@@ -239,7 +239,7 @@ Codex 不只是一个问答引擎——它自带一整个可扩展的能力面: 
 | ---- | ---- | ---- | ---- |
 | pdf skill(poppler+python 工作流) | ✅ 已装,已评审 | 扫描件兜底、按需页面渲染 | §2.6/§2.7,ADR 0005 |
 | 图像输入 `codex exec -i` | ✅ CLI 支持 | 截图/图表理解 | §2.6 |
-| cheap model `--model` | ✅ 已在用 | digest 压缩、轻量 turn | ADR 0004,已落地 |
+| model catalog + `--model` | ✅ 已在用 | 每个 Chat Session 动态选模型；digest 使用独立 cheap model 回退 | ADR 0004/0006,已落地 |
 | shell + git(源码阅读) | ✅ 核心能力 | 论文代码库 clone 与分析 | 执行顺序 12 |
 | playwright skill / browser_use | ✅ 已装 / stable 启用 | 论文 landing page、Papers-with-Code、代码 repo 发现;关键论文网络检索 | §7.3 论文发现 |
 | MCP 服务器(`codex mcp add`) | ✅ CLI 支持 | arXiv/Semantic Scholar 检索;Notion 投影同步 | §7.3/§7.4 |
@@ -259,6 +259,7 @@ Codex 不只是一个问答引擎——它自带一整个可扩展的能力面: 
 
 ## 8. 进展记录
 
+- **2026-07-10** 会话级 Codex 模型选择落地(ADR 0006): 侧栏从 `codex debug models` 动态加载当前 provider/account 可用模型，选择值按 Chat Session 持久化并用于 fresh/resume turn；保留 `thread_id` 连续性，用户显式选择失败时不静默回退，`Codex default` 继续继承本机配置。
 - **2026-07-10** Vault 远程托管规划入档(§2.8): 确认 git 为整 Vault 级单仓库(层级正确,保持);发现实际偏差——`.logs/` 被追踪(`.gitignore` 仅 `*/code/`),需加固 + 存量 untrack;托管默认 private 仓库(text.txt 版权/conversations 隐私),V1 单机单写 + 手动 push,多机 merge 留待独立 ADR。执行顺序新增 9b。
 - **2026-07-10** Codex 能力面撬动策略入档(§7): 接入判据四问(Vault 价值/真相源边界/配置边界/降级路径),本机验证的能力清单(skills、MCP、browser_use/computer_use stable、图像输入、模型路由)与产品映射,论文发现建议收件箱(§7.3)与 Notion 单向投影(§7.4)进入执行顺序 15/16。ADR 0005 定位为该策略的第一个实例。
 - **2026-07-10** Knowledge Surface 质量验收基线建立: 新增 `docs/benchmarks/knowledge-surface-quality.md`,定义 100 分 rubric、硬失败门槛、七节/Abstract/append-bloat/关系格式/grounding 的验收方法,以及基于 Codex activity 的 Knowledge reuse rate(`M-only`/`M→T`/`T-first`/`No-read`)。页码与 context dogfooding 协议扩展为 3–5 篇论文 × fresh/resume/digest 的固定提示词和证据矩阵;真实 Zotero 点击结果仍待人工填写,不以单测替代。

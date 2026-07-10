@@ -21,6 +21,19 @@ function installZoteroStub() {
 }
 
 describe("ChatStore context digest", () => {
+  it("stores a per-session model without breaking Codex thread continuity", () => {
+    installZoteroStub();
+    const store = new ChatStore();
+    const session = store.createSession(7, "Main");
+    store.updateCodexThreadId(7, "thread-existing", session?.sessionId);
+
+    store.updateSessionModel(7, "gpt-5.6-terra", session?.sessionId);
+
+    const updated = store.getSession(7);
+    expect(updated?.modelSlug).toBe("gpt-5.6-terra");
+    expect(updated?.codexThreadId).toBe("thread-existing");
+  });
+
   it("clears codexThreadId when storing a context digest", () => {
     installZoteroStub();
     const store = new ChatStore();

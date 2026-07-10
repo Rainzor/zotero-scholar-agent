@@ -51,6 +51,7 @@ export type CodexTurnResult = {
 export class CodexTurnError extends Error {
   readonly exitCode?: number | null;
   readonly timedOut: boolean;
+  readonly retryFreshThread: boolean;
   readonly stderr: string;
   readonly stdout: string;
 
@@ -58,6 +59,7 @@ export class CodexTurnError extends Error {
     message: string;
     exitCode?: number | null;
     timedOut?: boolean;
+    retryFreshThread?: boolean;
     stderr?: string;
     stdout?: string;
   }) {
@@ -65,6 +67,7 @@ export class CodexTurnError extends Error {
     this.name = "CodexTurnError";
     this.exitCode = options.exitCode;
     this.timedOut = Boolean(options.timedOut);
+    this.retryFreshThread = options.retryFreshThread !== false;
     this.stderr = options.stderr || "";
     this.stdout = options.stdout || "";
   }
@@ -87,6 +90,12 @@ export async function runCodexTurn(
     modelResolution.checkedCatalog &&
     !modelResolution.modelSlug
   ) {
+    if (input.fallbackToDefaultModel === false) {
+      throw new CodexTurnError({
+        message: `Selected Codex model "${requestedModel}" is unavailable. Choose another model or use the Codex default.`,
+        retryFreshThread: false,
+      });
+    }
     input.onStatus?.(
       `Configured Codex model "${requestedModel}" is unavailable. Falling back to default Codex model.`,
     );

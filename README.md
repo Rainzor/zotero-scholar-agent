@@ -46,9 +46,9 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 
 ## 配置
 
-侧栏聊天需要本机已安装并配置好 Codex CLI。插件会自动尝试解析可工作的 `codex` 路径，也可以在偏好设置中手动指定。
+侧栏聊天需要本机已安装并配置好 Codex CLI。插件会自动尝试解析可工作的 `codex` 路径，也可以在偏好设置中手动指定。每个聊天会话可从当前 Codex catalog 中选择模型；`Codex default` 继续继承用户的 Codex 配置，选择结果按会话保存。
 
-偏好设置中还保留 AI 服务配置，用于非 Codex 功能，例如划词翻译和接口连通性测试。侧栏聊天不再使用 Kimi、DeepSeek、GLM、Claude 等 provider 下拉选择，实际回答模型由 Codex CLI 自身配置决定。
+偏好设置中还保留 AI 服务配置，用于非 Codex 功能，例如划词翻译和接口连通性测试。侧栏的模型选择不是旧式 provider 路由：列表动态来自 `codex debug models`，实际调用仍完全由 Codex CLI 执行。
 
 ## 开发指南
 

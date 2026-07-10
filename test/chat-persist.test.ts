@@ -37,6 +37,7 @@ describe("normalizePersistedItem", () => {
         sessions: [
           {
             sessionId: "chat-1",
+            modelSlug: "gpt-5.6-sol",
             title: "Chat 1",
             contextMode: "currentPage" as any,
             summaryText: "old summary",
@@ -65,6 +66,7 @@ describe("normalizePersistedItem", () => {
         {
           sessionId: "chat-1",
           codexThreadId: "",
+          modelSlug: "gpt-5.6-sol",
           contextDigest: "# Context Digest\n\n## Coverage",
           contextDigestUpToMessageIndex: 4,
           contextDigestUpdatedAt: 12345,
@@ -107,6 +109,7 @@ describe("serializeItemState", () => {
         {
           sessionId: "s1",
           codexThreadId: "thread_x",
+          modelSlug: "gpt-5.6-terra",
           contextDigest: "# Context Digest\n\n## Coverage",
           contextDigestUpToMessageIndex: 0,
           contextDigestUpdatedAt: 123,
@@ -136,11 +139,13 @@ describe("serializeItemState", () => {
     });
     expect(serialized.sessions[0].contextMode).toBe("agent");
     expect(serialized.sessions[0].codexThreadId).toBe("thread_x");
+    expect(serialized.sessions[0].modelSlug).toBe("gpt-5.6-terra");
     expect(serialized.sessions[0].contextDigest).toContain("# Context Digest");
 
     const again = normalizePersistedItem(serialized, { now: 3 });
     expect(again.sessions[0]).toMatchObject({
       contextDigest: "# Context Digest\n\n## Coverage",
+      modelSlug: "gpt-5.6-terra",
       contextDigestUpToMessageIndex: 0,
       contextDigestUpdatedAt: 123,
       contextDigestTokenEstimate: 8,

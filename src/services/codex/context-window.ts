@@ -153,6 +153,21 @@ export async function resolveCodexModelForExecution(
   };
 }
 
+export async function listCodexModels(options?: {
+  codexPath?: string;
+  refresh?: boolean;
+}): Promise<CodexModelCatalogEntry[]> {
+  if (options?.refresh) cachedCatalog = null;
+  const catalog = await loadCodexModelCatalog(options?.codexPath);
+  return catalog
+    .filter((model) => model.visibility?.toLowerCase() !== "hide")
+    .slice()
+    .sort((a, b) => {
+      const priority = (a.priority ?? 9999) - (b.priority ?? 9999);
+      return priority || a.slug.localeCompare(b.slug);
+    });
+}
+
 export function parseCodexModelCatalog(raw: string): CodexModelCatalogEntry[] {
   const parsed = parseJsonObjectFromOutput(raw);
   const models = Array.isArray((parsed as any)?.models) ? (parsed as any).models : [];

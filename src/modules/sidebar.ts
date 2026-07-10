@@ -30,9 +30,11 @@ import type {
 } from "../addon";
 import { chatStore } from "../services/chat-store";
 import {
+  listCodexModels,
   listVaultPapers,
   readPaperMemory,
   searchVaultMemory,
+  type CodexModelCatalogEntry,
   type PaperVaultMeta,
   type RunningLineProcess,
   type SemanticRelationship,
@@ -44,6 +46,7 @@ let activeBody: HTMLElement | null = null;
 let activeCodexProcess: RunningLineProcess | null = null;
 let isGenerating = false;
 let mentionRequestSeq = 0;
+let modelRequestSeq = 0;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
@@ -877,6 +880,21 @@ function ensureChatUI(body: HTMLElement) {
   actionsRow.id = "zoteroagent-actions-row";
   actionsRow.className = "zoteroagent-actions-row";
 
+  const modelSelect = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "select",
+  ) as HTMLSelectElement;
+  modelSelect.id = "zoteroagent-model-select";
+  modelSelect.className = "zoteroagent-model-select";
+  modelSelect.title = "Model for this chat";
+  const defaultModelOption = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "option",
+  ) as HTMLOptionElement;
+  defaultModelOption.value = "";
+  defaultModelOption.textContent = "Codex default";
+  modelSelect.appendChild(defaultModelOption);
+
   const actionsRight = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "div",
@@ -889,6 +907,7 @@ function ensureChatUI(body: HTMLElement) {
   sendBtn.textContent = "Send";
 
   actionsRight.appendChild(sendBtn);
+  actionsRow.appendChild(modelSelect);
   actionsRow.appendChild(actionsRight);
 
   composeArea.appendChild(contextChips);
@@ -1002,6 +1021,18 @@ function bindChatEvents(body: HTMLElement) {
       }
     });
   body
+    .querySelector("#zoteroagent-model-select")
+    ?.addEventListener("change", (event) => {
+      const itemId = Number(body.dataset.itemID);
+      if (itemId <= 0) return;
+      const session =
+        chatStore.getSession(itemId) || chatStore.createSession(itemId);
+      if (!session) return;
+      const select = event.target as HTMLSelectElement;
+      chatStore.updateSessionModel(itemId, select.value, session.sessionId);
+      updateModelSelectorTitle(select, select.value);
+    });
+  body
     .querySelector("#zoteroagent-session-new")
     ?.addEventListener("click", () => {
       const itemId = Number(body.dataset.itemID);
@@ -1079,6 +1110,10 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   const sendBtn = body.querySelector(
     "#zoteroagent-chat-send",
   ) as HTMLElement | null;
+  const modelSelect = body.querySelector(
+    "#zoteroagent-model-select",
+  ) as HTMLSelectElement | null;
+  if (modelSelect) modelSelect.disabled = generating;
   if (sendBtn) {
     if (generating) {
       sendBtn.classList.add("is-stop");
@@ -1452,11 +1487,13 @@ async function submitQuestion(body: HTMLElement) {
   body.dataset.chatMode = "chat";
   syncLayoutState(body, itemId);
 
+  const session = chatStore.getSession(itemId);
+  const selectedModel = String(session?.modelSlug || "").trim();
   const assistant: ChatMessage = {
     role: "assistant",
     content: "",
     reasoning: "",
-    model: getModelLabel(),
+    model: getModelLabel(selectedModel),
     contextPapers: mentionedPapers,
   };
   chatStore.addMessage(itemId, assistant);
@@ -1479,7 +1516,6 @@ async function submitQuestion(body: HTMLElement) {
     selectedText: refText,
     responseQuote,
   });
-  const session = chatStore.getSession(itemId);
 
   try {
     let lastRefresh = 0;
@@ -1491,6 +1527,7 @@ async function submitQuestion(body: HTMLElement) {
       session: {
         sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
         codexThreadId: session?.codexThreadId || "",
+        modelSlug: selectedModel,
         contextDigest: session?.contextDigest,
         contextDigestUpToMessageIndex: session?.contextDigestUpToMessageIndex,
       },
@@ -1520,6 +1557,7 @@ async function submitQuestion(body: HTMLElement) {
     assistant.content = result.content || assistant.content;
     assistant.reasoning = result.reasoning || assistant.reasoning;
     if (result.usage) assistant.usage = result.usage;
+    assistant.model = getModelLabel(result.usage?.modelSlug || selectedModel);
     if (result.activities.length) assistant.activities = result.activities.slice();
     if (result.resumedFreshThread) {
       if (isActivePane()) {
@@ -1569,8 +1607,8 @@ function maybeGenerateSessionTitleLocal(
 
 // ===================== Rendering =====================
 
-function getModelLabel(): string {
-  return "Codex";
+function getModelLabel(modelSlug?: string): string {
+  return String(modelSlug || "").trim() || "Codex";
 }
 
 async function copyTextToClipboard(
@@ -3101,6 +3139,92 @@ function syncSessionSelector(body: HTMLElement, itemId: number) {
   renderContextDigestStatus(body, itemId);
 }
 
+async function syncModelSelector(
+  body: HTMLElement,
+  itemId: number,
+  refresh = false,
+) {
+  const select = body.querySelector(
+    "#zoteroagent-model-select",
+  ) as HTMLSelectElement | null;
+  const session = chatStore.getSession(itemId);
+  if (!select) return;
+  const sessionId = session?.sessionId || "";
+
+  const requestId = String(++modelRequestSeq);
+  select.dataset.requestId = requestId;
+  select.disabled = true;
+  let models: CodexModelCatalogEntry[] = [];
+  try {
+    models = await listCodexModels({ refresh });
+  } catch (error) {
+    ztoolkit.log("[Agent] Codex model catalog error:", error);
+  }
+  if (
+    !isSafeBody(body) ||
+    Number(body.dataset.itemID) !== itemId ||
+    select.dataset.requestId !== requestId
+  ) {
+    return;
+  }
+  const activeSession = chatStore.getSession(itemId);
+  if ((activeSession?.sessionId || "") !== sessionId) return;
+
+  renderModelOptions(select, models, activeSession?.modelSlug || "");
+  select.disabled = isGenerating;
+}
+
+function renderModelOptions(
+  select: HTMLSelectElement,
+  models: CodexModelCatalogEntry[],
+  selectedModel: string,
+) {
+  while (select.firstChild) select.firstChild.remove();
+  const doc = select.ownerDocument;
+  const defaultOption = doc.createElementNS(
+    XHTML_NS,
+    "option",
+  ) as HTMLOptionElement;
+  defaultOption.value = "";
+  defaultOption.textContent = "Codex default";
+  select.appendChild(defaultOption);
+
+  for (const model of models) {
+    const option = doc.createElementNS(
+      XHTML_NS,
+      "option",
+    ) as HTMLOptionElement;
+    option.value = model.slug;
+    option.textContent =
+      model.displayName && model.displayName !== model.slug
+        ? `${model.displayName} (${model.slug})`
+        : model.slug;
+    select.appendChild(option);
+  }
+
+  const normalized = String(selectedModel || "").trim();
+  if (normalized && !models.some((model) => model.slug === normalized)) {
+    const unavailable = doc.createElementNS(
+      XHTML_NS,
+      "option",
+    ) as HTMLOptionElement;
+    unavailable.value = normalized;
+    unavailable.textContent = `${normalized} (unavailable)`;
+    select.appendChild(unavailable);
+  }
+  select.value = normalized;
+  updateModelSelectorTitle(select, normalized);
+}
+
+function updateModelSelectorTitle(
+  select: HTMLSelectElement,
+  modelSlug: string,
+) {
+  select.title = modelSlug
+    ? `Model for this chat: ${modelSlug}`
+    : "Model for this chat: Codex default";
+}
+
 function renderContextDigestStatus(
   body: HTMLElement,
   itemId: number,
@@ -3232,6 +3356,7 @@ function syncLayoutState(body: HTMLElement, itemId: number) {
   messages.style.flexDirection = "column";
   inputArea.style.display = "flex";
   if (itemId > 0) renderContextDigestStatus(body, itemId);
+  if (itemId > 0) void syncModelSelector(body, itemId);
 }
 
 function parseUserContent(content: string): {

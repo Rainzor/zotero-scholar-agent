@@ -46,6 +46,7 @@ export type ChatSession = {
   itemId: number;
   itemKey: string;
   codexThreadId?: string;
+  modelSlug?: string;
   contextDigest?: string;
   contextDigestUpToMessageIndex?: number;
   contextDigestUpdatedAt?: number;

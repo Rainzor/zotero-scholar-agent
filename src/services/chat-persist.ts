@@ -4,6 +4,7 @@ import type { ContextDigestSource } from "./context-digest";
 export type PersistedSession = {
   sessionId: string;
   codexThreadId?: string;
+  modelSlug?: string;
   contextDigest?: string;
   contextDigestUpToMessageIndex?: number;
   contextDigestUpdatedAt?: number;
@@ -71,6 +72,7 @@ export function normalizePersistedSession(
   return {
     sessionId: String(raw?.sessionId || makeId()),
     codexThreadId: String(raw?.codexThreadId || ""),
+    modelSlug: String(raw?.modelSlug || "").trim() || undefined,
     contextDigest: digest || undefined,
     contextDigestUpToMessageIndex:
       digest && Number.isFinite(digestUpTo) && digestUpTo >= 0
@@ -103,6 +105,7 @@ export function serializeItemState(state: {
   sessions: Array<{
     sessionId: string;
     codexThreadId?: string;
+    modelSlug?: string;
     contextDigest?: string;
     contextDigestUpToMessageIndex?: number;
     contextDigestUpdatedAt?: number;
@@ -123,6 +126,7 @@ export function serializeItemState(state: {
     sessions: state.sessions.map((s) => ({
       sessionId: s.sessionId,
       codexThreadId: s.codexThreadId || undefined,
+      modelSlug: s.modelSlug?.trim() || undefined,
       contextDigest: s.contextDigest?.trim() || undefined,
       contextDigestUpToMessageIndex:
         typeof s.contextDigestUpToMessageIndex === "number"

@@ -39,6 +39,7 @@ export type ResearchTurnRequest = {
   session: {
     sessionId: string;
     codexThreadId?: string;
+    modelSlug?: string;
     contextDigest?: string;
     contextDigestUpToMessageIndex?: number;
   };
@@ -236,6 +237,8 @@ async function runCodexAttempt(options: {
   const result = await deps.runCodexTurn({
     prompt,
     threadId,
+    model: request.session.modelSlug,
+    fallbackToDefaultModel: request.session.modelSlug ? false : undefined,
     sandbox: "workspace-write",
     onStatus: events.onStatus,
     onProcess: events.onProcess,
@@ -271,7 +274,11 @@ function shouldRetryAsFreshThread(error: unknown, threadId: string): boolean {
   // Only a Codex process failure suggests a stale/lost thread. Errors thrown
   // before or outside the Codex run (binary/vault resolution, callback bugs)
   // would fail identically on a fresh thread, so don't pay for a second run.
-  return error instanceof CodexTurnError && !error.timedOut;
+  return (
+    error instanceof CodexTurnError &&
+    !error.timedOut &&
+    error.retryFreshThread
+  );
 }
 
 function errorMessage(error: unknown): string {
