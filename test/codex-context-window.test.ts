@@ -16,6 +16,12 @@ describe("parseCodexModelCatalog", () => {
             {
               slug: "gpt-5.5",
               display_name: "GPT-5.5",
+              default_reasoning_level: "medium",
+              supported_reasoning_levels: [
+                { effort: "low", description: "Fast" },
+                { effort: "medium", description: "Balanced" },
+                { effort: "high", description: "Deep" },
+              ],
               context_window: 272000,
               max_context_window: 1000000,
               effective_context_window_percent: 95,
@@ -31,6 +37,12 @@ describe("parseCodexModelCatalog", () => {
       {
         slug: "gpt-5.5",
         displayName: "GPT-5.5",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: [
+          { effort: "low", description: "Fast" },
+          { effort: "medium", description: "Balanced" },
+          { effort: "high", description: "Deep" },
+        ],
         contextWindowTokens: 272000,
         maxContextWindowTokens: 1000000,
         effectiveContextWindowPercent: 95,

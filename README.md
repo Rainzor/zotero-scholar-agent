@@ -7,6 +7,7 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 - 在 PDF Reader 侧栏中直接向 Codex 提问当前论文。
 - 自动为当前论文准备 `text.txt`、`memory.md`、`record.json` 和会话日志。
 - 在同一篇论文下创建、切换、重命名、删除多个独立聊天会话。
+- 每个聊天会话可独立选择 Codex 模型和 Thinking 强度。
 - 通过 Memory 视图查看当前论文的 Knowledge Surface、浏览 Vault 中的论文、跨论文搜索 `memory.md`。
 - 在对话中用 `@` 提及 Vault 中的其他论文，让 Codex 基于多篇 Paper Knowledge Records 进行比较和关联。
 - 在输入框粘贴本地截图并随问题发送给 Codex；截图保存在 Vault 的 gitignored 本地目录。
@@ -55,7 +56,7 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 
 ## 配置
 
-侧栏聊天需要本机已安装并配置好 Codex CLI。插件会自动尝试解析可工作的 `codex` 路径，也可以在偏好设置中手动指定。每个聊天会话可从当前 Codex catalog 中选择模型；`Codex default` 继续继承用户的 Codex 配置，选择结果按会话保存。
+侧栏聊天需要本机已安装并配置好 Codex CLI。插件会自动尝试解析可工作的 `codex` 路径，也可以在偏好设置中手动指定。每个聊天会话可从当前 Codex catalog 中选择模型和 Thinking 强度；`Codex default` / `Thinking default` 继续继承用户配置，选择结果按会话保存。
 
 偏好设置中还保留 AI 服务配置，用于非 Codex 功能，例如划词翻译和接口连通性测试。侧栏的模型选择不是旧式 provider 路由：列表动态来自 `codex debug models`，实际调用仍完全由 Codex CLI 执行。
 

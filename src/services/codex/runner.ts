@@ -9,6 +9,7 @@ import {
   enrichUsageWithContext,
   resolveCodexModelForExecution,
   resolveCodexContextWindow,
+  type CodexReasoningEffort,
 } from "./context-window";
 import { resolveCodexBinary } from "./path";
 import { spawnLineProcess, type RunningLineProcess } from "./subprocess";
@@ -19,6 +20,7 @@ export type CodexTurnInput = {
   threadId?: string;
   model?: string;
   images?: string[];
+  reasoningEffort?: CodexReasoningEffort;
   fallbackToDefaultModel?: boolean;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   timeoutMs?: number;
@@ -195,6 +197,7 @@ async function executeCodexProcess(options: {
     threadId: input.threadId,
     model,
     images: input.images,
+    reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox || "workspace-write",
   });
   let lastContent = "";
@@ -246,11 +249,15 @@ export function buildCodexArgs(options: {
   threadId?: string;
   model?: string;
   images?: string[];
+  reasoningEffort?: CodexReasoningEffort;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
 }): string[] {
   const base = [
     "exec",
     "--json",
+    ...(options.reasoningEffort
+      ? ["-c", `model_reasoning_effort="${options.reasoningEffort}"`]
+      : []),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.images || []).flatMap((image) => ["-i", image]),
     "-C",

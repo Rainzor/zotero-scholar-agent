@@ -4,6 +4,7 @@ import type { ContextDigestSource } from "./services/context-digest";
 import type { SemanticRelationship } from "./services/codex/vault-format";
 import type { KnowledgeQualityReport } from "./services/knowledge-quality";
 import type { LocalImageRef } from "./services/local-images";
+import type { CodexReasoningEffort } from "./services/codex/context-window";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -36,6 +37,7 @@ export type ChatMessage = {
   reasoning?: string;
   timestamp?: number;
   model?: string;
+  reasoningEffort?: CodexReasoningEffort;
   usage?: TokenUsage;
   activities?: CodexActivity[];
   memoryUpdated?: boolean;
@@ -52,6 +54,7 @@ export type ChatSession = {
   itemKey: string;
   codexThreadId?: string;
   modelSlug?: string;
+  reasoningEffort?: CodexReasoningEffort;
   contextDigest?: string;
   contextDigestUpToMessageIndex?: number;
   contextDigestUpdatedAt?: number;

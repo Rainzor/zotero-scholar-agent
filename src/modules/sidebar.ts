@@ -52,6 +52,7 @@ import {
   acceptPaperKeyword,
   updatePaperRating,
   type CodexModelCatalogEntry,
+  type CodexReasoningEffort,
   type PaperVaultMeta,
   type RunningLineProcess,
   type SemanticRelationship,
@@ -1149,6 +1150,21 @@ function ensureChatUI(body: HTMLElement) {
   defaultModelOption.textContent = "Codex default";
   modelSelect.appendChild(defaultModelOption);
 
+  const reasoningSelect = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "select",
+  ) as HTMLSelectElement;
+  reasoningSelect.id = "zoteroagent-reasoning-select";
+  reasoningSelect.className = "zoteroagent-reasoning-select";
+  reasoningSelect.title = "Thinking intensity for this chat";
+  const defaultReasoningOption = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "option",
+  ) as HTMLOptionElement;
+  defaultReasoningOption.value = "";
+  defaultReasoningOption.textContent = "Thinking default";
+  reasoningSelect.appendChild(defaultReasoningOption);
+
   const actionsRight = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "div",
@@ -1171,6 +1187,7 @@ function ensureChatUI(body: HTMLElement) {
   actionsRight.appendChild(attachPageBtn);
   actionsRight.appendChild(sendBtn);
   actionsRow.appendChild(modelSelect);
+  actionsRow.appendChild(reasoningSelect);
   actionsRow.appendChild(actionsRight);
 
   composeArea.appendChild(contextChips);
@@ -1312,6 +1329,22 @@ function bindChatEvents(body: HTMLElement) {
       const select = event.target as HTMLSelectElement;
       chatStore.updateSessionModel(itemId, select.value, session.sessionId);
       updateModelSelectorTitle(select, select.value);
+      void syncModelSelector(body, itemId);
+    });
+  body
+    .querySelector("#zoteroagent-reasoning-select")
+    ?.addEventListener("change", (event) => {
+      const itemId = Number(body.dataset.itemID);
+      if (itemId <= 0) return;
+      const session =
+        chatStore.getSession(itemId) || chatStore.createSession(itemId);
+      if (!session) return;
+      const value = (event.target as HTMLSelectElement).value;
+      chatStore.updateSessionReasoningEffort(
+        itemId,
+        (value || undefined) as CodexReasoningEffort | undefined,
+        session.sessionId,
+      );
     });
   body
     .querySelector("#zoteroagent-session-new")
@@ -1394,10 +1427,14 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   const modelSelect = body.querySelector(
     "#zoteroagent-model-select",
   ) as HTMLSelectElement | null;
+  const reasoningSelect = body.querySelector(
+    "#zoteroagent-reasoning-select",
+  ) as HTMLSelectElement | null;
   const attachPage = body.querySelector(
     "#zoteroagent-attach-page",
   ) as HTMLButtonElement | null;
   if (modelSelect) modelSelect.disabled = generating;
+  if (reasoningSelect) reasoningSelect.disabled = generating;
   if (attachPage) attachPage.disabled = generating;
   if (sendBtn) {
     if (generating) {
@@ -1755,6 +1792,7 @@ async function submitQuestion(body: HTMLElement) {
     content: "",
     reasoning: "",
     model: getModelLabel(selectedModel),
+    reasoningEffort: session?.reasoningEffort,
     contextPapers: mentionedPapers,
   };
   chatStore.addMessage(itemId, assistant);
@@ -1789,6 +1827,7 @@ async function submitQuestion(body: HTMLElement) {
         sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
         codexThreadId: session?.codexThreadId || "",
         modelSlug: selectedModel,
+        reasoningEffort: session?.reasoningEffort,
         contextDigest: session?.contextDigest,
         contextDigestUpToMessageIndex: session?.contextDigestUpToMessageIndex,
       },
@@ -3687,13 +3726,17 @@ async function syncModelSelector(
   const select = body.querySelector(
     "#zoteroagent-model-select",
   ) as HTMLSelectElement | null;
+  const reasoningSelect = body.querySelector(
+    "#zoteroagent-reasoning-select",
+  ) as HTMLSelectElement | null;
   const session = chatStore.getSession(itemId);
-  if (!select) return;
+  if (!select || !reasoningSelect) return;
   const sessionId = session?.sessionId || "";
 
   const requestId = String(++modelRequestSeq);
   select.dataset.requestId = requestId;
   select.disabled = true;
+  reasoningSelect.disabled = true;
   let models: CodexModelCatalogEntry[] = [];
   try {
     models = await listCodexModels({ refresh });
@@ -3711,7 +3754,90 @@ async function syncModelSelector(
   if ((activeSession?.sessionId || "") !== sessionId) return;
 
   renderModelOptions(select, models, activeSession?.modelSlug || "");
+  const supportedEfforts = getSupportedReasoningEfforts(
+    models,
+    activeSession?.modelSlug || "",
+  );
+  const selectedEffort = activeSession?.reasoningEffort;
+  const canValidateEffort =
+    models.length > 0 &&
+    (!activeSession?.modelSlug ||
+      models.some((model) => model.slug === activeSession.modelSlug));
+  const normalizedEffort =
+    selectedEffort &&
+    (!canValidateEffort || supportedEfforts.includes(selectedEffort))
+      ? selectedEffort
+      : undefined;
+  if (
+    selectedEffort &&
+    canValidateEffort &&
+    !normalizedEffort &&
+    activeSession
+  ) {
+    chatStore.updateSessionReasoningEffort(
+      itemId,
+      undefined,
+      activeSession.sessionId,
+    );
+  }
+  renderReasoningOptions(
+    reasoningSelect,
+    !canValidateEffort && selectedEffort
+      ? [selectedEffort]
+      : supportedEfforts,
+    normalizedEffort,
+  );
   select.disabled = isGenerating;
+  reasoningSelect.disabled = isGenerating;
+}
+
+function getSupportedReasoningEfforts(
+  models: CodexModelCatalogEntry[],
+  modelSlug: string,
+): CodexReasoningEffort[] {
+  const selected = modelSlug
+    ? models.find((model) => model.slug === modelSlug)
+    : undefined;
+  const efforts = selected
+    ? selected.supportedReasoningEfforts || []
+    : models.flatMap((model) => model.supportedReasoningEfforts || []);
+  return Array.from(new Set(efforts.map((entry) => entry.effort)));
+}
+
+function renderReasoningOptions(
+  select: HTMLSelectElement,
+  efforts: CodexReasoningEffort[],
+  selected?: CodexReasoningEffort,
+) {
+  while (select.firstChild) select.firstChild.remove();
+  const defaultOption = select.ownerDocument.createElementNS(
+    XHTML_NS,
+    "option",
+  ) as HTMLOptionElement;
+  defaultOption.value = "";
+  defaultOption.textContent = "Thinking default";
+  select.appendChild(defaultOption);
+  const labels: Record<CodexReasoningEffort, string> = {
+    none: "None",
+    minimal: "Minimal",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "XHigh",
+  };
+  for (const effort of efforts) {
+    const option = select.ownerDocument.createElementNS(
+      XHTML_NS,
+      "option",
+    ) as HTMLOptionElement;
+    option.value = effort;
+    option.textContent = labels[effort];
+    select.appendChild(option);
+  }
+  select.value = selected || "";
+  select.title = selected
+    ? `Thinking intensity: ${labels[selected]}`
+    : "Thinking intensity: Codex default";
 }
 
 function renderModelOptions(

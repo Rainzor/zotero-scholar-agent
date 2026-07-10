@@ -24,12 +24,25 @@ export type CodexContextWindow = {
 export type CodexModelCatalogEntry = {
   slug: string;
   displayName?: string;
+  defaultReasoningEffort?: CodexReasoningEffort;
+  supportedReasoningEfforts?: Array<{
+    effort: CodexReasoningEffort;
+    description?: string;
+  }>;
   contextWindowTokens?: number;
   maxContextWindowTokens?: number;
   effectiveContextWindowPercent?: number;
   priority?: number;
   visibility?: string;
 };
+
+export type CodexReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
 
 let cachedContextWindow: CodexContextWindow | null = null;
 let cachedContextWindowKey = "";
@@ -178,6 +191,13 @@ export function parseCodexModelCatalog(raw: string): CodexModelCatalogEntry[] {
       return {
         slug,
         displayName: String(model?.display_name || model?.displayName || "").trim() || undefined,
+        defaultReasoningEffort: normalizeCodexReasoningEffort(
+          model?.default_reasoning_level || model?.defaultReasoningEffort,
+        ),
+        supportedReasoningEfforts: normalizeReasoningEfforts(
+          model?.supported_reasoning_levels ||
+            model?.supportedReasoningEfforts,
+        ),
         contextWindowTokens: positiveInteger(model?.context_window),
         maxContextWindowTokens: positiveInteger(model?.max_context_window),
         effectiveContextWindowPercent: positiveInteger(
@@ -191,6 +211,41 @@ export function parseCodexModelCatalog(raw: string): CodexModelCatalogEntry[] {
       };
     })
     .filter(Boolean) as CodexModelCatalogEntry[];
+}
+
+export function normalizeCodexReasoningEffort(
+  value: unknown,
+): CodexReasoningEffort | undefined {
+  const effort = String(value || "").trim().toLowerCase();
+  return effort === "none" ||
+    effort === "minimal" ||
+    effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh"
+    ? effort
+    : undefined;
+}
+
+function normalizeReasoningEfforts(
+  value: unknown,
+): CodexModelCatalogEntry["supportedReasoningEfforts"] {
+  if (!Array.isArray(value)) return undefined;
+  const efforts = value
+    .map((entry: any) => {
+      const effort = normalizeCodexReasoningEffort(
+        entry?.effort || entry?.reasoningEffort,
+      );
+      if (!effort) return null;
+      return {
+        effort,
+        description: String(entry?.description || "").trim() || undefined,
+      };
+    })
+    .filter(Boolean) as NonNullable<
+    CodexModelCatalogEntry["supportedReasoningEfforts"]
+  >;
+  return efforts.length ? efforts : undefined;
 }
 
 export function parseTopLevelTomlString(toml: string, key: string): string {

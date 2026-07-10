@@ -1,10 +1,15 @@
 import type { ChatMessage } from "../addon";
 import type { ContextDigestSource } from "./context-digest";
+import {
+  normalizeCodexReasoningEffort,
+  type CodexReasoningEffort,
+} from "./codex/context-window";
 
 export type PersistedSession = {
   sessionId: string;
   codexThreadId?: string;
   modelSlug?: string;
+  reasoningEffort?: CodexReasoningEffort;
   contextDigest?: string;
   contextDigestUpToMessageIndex?: number;
   contextDigestUpdatedAt?: number;
@@ -73,6 +78,7 @@ export function normalizePersistedSession(
     sessionId: String(raw?.sessionId || makeId()),
     codexThreadId: String(raw?.codexThreadId || ""),
     modelSlug: String(raw?.modelSlug || "").trim() || undefined,
+    reasoningEffort: normalizeCodexReasoningEffort(raw?.reasoningEffort),
     contextDigest: digest || undefined,
     contextDigestUpToMessageIndex:
       digest && Number.isFinite(digestUpTo) && digestUpTo >= 0
@@ -106,6 +112,7 @@ export function serializeItemState(state: {
     sessionId: string;
     codexThreadId?: string;
     modelSlug?: string;
+    reasoningEffort?: CodexReasoningEffort;
     contextDigest?: string;
     contextDigestUpToMessageIndex?: number;
     contextDigestUpdatedAt?: number;
@@ -127,6 +134,7 @@ export function serializeItemState(state: {
       sessionId: s.sessionId,
       codexThreadId: s.codexThreadId || undefined,
       modelSlug: s.modelSlug?.trim() || undefined,
+      reasoningEffort: s.reasoningEffort,
       contextDigest: s.contextDigest?.trim() || undefined,
       contextDigestUpToMessageIndex:
         typeof s.contextDigestUpToMessageIndex === "number"

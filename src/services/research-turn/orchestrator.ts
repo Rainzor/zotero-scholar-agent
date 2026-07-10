@@ -17,6 +17,7 @@ import {
   type CodexEvent,
   type CodexTurnInput,
   type CodexTurnResult,
+  type CodexReasoningEffort,
   type EnsurePaperVaultOptions,
   type PaperVaultMeta,
   type RunningLineProcess,
@@ -45,6 +46,7 @@ export type ResearchTurnRequest = {
     sessionId: string;
     codexThreadId?: string;
     modelSlug?: string;
+    reasoningEffort?: CodexReasoningEffort;
     contextDigest?: string;
     contextDigestUpToMessageIndex?: number;
   };
@@ -268,6 +270,7 @@ async function runCodexAttempt(options: {
     prompt,
     threadId,
     model: request.session.modelSlug,
+    reasoningEffort: request.session.reasoningEffort,
     images: request.images,
     fallbackToDefaultModel: request.session.modelSlug ? false : undefined,
     sandbox: "workspace-write",

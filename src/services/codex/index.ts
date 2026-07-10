@@ -47,6 +47,7 @@ export {
   getConfiguredCodexContextWindow,
   getConfiguredCodexModelSlug,
   listCodexModels,
+  normalizeCodexReasoningEffort,
   parseCodexModelCatalog,
   parseTopLevelTomlString,
   resolveCodexModelForExecution,
@@ -58,6 +59,7 @@ export {
   type CodexContextSource,
   type CodexContextWindow,
   type CodexModelCatalogEntry,
+  type CodexReasoningEffort,
 } from "./context-window";
 
 export {

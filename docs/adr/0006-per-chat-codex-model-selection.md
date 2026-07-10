@@ -44,5 +44,5 @@ Add an optional `modelSlug` to each sidebar `ChatSession`.
   Codex authentication/provider rather than assuming OpenAI-only slugs.
 - Conversation messages record the resolved model when usage metadata exposes
   it, making model changes visible in the transcript.
-- Reasoning-effort selection remains out of scope. It can be added later from
-  catalog metadata without changing the per-session ownership decision.
+- Reasoning-effort selection was added by ADR 0008 using the same per-session
+  ownership and catalog-driven UI.

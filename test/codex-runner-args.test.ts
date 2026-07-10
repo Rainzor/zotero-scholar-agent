@@ -24,4 +24,15 @@ describe("buildCodexArgs", () => {
       "Analyze",
     ]);
   });
+
+  it("passes reasoning effort as an invocation-only config override", () => {
+    expect(
+      buildCodexArgs({
+        vaultDir: "/vault",
+        prompt: "Analyze",
+        reasoningEffort: "high",
+        sandbox: "workspace-write",
+      }),
+    ).toContain('model_reasoning_effort="high"');
+  });
 });

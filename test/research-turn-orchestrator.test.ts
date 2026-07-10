@@ -133,6 +133,7 @@ describe("runResearchTurn", () => {
           sessionId: "chat-1",
           codexThreadId: "thread-existing",
           modelSlug: "gpt-5.6-terra",
+          reasoningEffort: "high",
           contextDigest: "# Context Digest",
         },
         images: ["/vault/AAAA1111/figures/local/image.png"],
@@ -144,6 +145,7 @@ describe("runResearchTurn", () => {
           expect(input.threadId).toBe("thread-existing");
           expect(input.model).toBe("gpt-5.6-terra");
           expect(input.fallbackToDefaultModel).toBe(false);
+          expect(input.reasoningEffort).toBe("high");
           expect(input.images).toEqual([
             "/vault/AAAA1111/figures/local/image.png",
           ]);
