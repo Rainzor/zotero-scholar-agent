@@ -9,9 +9,10 @@ npm run start    # Development mode with hot reload (zotero-plugin serve)
 npm run build    # Type-check then production build → build/ directory
 npm run release  # Create a release build
 npm run lint     # Prettier + ESLint auto-fix
+npm test         # Vitest unit tests (pure helpers: vault-format, page-evidence, codex events, etc.)
 ```
 
-There are no tests (`npm test` is unimplemented).
+Unit tests cover pure logic only (no Zotero runtime). Runtime behavior is validated manually in Zotero — see `docs/benchmarks/`.
 
 To build for development, run `npm run start`. The plugin output goes to `build/` and is served to a running Zotero instance.
 
@@ -41,7 +42,7 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ai-service.ts`      | Abstract AI API client used by non-agent features such as popup translation and preference API checks                                                              |
 | `codex/`             | Codex CLI integration: binary resolution, Mozilla subprocess wrapper, JSONL event parsing, Vault prep, and turn execution                                          |
-| `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/extension/zotero-agent/{itemKey}.json`                                                           |
+| `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/zoteroagent/chats/{itemKey}.json` (front-end/UI state only — see Storage below) |
 | `prompts.ts`         | Popup translation prompt                                                                                                                                            |
 | `page-cache.ts`      | Caches parsed PDF pages to avoid re-parsing                                                                                                                          |
 | `pdf-parser.ts`      | PDF.js page parsing used by the Codex Knowledge Vault                                                                                                                |
@@ -66,7 +67,7 @@ Providers are configured in `src/utils/provider-presets.ts`. Supported API forma
 
 ### Key Data Structures
 
-**Session file** (`{dataDir}/extension/zotero-agent/{itemKey}.json`):
+**Session file** (`{ZoteroDataDir}/zoteroagent/chats/{itemKey}.json`):
 
 ```typescript
 {
@@ -81,6 +82,20 @@ Providers are configured in `src/utils/provider-presets.ts`. Supported API forma
   }]
 }
 ```
+
+### Storage & Source of Truth
+
+Plugin state lives in three roots, split by purpose:
+
+| Location | Contents | Role |
+| -------- | -------- | ---- |
+| **Knowledge Vault** — `~/papers` (or pref `codex.vaultPath`), a git repo | per-paper `{itemKey}/`: `text.txt`, `text.meta.json` (parser-version stamp), `memory.md` (Knowledge Surface), `record.json` (Structured Projection), `conversations/{sessionId}.md`; root `AGENTS.md`, `README.md`, `.logs/{date}.log` | **Single source of truth.** Durable, migratable, git-versioned. Codex's working directory (`codex exec -C {vault}`). |
+| **Zotero DataDir** — `{ZoteroDataDir}/zoteroagent/` | `chats/{itemKey}.json` (sessions/messages/`codexThreadId`, UI-specific fields); `papers/{itemKey}-pages.json` (PDF.js page cache) | Front-end/UI state and caches. Ephemeral — not git-tracked. |
+| **Zotero Prefs** (`Zotero.Prefs`) | vault path, Codex binary path, model slugs, context-window override, AI services list | Configuration. |
+
+**Deliberate dual-write of conversations.** Each turn is persisted twice: the structured session JSON in `chats/` (what the sidebar renders, with per-message reasoning/activities/usage) and a human-readable transcript in the Vault's `conversations/*.md` (git history, browsable record). This is intentional — deleting a session in the UI touches only `chats/` and leaves the Vault record intact. `conversations/*.md` is **append-only** and is not read back by the UI, so it can diverge from edited UI history by design; the Vault is authoritative.
+
+`~/.codex/` is **read-only** to the plugin (model/context-window resolution). The Codex CLI itself writes its own thread rollouts there when we run `codex exec`.
 
 ### Build System
 
