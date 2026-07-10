@@ -7,7 +7,6 @@ import {
   buildReadmeTable,
   buildTextMeta,
   escapeTable,
-  formatPagesForVault,
   formatWorkerTextForVault,
   hasPageEvidenceMarkers,
   inferTextMetaFromContent,
@@ -186,16 +185,6 @@ describe("markdown / README helpers", () => {
     expect(replaceMarkedBlock(text, start, end, `${start}\nnew\n${end}`)).toBe(
       `header\n${start}\nnew\n${end}\nfooter`,
     );
-  });
-
-  it("formats pages for vault text.txt", () => {
-    expect(
-      formatPagesForVault([
-        { pageNumber: 1, plainText: "hello", blocks: [] },
-        { pageNumber: 2, plainText: "  ", blocks: [] },
-        { pageNumber: 3, plainText: "world", blocks: [] },
-      ]),
-    ).toBe("[page 1]\nhello\n\n[page 3]\nworld");
   });
 
   it("formats PDFWorker form-feed text with page markers", () => {

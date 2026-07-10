@@ -1,7 +1,5 @@
 import { getFullText } from "../../modules/pdf-context";
 import { getPref, setPref } from "../../utils/prefs";
-import { buildPageCacheData, loadPageCache, savePageCache } from "../page-cache";
-import { getPdfDocumentFromReader, parseAllPages } from "../pdf-parser";
 import { runLineProcess } from "./subprocess";
 import {
   appendMarkdownBlock,
@@ -10,7 +8,6 @@ import {
   buildPaperRecordProjection,
   buildReadmeTable,
   buildTextMeta,
-  formatPagesForVault,
   formatWorkerTextForVault,
   hasPageEvidenceMarkers,
   initialMemoryMarkdown,
@@ -35,7 +32,6 @@ export type { SemanticRelationship } from "./vault-format";
 
 export type EnsurePaperVaultOptions = PaperVaultMeta & {
   pdfItemId: number;
-  reader?: _ZoteroTypes.ReaderInstance | null;
   forceTextRefresh?: boolean;
   onStatus?: (text: string) => void;
 };
@@ -531,53 +527,14 @@ export async function commitVaultChanges(message: string): Promise<boolean> {
   return commit.exitCode === 0;
 }
 
+// Vault text comes solely from Zotero's PDFWorker full-text extraction. The
+// former PDF.js structured-parse path never succeeded in production (page
+// getTextContent items were unreadable across the reader's Xray boundary), so
+// it and its page cache were removed. formatWorkerTextForVault turns the
+// worker's form-feed page breaks into `[page N]` markers.
 async function buildTextForPaper(
   options: EnsurePaperVaultOptions,
 ): Promise<TextExtractionResult> {
-  const cached = await loadPageCache(options.itemKey);
-  if (cached?.pages?.length) {
-    const cachedText = formatPagesForVault(cached.pages);
-    if (cachedText.trim()) return { text: cachedText, source: "pdfjs" };
-    ztoolkit.log(`[Codex Vault] Ignoring empty page cache for ${options.itemKey}`);
-    await appendVaultLog("pdf-text-empty-cache", `Ignoring empty page cache for ${options.itemKey}`, {
-      itemKey: options.itemKey,
-      pdfItemId: options.pdfItemId,
-    });
-  }
-
-  const pdfDocument = getPdfDocumentFromReader(options.reader) ||
-    getPdfDocumentFromAnyReader(options.pdfItemId);
-  if (pdfDocument) {
-    const pages = await parseAllPages(pdfDocument);
-    const parsedText = formatPagesForVault(pages);
-    if (parsedText.trim()) {
-      await savePageCache(options.itemKey, buildPageCacheData(pages));
-      return { text: parsedText, source: "pdfjs" };
-    }
-    ztoolkit.log(
-      `[Codex Vault] PDF.js parse returned no text for ${options.itemKey} (${pages.length} pages)`,
-    );
-    await appendVaultLog(
-      "pdf-text-empty-pdfjs",
-      `PDF.js parse returned no text for ${options.itemKey}`,
-      {
-        itemKey: options.itemKey,
-        pdfItemId: options.pdfItemId,
-        pages: pages.length,
-        emptyPages: pages.filter((page) => !String(page.plainText || "").trim()).length,
-      },
-    );
-  } else {
-    ztoolkit.log(
-      `[Codex Vault] No PDF.js document found for ${options.itemKey}, pdfItemId=${options.pdfItemId}`,
-    );
-    await appendVaultLog(
-      "pdf-text-no-pdfjs-document",
-      `No PDF.js document found for ${options.itemKey}`,
-      { itemKey: options.itemKey, pdfItemId: options.pdfItemId },
-    );
-  }
-
   if (options.pdfItemId > 0) {
     const fullText = await getFullText(options.pdfItemId);
     const workerText = formatWorkerTextForVault(fullText);
@@ -599,39 +556,6 @@ async function buildTextForPaper(
     );
   }
   return { text: "", source: "pdfworker-plain" };
-}
-
-function getPdfDocumentFromAnyReader(pdfItemId: number): any | null {
-  for (const reader of getCandidateReaders()) {
-    const readerItemId = Number((reader as any)?.itemID || (reader as any)?._item?.id || 0);
-    if (pdfItemId > 0 && readerItemId > 0 && readerItemId !== pdfItemId) continue;
-    const doc = getPdfDocumentFromReader(reader as _ZoteroTypes.ReaderInstance);
-    if (doc) return doc;
-  }
-  return null;
-}
-
-function getCandidateReaders(): any[] {
-  const candidates: any[] = [];
-  try {
-    const tabId =
-      (typeof Zotero_Tabs !== "undefined" ? (Zotero_Tabs as any).selectedID : "") ||
-      (Zotero as any).getActiveZoteroPane?.()?.getSelectedTabID?.() ||
-      "";
-    if (tabId) {
-      const active = Zotero.Reader?.getByTabID?.(tabId);
-      if (active) candidates.push(active);
-    }
-  } catch {
-    // Ignore.
-  }
-  try {
-    const readers = (Zotero.Reader as any)?._readers;
-    if (Array.isArray(readers)) candidates.push(...readers);
-  } catch {
-    // Ignore.
-  }
-  return candidates;
 }
 
 async function updateReadme(meta: PaperVaultMeta) {

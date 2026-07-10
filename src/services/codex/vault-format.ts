@@ -1,5 +1,3 @@
-import type { StructuredPage } from "../pdf-parser";
-
 export type PaperVaultMeta = {
   itemId: number;
   itemKey: string;
@@ -146,16 +144,6 @@ export function initialMemoryMarkdown(meta: PaperVaultMeta): string {
     "## Evidence Pointers",
     "",
   ].join("\n");
-}
-
-export function formatPagesForVault(pages: StructuredPage[]): string {
-  return (pages || [])
-    .filter((page) => page.pageNumber > 0 && String(page.plainText || "").trim())
-    .map(
-      (page) =>
-        `[page ${page.pageNumber}]\n${String(page.plainText || "").trim()}`,
-    )
-    .join("\n\n");
 }
 
 export function hasPageEvidenceMarkers(text: string): boolean {

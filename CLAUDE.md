@@ -32,7 +32,7 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 | ------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `sidebar.ts`        | Main chat panel: session management, message rendering, Codex streaming updates, Memory view                          |
 | `popup.ts`          | In-reader text-selection popup with "Ask" and "Translate" quick actions                                               |
-| `pdf-context.ts`    | Full-text extraction fallback via Zotero PDFWorker and page cache                                                     |
+| `pdf-context.ts`    | Full-text extraction via Zotero PDFWorker (`getFullText`), trimming trailing references                               |
 | `preferences.ts`    | Settings UI for AI service configuration                                                                              |
 | `reader.ts`         | Reader lifecycle integration                                                                                          |
 
@@ -44,15 +44,13 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 | `codex/`             | Codex CLI integration: binary resolution, Mozilla subprocess wrapper, JSONL event parsing, Vault prep, and turn execution                                          |
 | `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/zoteroagent/chats/{itemKey}.json` (front-end/UI state only — see Storage below) |
 | `prompts.ts`         | Popup translation prompt                                                                                                                                            |
-| `page-cache.ts`      | Caches parsed PDF pages to avoid re-parsing                                                                                                                          |
-| `pdf-parser.ts`      | PDF.js page parsing used by the Codex Knowledge Vault                                                                                                                |
 
 ### Agent Execution Flow
 
 When a user submits a question in the sidebar (`sidebar.ts::submitQuestion`):
 
 1. Resolve the in-focus Zotero item and PDF attachment.
-2. Prepare the configured Knowledge Vault (`~/papers` by default): per-paper `text.txt`, `memory.md`, session conversation log, root `AGENTS.md`, and git repo.
+2. Prepare the configured Knowledge Vault (`~/papers` by default): per-paper `text.txt` (extracted via Zotero PDFWorker; form-feed page breaks become `[page N]` markers), `text.meta.json` parser-version stamp, `memory.md`, session conversation log, root `AGENTS.md`, and git repo.
 3. Run `codex exec --json -C {vault} -s workspace-write ...` via Mozilla Subprocess.
 4. Parse Codex JSONL events into sidebar updates, activity steps, usage, and the assistant answer.
 5. Append the conversation turn, detect whether `memory.md` changed, and git-commit Vault changes.
@@ -90,7 +88,7 @@ Plugin state lives in three roots, split by purpose:
 | Location | Contents | Role |
 | -------- | -------- | ---- |
 | **Knowledge Vault** — `~/papers` (or pref `codex.vaultPath`), a git repo | per-paper `{itemKey}/`: `text.txt`, `text.meta.json` (parser-version stamp), `memory.md` (Knowledge Surface), `record.json` (Structured Projection), `conversations/{sessionId}.md`; root `AGENTS.md`, `README.md`, `.logs/{date}.log` | **Single source of truth.** Durable, migratable, git-versioned. Codex's working directory (`codex exec -C {vault}`). |
-| **Zotero DataDir** — `{ZoteroDataDir}/zoteroagent/` | `chats/{itemKey}.json` (sessions/messages/`codexThreadId`, UI-specific fields); `papers/{itemKey}-pages.json` (PDF.js page cache) | Front-end/UI state and caches. Ephemeral — not git-tracked. |
+| **Zotero DataDir** — `{ZoteroDataDir}/zoteroagent/` | `chats/{itemKey}.json` (sessions/messages/`codexThreadId`, UI-specific fields) | Front-end/UI state. Ephemeral — not git-tracked. |
 | **Zotero Prefs** (`Zotero.Prefs`) | vault path, Codex binary path, model slugs, context-window override, AI services list | Configuration. |
 
 **Deliberate dual-write of conversations.** Each turn is persisted twice: the structured session JSON in `chats/` (what the sidebar renders, with per-message reasoning/activities/usage) and a human-readable transcript in the Vault's `conversations/*.md` (git history, browsable record). This is intentional — deleting a session in the UI touches only `chats/` and leaves the Vault record intact. `conversations/*.md` is **append-only** and is not read back by the UI, so it can diverge from edited UI history by design; the Vault is authoritative.

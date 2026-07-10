@@ -1481,7 +1481,6 @@ async function submitQuestion(body: HTMLElement) {
     const result = await runResearchTurn({
       paper: paperMeta,
       pdfItemId,
-      reader,
       question: aiQuestion,
       mentionedPapers,
       session: {

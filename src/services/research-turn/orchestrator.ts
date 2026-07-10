@@ -34,7 +34,6 @@ import { diffRelationships } from "./relationships";
 export type ResearchTurnRequest = {
   paper: PaperVaultMeta;
   pdfItemId: number;
-  reader?: _ZoteroTypes.ReaderInstance | null;
   question: string;
   mentionedPapers: PaperContext[];
   session: {
@@ -121,7 +120,6 @@ async function runResearchTurnInner(
   await deps.ensurePaperVault({
     ...paper,
     pdfItemId: request.pdfItemId,
-    reader: request.reader,
     onStatus: events.onStatus,
   } satisfies EnsurePaperVaultOptions);
 
