@@ -119,8 +119,8 @@ function isPdfAttachment(item: any): boolean {
   if (!item) return false;
   return Boolean(
     item.isPDFAttachment?.() ||
-      item.attachmentContentType === "application/pdf" ||
-      item.getField?.("mimeType") === "application/pdf",
+    item.attachmentContentType === "application/pdf" ||
+    item.getField?.("mimeType") === "application/pdf",
   );
 }
 
@@ -132,11 +132,7 @@ function getSelectedItems(win: Window): any[] {
   }
 }
 
-function createMenuItem(
-  doc: Document,
-  id: string,
-  label: string,
-): HTMLElement {
+function createMenuItem(doc: Document, id: string, label: string): HTMLElement {
   const item = (doc as any).createXULElement
     ? (doc as any).createXULElement("menuitem")
     : doc.createElementNS(

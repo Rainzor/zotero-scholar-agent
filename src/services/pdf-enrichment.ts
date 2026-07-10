@@ -140,12 +140,7 @@ export async function renderPdfPage(options: {
     throw new Error(`Page ${options.pageNumber} is outside the PDF.`);
   }
   const vaultDir = await getVaultDir();
-  const outputDir = joinPath(
-    vaultDir,
-    options.itemKey,
-    "figures",
-    "generated",
-  );
+  const outputDir = joinPath(vaultDir, options.itemKey, "figures", "generated");
   await getIOUtils().makeDirectory(outputDir, {
     createAncestors: true,
     ignoreExisting: true,
@@ -153,11 +148,7 @@ export async function renderPdfPage(options: {
   const prefix = joinPath(outputDir, `page-${options.pageNumber}`);
   const result = await runLineProcess({
     command: capabilities.pdftoppm,
-    arguments: buildPdftoppmArgs(
-      options.pdfPath,
-      prefix,
-      options.pageNumber,
-    ),
+    arguments: buildPdftoppmArgs(options.pdfPath, prefix, options.pageNumber),
     timeoutMs: 120000,
   });
   if (result.exitCode !== 0) {

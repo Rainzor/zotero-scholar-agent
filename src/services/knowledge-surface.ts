@@ -90,9 +90,7 @@ export function normalizePaperSignals(value: unknown): PaperSignalMetadata {
 
 function normalizeRating(value: unknown): number | null {
   const rating = Number(value);
-  return Number.isInteger(rating) && rating >= 1 && rating <= 5
-    ? rating
-    : null;
+  return Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : null;
 }
 
 function normalizeCollections(value: unknown): ZoteroCollectionSignal[] {

@@ -1,9 +1,6 @@
 import { getConfiguredCodexCheapModelSlug } from "./codex";
 import { runPaperColdStart } from "./cold-start";
-import type {
-  PaperVaultMeta,
-  RunningLineProcess,
-} from "./codex";
+import type { PaperVaultMeta, RunningLineProcess } from "./codex";
 
 export type ColdStartJobStatus =
   | "pending"
@@ -79,10 +76,7 @@ export class ColdStartQueue {
         (job) => job.paper.itemKey === input.paper.itemKey,
       );
       if (existing) {
-        if (
-          existing.status !== "pending" &&
-          existing.status !== "running"
-        ) {
+        if (existing.status !== "pending" && existing.status !== "running") {
           existing.paper = input.paper;
           existing.pdfItemId = input.pdfItemId;
           existing.status = "pending";
@@ -122,9 +116,7 @@ export class ColdStartQueue {
             },
           });
           job.status =
-            result.qualityStatus === "failed"
-              ? "failed"
-              : result.qualityStatus;
+            result.qualityStatus === "failed" ? "failed" : result.qualityStatus;
           job.error =
             result.qualityStatus === "failed"
               ? "Knowledge quality gate failed."

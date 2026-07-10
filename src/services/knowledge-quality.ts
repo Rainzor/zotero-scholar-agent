@@ -63,9 +63,7 @@ export function evaluateKnowledgeSurface(options: {
     hardFailures.push(`Missing core sections: ${missing.join(", ")}`);
   }
   if (placeholder.length) {
-    hardFailures.push(
-      `Placeholder core sections: ${placeholder.join(", ")}`,
-    );
+    hardFailures.push(`Placeholder core sections: ${placeholder.join(", ")}`);
   }
 
   const abstractText = String(sections.get("Abstract") || "").trim();
@@ -93,7 +91,9 @@ export function evaluateKnowledgeSurface(options: {
   const beforeLength = beforeBody.trim().length;
   const afterLength = afterBody.trim().length;
   const ratio =
-    beforeLength > 0 ? Number((afterLength / beforeLength).toFixed(3)) : undefined;
+    beforeLength > 0
+      ? Number((afterLength / beforeLength).toFixed(3))
+      : undefined;
   const growthReviewRequired =
     beforeLength >= 200 && typeof ratio === "number" && ratio > 1.25;
   if (growthReviewRequired) {
