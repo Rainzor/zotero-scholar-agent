@@ -22,7 +22,7 @@ contextDigestTokenEstimate
 contextDigestSource
 ```
 
-The digest is hidden machine context. It is injected into future Codex prompts between paper metadata / mentioned paper context and recent visible chat turns. The full visible message list remains intact unless the user deletes or edits messages.
+The digest is hidden machine context. After a digest is saved, the session's `codexThreadId` is cleared so the next research turn starts a fresh Codex thread using the digest plus recent visible turns. The full visible message list remains intact unless the user deletes or edits messages.
 
 Digest generation uses a compact instruction that preserves user intent, unresolved questions, paper-grounded facts, reader thinking, constraints, tool outcomes, file paths, Item Keys, page/evidence pointers, and mentioned papers. It tries the configured cheap Codex model first, falls back to the default Codex model, and finally falls back to a deterministic local digest if Codex compaction fails.
 
@@ -37,7 +37,8 @@ The digest is never appended to the Conversation Log and never written to `memor
 ## Consequences
 
 - The visible transcript stays complete and honest.
-- Future turns get compact continuity even when Codex's own internal context is under pressure.
+- Future turns get compact continuity by replacing a swollen Codex thread with digest-backed fresh-thread context.
 - `memory.md` remains reserved for durable Paper Knowledge Records, not session compression.
 - Editing or deleting visible messages invalidates the digest because message indices and meaning may have changed.
 - The digest prompt and deterministic fallback become part of session semantics and need unit coverage.
+- Digest quality matters: once compacted, the old Codex thread is intentionally discarded for that sidebar session.

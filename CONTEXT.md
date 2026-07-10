@@ -119,7 +119,8 @@ _Avoid_: the agent, the model, the LLM
 - **Review model (RATIFIED for V1):** normal turns use post-turn review. Codex may update the In-Focus Paper during the turn; the UI then shows Knowledge/relationship updates for review. Pre-commit approval would be a separate architecture.
 - **Context usage display:** sidebar usage is grounded in Codex JSONL `turn.completed.usage`; `input_tokens` is the canonical input-context count, `cached_input_tokens` is displayed as cache hit metadata and is not subtracted. Context window percentage is shown only when the plugin can resolve the active Codex model window from Codex config/catalog or an explicit user override.
 - **Cheap Codex model for temporary turns:** lightweight/temporary Codex workflows may pass a user-configured cheap model via `--model`; normal research chat continues to inherit the user's default Codex config. If the cheap model is absent from the Codex model catalog, or a cheap-model run fails before producing content, the runner falls back to the default Codex model.
-- **Context Digest (RATIFIED):** long sidebar chats compact earlier visible turns into hidden session metadata. The full transcript remains visible; the digest is injected into future prompts with recent visible turns and is never appended to Conversation Logs or written into `memory.md`.
+- **Context Digest (RATIFIED):** long sidebar chats compact earlier visible turns into hidden session metadata. The full transcript remains visible; the digest is injected only for fresh-thread prompts with recent visible turns and is never appended to Conversation Logs or written into `memory.md`. Saving a digest clears the session's `codexThreadId` so the next turn starts fresh from compacted context.
+- **Resume fallback (RATIFIED):** if resuming an existing Codex thread fails without timing out, the research turn retries once as a fresh thread using hidden digest and recent visible messages.
 - Vault layout:
 
 ```

@@ -51,22 +51,26 @@
 
 ### 2.1 抽出 Research Turn Orchestration
 
-当前 `sidebar.ts` 同时承担 UI、prompt、Codex subprocess、Vault 写入、message metadata。下一步先抽服务边界，避免后续功能继续堆进 sidebar。
+状态: 已完成第一轮抽离。`runResearchTurn()` 已承接 Codex/Vault turn 生命周期，`sidebar.ts` 保留 UI 状态与渲染职责。后续只做增量收口，不在 sidebar 继续堆业务编排。
 
-- 抽出 turn 编排服务，接收 In-Focus Paper、用户问题、选区引用、Paper Mentions，返回 assistant 内容、usage、activities、memory/relationship 更新结果。
-- 抽出 prompt builder，覆盖无 mention、单 mention、多 mention、Knowledge Write Scope、relationship format。
-- 保留现有 UI 行为，先做内部结构迁移。
+- 已抽出 turn 编排服务，接收 In-Focus Paper、用户问题、选区引用、Paper Mentions，返回 assistant 内容、usage、activities、memory/relationship 更新结果。
+- 已抽出 prompt builder，覆盖无 mention、单 mention、多 mention、Knowledge Write Scope、relationship format。
+- 已抽出 activity aggregation 和 relationship diff 纯函数。
+- 已实现 resume 失败后 fresh thread 重试一次。
 
-验收:
+剩余收口:
 
-- `submitQuestion` 只负责 UI 状态和调用 service，不直接拼大 prompt。
-- prompt builder、relationship diff、context packing 有 Vitest 覆盖。
+- 如果后续继续拆 sidebar，优先拆 Memory view 与 message rendering；不要再扩大 `submitQuestion` 职责。
 
 ### 2.2 Layered Paper Context 与成本压降
 
-- 首轮直接给 Codex 明确的 In-Focus Paper `memory.md` 路径，并在必要时注入 compact Knowledge Surface。
-- `@` Paper Mention 默认注入 compact Knowledge Surface；全文、图表、截图、源码只在问题需要时读取。
-- 记录每轮 token usage 和 wall-clock，前端展示简洁指标。
+状态: context 管理基础已完成，真实 token/latency benchmark 待做。
+
+- 已实现 Context Window usage display: 基于 Codex JSONL usage 与模型 context window 计算占用。
+- 已实现 Hidden Context Digest: 长会话可手动/自动 compact，digest 作为隐藏机器上下文保存。
+- 已实现条件化注入: resume 已有 Codex thread 时不注入 digest/recent messages；fresh thread 和 resume fallback 才注入。
+- `@` Paper Mention 默认注入 compact Knowledge Surface；全文、图表、截图、源码仍按需读取。
+- 下一步需要记录多轮真实使用的 token usage 和 wall-clock，比较 resume / fresh / digest fallback 的成本。
 
 验收:
 
@@ -99,7 +103,13 @@
 - 从 `text.txt` 页码标记到回答页码 chip 的路径可用。
 - 无法定位页码时显示不可跳转状态，而不是静默失败。
 
-### 2.5 截图与图表理解
+### 2.5 Context 管理后续优化
+
+2026-07 已落地 hidden Context Digest、context window 解析、条件化注入与 prompt builder 归位(见 ADR 0004),遗留一件事:
+
+- **digest 质量回归**: digest 的压缩指令与确定性兜底已有单测,但缺少"digest 注入后回答质量不退化"的人工评估清单;至少记录几个长会话样例作为回归用例。
+
+### 2.6 截图与图表理解
 
 - 用户框选/截图保存到 `{itemKey}/figures/` 或等价 derived artifact 目录。
 - Codex 可在相关 turn 中读取图像，并把关键结论写入 Evidence Pointers 或 Reader Thinking。
@@ -155,14 +165,18 @@
 
 ## 6. 执行顺序
 
-| 顺序 | 内容 | 理由 |
-| ---- | ---- | ---- |
-| 1 | 文档同步 + ADR | 先固定 Paper Knowledge Record / Structured Projection / post-turn review 方向 |
-| 2 | 抽 Research Turn / Prompt Builder 服务 | 降低 `sidebar.ts` 复杂度，后续能力有稳定承载点 |
-| 3 | Layered Paper Context + token/latency 指标 | 直接改善成本和日常体验 |
-| 4 | 页码引用 chip | 提升可信度，成本低 |
-| 5 | post-turn Knowledge Review 增强 + 反向链接 | 让 Semantic Relationships 真正可见、可审查 |
-| 6 | opt-in 冷启动 | 改善首问体验，同时守住用户控制和成本边界 |
-| 7 | 截图/图表理解 | 增强论文输入质量 |
-| 8 | 库级问答 + 关系图谱 | 进入跨论文知识网络 |
-| 9 | Topic Note / Living Survey | 需要前面积累足够高质量的 Paper Knowledge Records |
+| 顺序 | 内容 | 理由 | 状态 |
+| ---- | ---- | ---- | ---- |
+| 1 | 文档同步 + ADR | 先固定 Paper Knowledge Record / Structured Projection / post-turn review 方向 | ✅ 完成(ADR 0003/0004,2026-07) |
+| 2 | 抽 Research Turn / Prompt Builder 服务 | 降低 `sidebar.ts` 复杂度，后续能力有稳定承载点 | ✅ 第一轮完成 — `runResearchTurn`、prompt/activity/relationship helpers 已抽出 |
+| 3 | Layered Paper Context + token/latency 指标 | 直接改善成本和日常体验 | 🔶 部分 — token 指标/context window/digest/条件化注入已落地;真实 benchmark 与 In-Focus compact surface 注入未做 |
+| 4 | 页码引用 chip | 提升可信度，成本低 | 未开始 |
+| 5 | post-turn Knowledge Review 增强 + 反向链接 | 让 Semantic Relationships 真正可见、可审查 | 未开始 |
+| 6 | opt-in 冷启动 | 改善首问体验，同时守住用户控制和成本边界 | 未开始 |
+| 7 | 截图/图表理解 | 增强论文输入质量 | 未开始 |
+| 8 | 库级问答 + 关系图谱 | 进入跨论文知识网络 | 未开始 |
+| 9 | Topic Note / Living Survey | 需要前面积累足够高质量的 Paper Knowledge Records | 未开始 |
+
+## 7. 进展记录
+
+- **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(70% 提示 / 85% 自动压缩,cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型上下文窗口,per-turn token usage 统计与前端指标,compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。遗留项见 §2.5。
