@@ -79,6 +79,18 @@ describe("evaluateKnowledgeSurface", () => {
     expect(report.relationships).toEqual({ candidates: 1, parsed: 0 });
   });
 
+  it("ignores bracketed bullets outside Semantic Relationships", () => {
+    const report = evaluateKnowledgeSurface({
+      after: COMPLETE.replace(
+        "Specific method.",
+        "Specific method.\n- [stage] internal pipeline label",
+      ),
+      sourceAbstract: "Source abstract.",
+    });
+    expect(report.relationships).toEqual({ candidates: 0, parsed: 0 });
+    expect(report.status).toBe("passed");
+  });
+
   it("flags append growth above 25 percent for an established record", () => {
     const report = evaluateKnowledgeSurface({
       before: COMPLETE,

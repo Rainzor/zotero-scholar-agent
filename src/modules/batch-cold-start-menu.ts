@@ -36,10 +36,7 @@ export function registerBatchColdStartMenu(win: Window) {
         : "Build Knowledge Records",
     );
     build.toggleAttribute("disabled", selected.length === 0);
-    const hasActive = coldStartQueue
-      .getState()
-      .jobs.some((job) => job.status === "pending" || job.status === "running");
-    cancel.toggleAttribute("disabled", !hasActive);
+    cancel.toggleAttribute("disabled", !coldStartQueue.hasActiveJobs());
   });
 }
 
@@ -52,6 +49,7 @@ async function enqueueSelectedPapers(win: Window) {
   const inputs = buildColdStartInputs(getSelectedItems(win));
   if (!inputs.length) return;
   await coldStartQueue.enqueue(inputs);
+  const batchKeys = new Set(inputs.map((input) => input.paper.itemKey));
   const progress = new ztoolkit.ProgressWindow("Knowledge Record Queue", {
     window: win,
     closeTime: -1,
@@ -59,11 +57,12 @@ async function enqueueSelectedPapers(win: Window) {
     .createLine({ text: "Queued", progress: 0 })
     .show(-1);
   const unsubscribe = coldStartQueue.subscribe((state) => {
-    const total = state.jobs.length;
-    const completed = state.jobs.filter((job) =>
+    const jobs = state.jobs.filter((job) => batchKeys.has(job.paper.itemKey));
+    const total = jobs.length;
+    const completed = jobs.filter((job) =>
       ["passed", "needs-review", "failed", "cancelled"].includes(job.status),
     ).length;
-    const running = state.jobs.find((job) => job.status === "running");
+    const running = jobs.find((job) => job.status === "running");
     progress.changeLine({
       text: running
         ? `Building ${running.paper.title}`
@@ -73,8 +72,11 @@ async function enqueueSelectedPapers(win: Window) {
   });
   await coldStartQueue.start();
   unsubscribe();
-  const state = coldStartQueue.getState();
-  const failed = state.jobs.filter((job) => job.status === "failed").length;
+  const failed = coldStartQueue
+    .getState()
+    .jobs.filter(
+      (job) => batchKeys.has(job.paper.itemKey) && job.status === "failed",
+    ).length;
   progress
     .changeLine({
       type: failed ? "fail" : "success",

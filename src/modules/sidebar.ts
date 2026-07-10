@@ -1686,7 +1686,8 @@ async function submitQuestion(body: HTMLElement) {
     paperMeta.itemKey,
   );
   const imageRefs = addon.data.chat.pendingImages.filter((ref) =>
-    ref.relativePath.startsWith(`${paperMeta.itemKey}/`),
+    ref.relativePath.startsWith(`${paperMeta.itemKey}/`) &&
+    ref.sessionId === chatStore.getActiveSessionId(itemId),
   );
   const imagePaths = await resolveLocalImagePaths(imageRefs);
   const priorVisibleMessages = chatStore
@@ -2621,12 +2622,12 @@ function buildQualityReviewBlock(
   summary.className = "zoteroagent-quality-review-summary";
   summary.textContent =
     quality.status === "passed"
-      ? "Knowledge quality · passed"
+      ? "Automated checks · passed"
       : quality.status === "failed"
-        ? `Knowledge quality · ${quality.hardFailures.length} failure${
+        ? `Automated checks · ${quality.hardFailures.length} failure${
             quality.hardFailures.length === 1 ? "" : "s"
           }`
-        : `Knowledge quality · ${quality.warnings.length} review item${
+        : `Automated checks · ${quality.warnings.length} review item${
             quality.warnings.length === 1 ? "" : "s"
           }`;
   details.appendChild(summary);
@@ -2734,10 +2735,10 @@ function buildTurnFooter(doc: Document, msg: ChatMessage): HTMLElement {
     chip.className = `zoteroagent-turn-chip is-quality is-${msg.quality.status}`;
     chip.textContent =
       msg.quality.status === "passed"
-        ? "Quality passed"
+        ? "Checks passed"
         : msg.quality.status === "failed"
-          ? "Quality failed"
-          : "Quality review";
+          ? "Checks failed"
+          : "Checks need review";
     footer.appendChild(chip);
   }
   if (msg.committed) {
@@ -3290,6 +3291,9 @@ async function handleClipboardImages(
   const itemId = Number(body.dataset.itemID) || 0;
   if (itemId <= 0) return;
   const itemKey = getPaperMeta(itemId).itemKey;
+  const session =
+    chatStore.getSession(itemId) || chatStore.createSession(itemId);
+  if (!session) return;
   for (const file of files) {
     const previewUrl =
       body.ownerDocument.defaultView?.URL?.createObjectURL?.(file) || undefined;
@@ -3298,6 +3302,7 @@ async function handleClipboardImages(
         itemKey,
         file,
         previewUrl,
+        sessionId: session.sessionId,
       });
       addon.data.chat.pendingImages.push(image);
     } catch (error) {
@@ -3323,7 +3328,8 @@ function syncContextChips(body: HTMLElement) {
     currentKey,
   );
   const images = addon.data.chat.pendingImages.filter((ref) =>
-    ref.relativePath.startsWith(`${currentKey}/`),
+    ref.relativePath.startsWith(`${currentKey}/`) &&
+    ref.sessionId === chatStore.getActiveSessionId(itemId),
   );
   addon.data.chat.mentionedPapers = mentionedPapers;
   if (!refText && !responseQuote && !mentionedPapers.length && !images.length) {

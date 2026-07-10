@@ -116,6 +116,77 @@ export async function parseScannedPdfWithCodex(options: {
   return { pageCount, committed };
 }
 
+export async function renderPdfPage(options: {
+  itemKey: string;
+  pdfPath: string;
+  pageNumber: number;
+}): Promise<string> {
+  const capabilities = await probePdfEnrichmentCapabilities();
+  if (!capabilities.pdftoppm || !capabilities.pdfinfo) {
+    throw new Error(
+      `PDF rendering dependencies are missing: ${capabilities.missing.join(", ")}.`,
+    );
+  }
+  const pageCount = await readPdfPageCount(
+    options.pdfPath,
+    capabilities.pdfinfo,
+  );
+  if (
+    !pageCount ||
+    !Number.isInteger(options.pageNumber) ||
+    options.pageNumber < 1 ||
+    options.pageNumber > pageCount
+  ) {
+    throw new Error(`Page ${options.pageNumber} is outside the PDF.`);
+  }
+  const vaultDir = await getVaultDir();
+  const outputDir = joinPath(
+    vaultDir,
+    options.itemKey,
+    "figures",
+    "generated",
+  );
+  await getIOUtils().makeDirectory(outputDir, {
+    createAncestors: true,
+    ignoreExisting: true,
+  });
+  const prefix = joinPath(outputDir, `page-${options.pageNumber}`);
+  const result = await runLineProcess({
+    command: capabilities.pdftoppm,
+    arguments: buildPdftoppmArgs(
+      options.pdfPath,
+      prefix,
+      options.pageNumber,
+    ),
+    timeoutMs: 120000,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || "PDF page rendering failed.");
+  }
+  const outputPath = `${prefix}.png`;
+  if (!(await getIOUtils().exists(outputPath))) {
+    throw new Error("PDF page renderer did not produce an image.");
+  }
+  return outputPath;
+}
+
+export function buildPdftoppmArgs(
+  pdfPath: string,
+  outputPrefix: string,
+  pageNumber: number,
+): string[] {
+  return [
+    "-f",
+    String(pageNumber),
+    "-l",
+    String(pageNumber),
+    "-png",
+    "-singlefile",
+    pdfPath,
+    outputPrefix,
+  ];
+}
+
 async function readPdfPageCount(
   pdfPath: string,
   pdfinfo: string,

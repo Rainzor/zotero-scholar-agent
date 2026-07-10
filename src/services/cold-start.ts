@@ -16,7 +16,10 @@ import {
   type KnowledgeQualityReport,
 } from "./knowledge-quality";
 import { replaceKnowledgeSurfaceSection } from "./knowledge-surface";
-import { extractPaperKeywords } from "./keyword-suggestions";
+import {
+  extractPaperAbstract,
+  extractPaperKeywords,
+} from "./keyword-suggestions";
 
 export type PaperColdStartRequest = {
   paper: PaperVaultMeta;
@@ -71,13 +74,17 @@ export async function runPaperColdStart(
     onStatus: events.onStatus,
   });
   const paperText = await deps.readPaperText(request.paper.itemKey);
+  const sourceAbstract =
+    String(request.paper.abstract || "").trim() ||
+    extractPaperAbstract(paperText);
+  const paper = { ...request.paper, abstract: sourceAbstract };
   const paperKeywords = extractPaperKeywords(paperText);
   if (paperKeywords.length) {
-    await deps.updatePaperSignals(request.paper, { paperKeywords });
+    await deps.updatePaperSignals(paper, { paperKeywords });
   }
-  const before = await deps.readPaperMemory(request.paper.itemKey);
+  const before = await deps.readPaperMemory(paper.itemKey);
   await deps.runCodexTurn({
-    prompt: buildColdStartPrompt(request.paper),
+    prompt: buildColdStartPrompt(paper),
     model: request.model,
     fallbackToDefaultModel: request.model ? false : undefined,
     sandbox: "workspace-write",
@@ -96,8 +103,7 @@ export async function runPaperColdStart(
     } satisfies CodexTurnInput);
   }
 
-  let after = await deps.readPaperMemory(request.paper.itemKey);
-  const sourceAbstract = String(request.paper.abstract || "").trim();
+  let after = await deps.readPaperMemory(paper.itemKey);
   if (sourceAbstract) {
     const corrected = replaceKnowledgeSurfaceSection(
       after,
@@ -106,18 +112,18 @@ export async function runPaperColdStart(
     );
     if (corrected !== after) {
       after = corrected;
-      await deps.writePaperMemory(request.paper.itemKey, after);
+      await deps.writePaperMemory(paper.itemKey, after);
     }
   }
   const quality = evaluateKnowledgeSurface({
     before,
     after,
     sourceAbstract,
-    itemKey: request.paper.itemKey,
+    itemKey: paper.itemKey,
   });
-  await deps.refreshPaperRecordProjection(request.paper, quality);
+  await deps.refreshPaperRecordProjection(paper, quality);
   const committed = await deps.commitVaultChanges(
-    `initialize: ${request.paper.itemKey}`,
+    `initialize: ${paper.itemKey}`,
   );
   return { quality, committed };
 }

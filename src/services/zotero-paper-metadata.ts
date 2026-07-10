@@ -2,12 +2,13 @@ import type { PaperVaultMeta } from "./codex/vault-format";
 import type { ZoteroCollectionSignal } from "./knowledge-surface";
 
 export function getZoteroPaperMeta(itemId: number): PaperVaultMeta {
+  const attachment = Zotero.Items.get(itemId) as any;
+  if (!attachment) throw new Error(`Zotero item ${itemId} was not found.`);
+  const source =
+    Number(attachment.parentItemID) > 0
+      ? (Zotero.Items.get(Number(attachment.parentItemID)) as any) || attachment
+      : attachment;
   try {
-    const attachment = Zotero.Items.get(itemId) as any;
-    const source =
-      Number(attachment?.parentItemID) > 0
-        ? (Zotero.Items.get(Number(attachment.parentItemID)) as any)
-        : attachment;
     const creators = (source?.getCreators?.() || [])
       .map((creator: any) =>
         [creator?.firstName, creator?.lastName]
@@ -32,30 +33,36 @@ export function getZoteroPaperMeta(itemId: number): PaperVaultMeta {
       year: (date.match(/\b(18|19|20)\d{2}\b/) || [""])[0],
       abstract: String(source?.getField?.("abstractNote") || "").trim(),
       zoteroCollections: getCollectionSignals(source),
-      zoteroTags: (source?.getTags?.() || [])
-        .map((tag: any) => String(tag?.tag || "").trim())
-        .filter(Boolean),
-      paperKeywords: [],
+      zoteroTags:
+        typeof source?.getTags === "function"
+          ? source
+              .getTags()
+              .map((tag: any) => String(tag?.tag || "").trim())
+              .filter(Boolean)
+          : undefined,
     };
-  } catch {
+  } catch (error) {
+    (globalThis as any).ztoolkit?.log?.(
+      "[Agent] Failed to read Zotero paper metadata:",
+      error,
+    );
     return {
       itemId,
-      itemKey: String(itemId),
-      title: `Item ${itemId}`,
-      creators: "",
-      year: "",
-      abstract: "",
-      zoteroCollections: [],
-      zoteroTags: [],
-      paperKeywords: [],
+      itemKey: String(attachment.key || itemId),
+      title: String(
+        source?.getField?.("title") ||
+          source?.getDisplayTitle?.() ||
+          `Item ${itemId}`,
+      ),
     };
   }
 }
 
-function getCollectionSignals(item: any): ZoteroCollectionSignal[] {
-  const ids = Array.isArray(item?.getCollections?.())
-    ? item.getCollections()
-    : [];
+function getCollectionSignals(
+  item: any,
+): ZoteroCollectionSignal[] | undefined {
+  if (typeof item?.getCollections !== "function") return undefined;
+  const ids = Array.isArray(item.getCollections()) ? item.getCollections() : [];
   return ids
     .map((id: number) => {
       const collection = Zotero.Collections?.get?.(id) as any;

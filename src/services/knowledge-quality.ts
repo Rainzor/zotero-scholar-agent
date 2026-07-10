@@ -78,10 +78,11 @@ export function evaluateKnowledgeSurface(options: {
     warnings.push("Source abstract is unavailable for fidelity checking.");
   }
 
+  const relationshipBlock = extractSemanticRelationshipBlock(afterBody);
   const candidateLines =
-    afterBody.match(/^\s*-\s+\[[a-z_]+\]\s+.+$/gim) || [];
+    relationshipBlock.match(/^\s*-\s+\[[a-z_]+\]\s+.+$/gim) || [];
   const parsedRelationships = parseSemanticRelationships(
-    afterBody,
+    relationshipBlock,
     options.itemKey || "CURRENT",
     options.checkedAt || new Date().toISOString(),
   );
@@ -119,6 +120,17 @@ export function evaluateKnowledgeSurface(options: {
       reviewRequired: growthReviewRequired,
     },
   };
+}
+
+function extractSemanticRelationshipBlock(markdown: string): string {
+  const text = String(markdown || "");
+  const heading = /^###\s+Semantic Relationships\s*$/im.exec(text);
+  if (!heading || typeof heading.index !== "number") return "";
+  const rest = text.slice(heading.index + heading[0].length);
+  const nextHeading = /^#{2,3}\s+.+$/m.exec(rest);
+  return nextHeading && typeof nextHeading.index === "number"
+    ? rest.slice(0, nextHeading.index)
+    : rest;
 }
 
 function parseH2Sections(markdown: string): Map<string, string> {

@@ -459,11 +459,9 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.conversationsDir);
   await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
   await ensureGitRepo(paths.vaultDir);
-  const manifestMigrated = await ensureVaultManifest(paths.vaultDir);
+  await ensureVaultManifest(paths.vaultDir);
   await ensureGitignore(paths.vaultDir);
-  if (manifestMigrated) {
-    await untrackIgnoredVaultArtifacts(paths.vaultDir);
-  }
+  await untrackIgnoredVaultArtifacts(paths.vaultDir);
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
     initialMemoryMarkdown(options),
@@ -702,7 +700,9 @@ async function updateReadme(meta: PaperVaultMeta) {
   const existing = await readTextIfExists(readmePath);
   const markerStart = "<!-- zotero-agent-papers:start -->";
   const markerEnd = "<!-- zotero-agent-papers:end -->";
-  const entries = mergeReadmeEntries(existing, meta);
+  const memory = await readPaperMemory(meta.itemKey);
+  const rating = parseKnowledgeSurface(memory).signals.rating;
+  const entries = mergeReadmeEntries(existing, { ...meta, rating });
   const table = buildReadmeTable(entries);
   const base = existing.trim()
     ? replaceMarkedBlock(existing, markerStart, markerEnd, table)

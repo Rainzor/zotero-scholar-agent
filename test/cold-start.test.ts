@@ -152,4 +152,40 @@ describe("runPaperColdStart", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("Deepen the Insight section");
   });
+
+  it("falls back to the paper text abstract when Zotero metadata is empty", async () => {
+    let memory = completedMemory.replace(
+      "Rewritten abstract.",
+      "Generated abstract.",
+    );
+    let projectedAbstract = "";
+    const deps: PaperColdStartDeps = {
+      ensurePaperVault: async () => ({}) as any,
+      readPaperMemory: async () => memory,
+      readPaperText: async () =>
+        "[page 1]\nAbstract\nExtracted source abstract.\nKeywords: video\n\n1 Introduction",
+      writePaperMemory: async (_key, value) => {
+        memory = value;
+      },
+      updatePaperSignals: async () => false,
+      runCodexTurn: async () => ({
+        content: "Done.",
+        reasoning: "",
+        threadId: "cold",
+      }),
+      refreshPaperRecordProjection: async (meta) => {
+        projectedAbstract = String(meta.abstract || "");
+        return [];
+      },
+      commitVaultChanges: async () => true,
+    };
+    const result = await runPaperColdStart(
+      { paper: { ...paper, abstract: "" }, pdfItemId: 10 },
+      {},
+      deps,
+    );
+    expect(result.quality.status).toBe("passed");
+    expect(memory).toContain("## Abstract\n\nExtracted source abstract.");
+    expect(projectedAbstract).toBe("Extracted source abstract.");
+  });
 });

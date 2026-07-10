@@ -56,7 +56,27 @@ describe("getZoteroPaperMeta", () => {
         { key: "CHILD", name: "Video", path: "Research / Video" },
       ],
       zoteroTags: ["Diffusion", "Video"],
-      paperKeywords: [],
+    });
+  });
+
+  it("does not erase mirrored signals when Zotero metadata reads fail", () => {
+    (globalThis as any).Zotero = {
+      Items: {
+        get: () => ({
+          id: 10,
+          key: "PDFKEY",
+          getField: (field: string) => (field === "title" ? "Paper" : ""),
+          getTags: () => {
+            throw new Error("database unavailable");
+          },
+        }),
+      },
+      Collections: { get: () => null },
+    };
+    expect(getZoteroPaperMeta(10)).toEqual({
+      itemId: 10,
+      itemKey: "PDFKEY",
+      title: "Paper",
     });
   });
 });

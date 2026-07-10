@@ -131,12 +131,15 @@ _Avoid_: the agent, the model, the LLM
 
 ```
 ~/papers/
+├── vault.json             # Vault / Knowledge Surface / projection schema versions
 ├── AGENTS.md              # memory discipline (Codex auto-reads)
 ├── README.md              # human index: title/author/year → link to {itemKey}/
-├── .logs/                 # plugin diagnostics — SHOULD be gitignored (current real vaults track it; needs one-time untrack migration, see roadmap §2.8)
+├── .logs/                 # plugin diagnostics (gitignored and untracked by migration)
 └── {itemKey}/
     ├── text.txt           # extracted PDF text (plugin-generated)
+    ├── text.meta.json     # extraction provenance and parser version
     ├── record.json        # plugin-generated Structured Projection
+    ├── figures/           # local screenshots and regenerable rendered pages (gitignored)
     ├── conversations/     # ② episodic logs, one file per session (human-facing)
     │   └── {sessionId}.md
     └── memory.md          # ③ Knowledge Surface for the Paper Knowledge Record
@@ -145,13 +148,14 @@ _Avoid_: the agent, the model, the LLM
 ## Open decisions
 
 - **README maintenance** (minor): who writes/updates the root `README.md` mapping (plugin on paper-add vs Codex). Leaning: plugin writes it deterministically since it has the title/author/year metadata. _(Current implementation: plugin `updateReadme()`.)_
-- **Vault schema versioning**: root `vault.json` or equivalent migration marker is not implemented yet. Needed before larger Knowledge Surface migrations.
+- **Vault schema versioning (RATIFIED, ADR 0007):** root `vault.json` versions the Vault, Knowledge Surface frontmatter, and Structured Projection. Existing Knowledge Surfaces migrate without changing their Markdown body.
+- **Paper Signal Metadata (RATIFIED, ADR 0007):** 1–5 rating, Zotero collection/tag mirrors, paper keywords, and review-accepted Codex keywords live in frontmatter and project into `record.json` schema v2.
 
 ## Phase 1 decisions
 
 - **codex binary path (Q7):** auto-detect (common install locations + read the user's login-shell PATH) with fallback to a user-set pref (absolute path) plus a "Test codex" button in settings.
 - **Old RAG engine (Q8): HARD REPLACE.** `executeAgent` and its RAG-only pipeline are removed, not kept behind a toggle. `submitQuestion` routes only to the Codex runner.
-- **Dropped/deferred in Phase 1 (Q9):** image multimodal asks, Context-PDF attach, per-page citation chips, and multi-provider answer routing are all removed for now (each needs separate rebuild). In-chat history/summary machinery is dropped outright (Codex `resume {threadId}` handles continuity). Session titles switch to a local heuristic (first user message), no HTTP call.
+- **Dropped/deferred in Phase 1 (Q9):** the old image/context-PDF pipeline and multi-provider answer routing were removed. Page chips and local clipboard-image input have since been rebuilt on the Codex path. In-chat history/summary machinery remains dropped (Codex `resume {threadId}` handles continuity). Session titles use a local heuristic.
 
 ## Validated constraints (Phase 0, codex-cli 0.142.5)
 

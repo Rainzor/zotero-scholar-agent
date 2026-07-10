@@ -49,7 +49,7 @@ describe("ColdStartQueue", () => {
     ]);
   });
 
-  it("recovers persisted running jobs as pending and re-enqueue retries failures", async () => {
+  it("recovers persisted running jobs and re-enqueue retries terminal jobs", async () => {
     let persisted: ColdStartQueueState | null = {
       version: 1,
       jobs: [

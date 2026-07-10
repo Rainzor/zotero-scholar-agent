@@ -2,6 +2,7 @@ import { getPaperVaultPaths, getVaultDir } from "./codex";
 
 export type LocalImageRef = {
   id: string;
+  sessionId?: string;
   relativePath: string;
   name: string;
   mimeType: string;
@@ -12,6 +13,7 @@ export async function saveLocalClipboardImage(options: {
   itemKey: string;
   file: File;
   previewUrl?: string;
+  sessionId?: string;
 }): Promise<LocalImageRef> {
   const paths = await getPaperVaultPaths(options.itemKey);
   const ioUtils = getIOUtils();
@@ -28,6 +30,7 @@ export async function saveLocalClipboardImage(options: {
   await ioUtils.write(absolutePath, bytes);
   return {
     id,
+    sessionId: options.sessionId,
     relativePath: `${options.itemKey}/figures/local/${name}`,
     name,
     mimeType: options.file.type || `image/${extension}`,

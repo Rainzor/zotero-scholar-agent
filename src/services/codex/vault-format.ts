@@ -290,24 +290,41 @@ function isTextParserSource(value: unknown): value is TextParserSource {
   );
 }
 
-const README_ROW_PATTERN =
+const README_ROW_PATTERN_V2 =
+  /^\| ([^|]+) \| ([^|]*) \| ([^|]*) \| ([^|]*) \| \[([^\]]+)\]\(\.\/([^/]+)\/memory\.md\) \|$/gm;
+const README_ROW_PATTERN_V1 =
   /^\| ([^|]+) \| ([^|]*) \| ([^|]*) \| \[([^\]]+)\]\(\.\/([^/]+)\/memory\.md\) \|$/gm;
 
 /** Parse paper rows from a Vault README.md table. */
 export function parseReadmePaperRows(readme: string): PaperVaultMeta[] {
-  const entries: PaperVaultMeta[] = [];
+  const entries = new Map<string, PaperVaultMeta>();
   let match: RegExpExecArray | null;
-  const pattern = new RegExp(README_ROW_PATTERN.source, "gm");
-  while ((match = pattern.exec(readme))) {
-    entries.push({
+  const current = new RegExp(README_ROW_PATTERN_V2.source, "gm");
+  while ((match = current.exec(readme))) {
+    const rating = Number(String(match[4] || "").trim());
+    entries.set(match[6], {
+      itemId: 0,
+      itemKey: match[6],
+      title: unescapeTable(match[1]),
+      creators: unescapeTable(match[2]),
+      year: unescapeTable(match[3]),
+      rating:
+        Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : null,
+    });
+  }
+  const legacy = new RegExp(README_ROW_PATTERN_V1.source, "gm");
+  while ((match = legacy.exec(readme))) {
+    if (entries.has(match[5])) continue;
+    entries.set(match[5], {
       itemId: 0,
       itemKey: match[5],
       title: unescapeTable(match[1]),
       creators: unescapeTable(match[2]),
       year: unescapeTable(match[3]),
+      rating: null,
     });
   }
-  return entries;
+  return Array.from(entries.values());
 }
 
 export function buildReadmeTable(entries: PaperVaultMeta[]): string {
@@ -315,11 +332,11 @@ export function buildReadmeTable(entries: PaperVaultMeta[]): string {
   const markerEnd = "<!-- zotero-agent-papers:end -->";
   return [
     markerStart,
-    "| Title | Authors | Year | Memory |",
-    "|-------|---------|------|--------|",
+    "| Title | Authors | Year | Rating | Memory |",
+    "|-------|---------|------|-------:|--------|",
     ...entries.map(
       (entry) =>
-        `| ${escapeTable(entry.title)} | ${escapeTable(entry.creators || "")} | ${escapeTable(entry.year || "")} | [${entry.itemKey}](./${entry.itemKey}/memory.md) |`,
+        `| ${escapeTable(entry.title)} | ${escapeTable(entry.creators || "")} | ${escapeTable(entry.year || "")} | ${entry.rating || ""} | [${entry.itemKey}](./${entry.itemKey}/memory.md) |`,
     ),
     markerEnd,
     "",

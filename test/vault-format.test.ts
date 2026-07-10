@@ -193,6 +193,7 @@ codexKeywords:
         title: "Paper A",
         creators: "Alice",
         year: "2020",
+        rating: 4,
       },
     ]);
     const rows = parseReadmePaperRows(table);
@@ -203,6 +204,7 @@ codexKeywords:
         title: "Paper A",
         creators: "Alice",
         year: "2020",
+        rating: 4,
       },
     ]);
 

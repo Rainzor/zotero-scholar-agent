@@ -59,6 +59,12 @@ export class ColdStartQueue {
     return cloneState(this.state);
   }
 
+  hasActiveJobs(): boolean {
+    return this.state.jobs.some(
+      (job) => job.status === "pending" || job.status === "running",
+    );
+  }
+
   subscribe(listener: (state: ColdStartQueueState) => void): () => void {
     this.listeners.add(listener);
     listener(this.getState());
@@ -72,7 +78,10 @@ export class ColdStartQueue {
         (job) => job.paper.itemKey === input.paper.itemKey,
       );
       if (existing) {
-        if (existing.status === "failed" || existing.status === "cancelled") {
+        if (
+          existing.status !== "pending" &&
+          existing.status !== "running"
+        ) {
           existing.paper = input.paper;
           existing.pdfItemId = input.pdfItemId;
           existing.status = "pending";

@@ -9,6 +9,9 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 - 在同一篇论文下创建、切换、重命名、删除多个独立聊天会话。
 - 通过 Memory 视图查看当前论文的 Knowledge Surface、浏览 Vault 中的论文、跨论文搜索 `memory.md`。
 - 在对话中用 `@` 提及 Vault 中的其他论文，让 Codex 基于多篇 Paper Knowledge Records 进行比较和关联。
+- 在输入框粘贴本地截图并随问题发送给 Codex；截图保存在 Vault 的 gitignored 本地目录。
+- 从 Memory 视图建立单篇 Knowledge Record，或在 Zotero 多选后通过右键菜单批量建档。
+- 为论文记录 1–5 星评分，并镜像 Zotero collections/tags 作为 Paper Signal Metadata。
 - Codex 可在当前论文的 `memory.md` 中写入 Semantic Relationships，插件会生成 `record.json` 供脚本、索引和图谱使用。
 - 在 Codex 回复中查看命令执行活动、Knowledge 更新、关系审查和 Vault 保存状态。
 - 选中文本后通过 Reader 弹窗执行 `Ask` 或 `Translate` 快捷操作。
@@ -21,12 +24,18 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 
 ```text
 ~/papers/
+  vault.json
   AGENTS.md
+  .generated/
   .logs/
   {itemKey}/
     text.txt
+    text.meta.json
     memory.md
     record.json
+    figures/
+      local/
+      generated/
     conversations/
       {sessionId}.md
 ```
@@ -85,7 +94,7 @@ npm test
 
 ## 已移除的旧功能
 
-当前主线已移除旧自研 RAG 聊天管线、`/init`、`/summary`、`/compact` slash commands、context-PDF 附件、图片上传，以及聊天区 provider 选择器。`@` mention 已以 Vault Papers only 的方式重新引入，用于显式引入其他 Paper Knowledge Records。
+当前主线已移除旧自研 RAG 聊天管线、`/init`、`/summary`、`/compact` slash commands、context-PDF 附件，以及聊天区 provider 选择器。`@` mention 已以 Vault Papers only 的方式重新引入；图片输入以本地剪贴板截图形式恢复。
 
 ## 许可证
 
