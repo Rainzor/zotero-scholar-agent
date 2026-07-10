@@ -105,9 +105,8 @@ export async function runCodexTurn(
   if (
     primaryModel &&
     input.fallbackToDefaultModel !== false &&
-    execution.result.exitCode !== 0 &&
-    !execution.result.timedOut &&
-    !execution.state.content
+    (execution.result.exitCode !== 0 || !execution.state.content.trim()) &&
+    !execution.result.timedOut
   ) {
     input.onStatus?.(
       `Codex model "${primaryModel}" failed. Retrying with default Codex model...`,
@@ -136,6 +135,18 @@ export async function runCodexTurn(
         result.stderr ||
         result.stdout ||
         `Codex exited with code ${result.exitCode}`,
+      exitCode: result.exitCode,
+      timedOut: false,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    });
+  }
+  if (!state.content.trim()) {
+    throw new CodexTurnError({
+      message:
+        result.stderr ||
+        result.stdout ||
+        "Codex completed the turn without producing an assistant response.",
       exitCode: result.exitCode,
       timedOut: false,
       stderr: result.stderr,

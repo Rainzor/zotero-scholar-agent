@@ -235,7 +235,7 @@ async function runCodexAttempt(options: {
     contextDigest: request.session.contextDigest,
     recentMessages,
   });
-  return deps.runCodexTurn({
+  const result = await deps.runCodexTurn({
     prompt,
     threadId,
     sandbox: "workspace-write",
@@ -244,6 +244,8 @@ async function runCodexAttempt(options: {
     onEvent: options.onEvent,
     onChunk: events.onChunk as CodexTurnInput["onChunk"],
   });
+  assertTurnHasContent(result);
+  return result;
 }
 
 async function buildMentionedPaperContexts(
@@ -276,4 +278,13 @@ function shouldRetryAsFreshThread(error: unknown, threadId: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function assertTurnHasContent(result: CodexTurnResult) {
+  if (String(result.content || "").trim()) return;
+  throw new CodexTurnError({
+    message: "Codex completed the turn without producing an assistant response.",
+    exitCode: 0,
+    timedOut: false,
+  });
 }

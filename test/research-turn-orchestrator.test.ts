@@ -196,6 +196,58 @@ describe("runResearchTurn", () => {
     expect(outcome.threadId).toBe("thread-fresh");
   });
 
+  it("retries empty resumed output as a fresh thread", async () => {
+    const threadIds: string[] = [];
+    const appended: string[] = [];
+    const outcome = await runResearchTurn(
+      request({
+        session: {
+          sessionId: "chat-1",
+          codexThreadId: "thread-empty",
+          contextDigest: "# Context Digest",
+        },
+      }),
+      {},
+      deps({
+        runCodexTurn: async (input) => {
+          threadIds.push(input.threadId || "");
+          if (threadIds.length === 1) {
+            return { content: "", reasoning: "", threadId: "thread-empty" };
+          }
+          return { content: "fresh answer", reasoning: "", threadId: "thread-fresh" };
+        },
+        appendConversationTurn: async (turn) => {
+          appended.push(turn.assistantMessage);
+        },
+      }),
+    );
+
+    expect(threadIds).toEqual(["thread-empty", ""]);
+    expect(appended).toEqual(["fresh answer"]);
+    expect(outcome.resumedFreshThread).toBe(true);
+  });
+
+  it("does not append an empty fresh-thread response", async () => {
+    const appended: string[] = [];
+    await expect(
+      runResearchTurn(
+        request({ session: { sessionId: "chat-1" } }),
+        {},
+        deps({
+          runCodexTurn: async () => ({
+            content: "",
+            reasoning: "",
+            threadId: "thread-empty",
+          }),
+          appendConversationTurn: async (turn) => {
+            appended.push(turn.assistantMessage);
+          },
+        }),
+      ),
+    ).rejects.toThrow("without producing an assistant response");
+    expect(appended).toEqual([]);
+  });
+
   it("does not retry timed out resume turns", async () => {
     const logs: string[] = [];
     await expect(
