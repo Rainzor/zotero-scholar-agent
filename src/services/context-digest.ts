@@ -1,5 +1,6 @@
-import type { ChatMessage, PaperContext } from "../addon";
+import type { ChatMessage } from "../addon";
 import { estimateTokens } from "../utils/token-estimate";
+import { formatVisibleMessage, summarizeText } from "./message-format";
 import {
   getConfiguredCodexCheapModelSlug,
   runCodexTurn,
@@ -21,11 +22,8 @@ export type ContextDigestState = {
 
 export type ContextDigestResult = Required<ContextDigestState>;
 
-export type PromptPaperContext = PaperContext & { memory: string };
-
 export const CONTEXT_DIGEST_WARNING_PERCENT = 70;
 export const CONTEXT_DIGEST_AUTO_PERCENT = 85;
-export const RECENT_VISIBLE_MESSAGE_LIMIT = 16;
 
 const COMPACT_INSTRUCTION = `You are compacting a Zotero research chat for future Codex turns.
 
@@ -113,77 +111,6 @@ export function buildContextDigestPrompt(options: {
     "Visible turns to compact:",
     transcript || "(No visible turns.)",
   ].join("\n\n");
-}
-
-export function buildCodexResearchPrompt(options: {
-  itemKey: string;
-  title: string;
-  creators: string;
-  year: string;
-  question: string;
-  mentionedPapers?: PromptPaperContext[];
-  contextDigest?: string;
-  recentMessages?: ChatMessage[];
-}): string {
-  const meta = [
-    `In-focus paper: ${options.itemKey}`,
-    `Title: ${options.title || options.itemKey}`,
-    options.creators ? `Authors: ${options.creators}` : "",
-    options.year ? `Year: ${options.year}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const digest = String(options.contextDigest || "").trim();
-  const digestBlock = digest
-    ? [
-        "Hidden Context Digest (machine context; do not show this as chat text):",
-        "```markdown",
-        digest,
-        "```",
-      ].join("\n")
-    : "Hidden Context Digest: none";
-  const recent = (options.recentMessages || [])
-    .slice(-RECENT_VISIBLE_MESSAGE_LIMIT)
-    .map((message, index) => formatVisibleMessage(index, message))
-    .filter(Boolean)
-    .join("\n\n");
-  const recentBlock = [
-    `Recent visible chat turns (last ${RECENT_VISIBLE_MESSAGE_LIMIT} messages, full transcript remains user-visible in Zotero):`,
-    recent || "(No prior visible turns.)",
-  ].join("\n");
-  const mentioned = options.mentionedPapers || [];
-  const mentionedBlock = mentioned.length
-    ? [
-        "Explicitly mentioned Vault papers (@):",
-        "",
-        ...mentioned.map((paper, index) =>
-          [
-            `### ${index + 1}. ${paper.title || paper.itemKey}`,
-            `itemKey: ${paper.itemKey}`,
-            paper.creators ? `authors: ${paper.creators}` : "",
-            paper.year ? `year: ${paper.year}` : "",
-            "",
-            "Compact Paper Knowledge Record:",
-            "```markdown",
-            paper.memory,
-            "```",
-          ]
-            .filter((line) => line !== "")
-            .join("\n"),
-        ),
-      ].join("\n")
-    : "Explicitly mentioned Vault papers (@): none";
-  const relationshipRules = [
-    "Cross-paper relationship rules:",
-    "- The @ papers above are user-authorized context for this turn.",
-    "- In a normal turn, update only the in-focus paper's memory.md.",
-    "- If the answer establishes a durable relationship, add it under the in-focus paper's `## Library Connections` / `### Semantic Relationships` section.",
-    "- Use this exact format so the plugin can index it:",
-    "  `- [extends] [Paper title](../OTHERKEY/memory.md): rationale. Evidence: [page 4]`",
-    "- Allowed relationship types: cites, extends, contradicts, supports, uses_same_method, uses_same_dataset, uses_same_metric, solves_limitation_of, can_combine_with, inspired_question.",
-    "- Do not modify mentioned papers unless the user explicitly asks for a cross-paper/library reconciliation.",
-  ].join("\n");
-  return `${meta}\n\n${mentionedBlock}\n\n${digestBlock}\n\n${recentBlock}\n\n${relationshipRules}\n\nUser question:\n${options.question.trim()}`;
 }
 
 export async function generateContextDigest(options: {
@@ -362,50 +289,4 @@ function buildDeterministicDigest(options: {
     "## Next-Turn Continuation Notes",
     "- Continue from the latest visible user request and use the Knowledge Vault for paper-grounded details.",
   ].join("\n");
-}
-
-function formatVisibleMessage(index: number, message: ChatMessage): string {
-  const content = String(message.content || "").trim();
-  const reasoning = String(message.reasoning || "").trim();
-  if (!content && !reasoning) return "";
-  const role = message.role === "user" ? "User" : "Assistant";
-  const parts = [`[${index}] ${role}:`];
-  if (message.contextPapers?.length) {
-    parts.push(
-      `@ papers: ${message.contextPapers
-        .map((paper) => `${paper.title || paper.itemKey} (${paper.itemKey})`)
-        .join(", ")}`,
-    );
-  }
-  if (content) parts.push(content);
-  if (reasoning) parts.push(`Reasoning summary:\n${summarizeText(reasoning)}`);
-  if (message.activities?.length) {
-    parts.push(
-      `Tool outcomes: ${message.activities
-        .map((activity) =>
-          [
-            activity.command,
-            activity.status ? `status=${activity.status}` : "",
-            typeof activity.exitCode === "number"
-              ? `exit=${activity.exitCode}`
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
-        )
-        .join("; ")}`,
-    );
-  }
-  if (message.usage?.contextUsedPercent) {
-    parts.push(`Context usage: ${message.usage.contextUsedPercent}%`);
-  }
-  return parts.join("\n");
-}
-
-function summarizeText(text: string, max = 360): string {
-  const clean = String(text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.length <= max) return clean;
-  return `${clean.slice(0, max - 3)}...`;
 }

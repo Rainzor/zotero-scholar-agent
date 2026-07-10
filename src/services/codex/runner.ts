@@ -48,6 +48,28 @@ export type CodexTurnResult = {
   modelSlug?: string;
 };
 
+export class CodexTurnError extends Error {
+  readonly exitCode?: number | null;
+  readonly timedOut: boolean;
+  readonly stderr: string;
+  readonly stdout: string;
+
+  constructor(options: {
+    message: string;
+    exitCode?: number | null;
+    timedOut?: boolean;
+    stderr?: string;
+    stdout?: string;
+  }) {
+    super(options.message);
+    this.name = "CodexTurnError";
+    this.exitCode = options.exitCode;
+    this.timedOut = Boolean(options.timedOut);
+    this.stderr = options.stderr || "";
+    this.stdout = options.stdout || "";
+  }
+}
+
 const DEFAULT_CODEX_TIMEOUT_MS = 600000;
 
 export async function runCodexTurn(
@@ -100,16 +122,25 @@ export async function runCodexTurn(
 
   const { result, state, model } = execution;
   if (result.timedOut) {
-    throw new Error(
-      `Codex timed out after ${input.timeoutMs || DEFAULT_CODEX_TIMEOUT_MS}ms.`,
-    );
+    throw new CodexTurnError({
+      message: `Codex timed out after ${input.timeoutMs || DEFAULT_CODEX_TIMEOUT_MS}ms.`,
+      exitCode: result.exitCode,
+      timedOut: true,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    });
   }
   if (result.exitCode !== 0) {
-    throw new Error(
-      result.stderr ||
+    throw new CodexTurnError({
+      message:
+        result.stderr ||
         result.stdout ||
         `Codex exited with code ${result.exitCode}`,
-    );
+      exitCode: result.exitCode,
+      timedOut: false,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    });
   }
   const contextWindow = await resolveCodexContextWindow({
     codexPath: codex.path,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCodexResearchPrompt,
   buildContextDigestPrompt,
   generateContextDigest,
 } from "../src/services/context-digest";
+import { buildCodexResearchPrompt } from "../src/services/research-turn/prompt";
 
 describe("buildContextDigestPrompt", () => {
   it("preserves the required compact instruction sections", () => {
@@ -56,6 +56,7 @@ describe("buildCodexResearchPrompt", () => {
       creators: "A. Researcher",
       year: "2024",
       question: "Continue the comparison.",
+      mode: "fresh-thread",
       contextDigest: "# Context Digest\n\n## Coverage\n- Covers turns: 0..5",
       recentMessages: [
         { role: "user", content: "Compare it with @Other." },

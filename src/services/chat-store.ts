@@ -22,7 +22,7 @@ export type ChatSessionSummary = {
   messageCount: number;
 };
 
-class ChatStore {
+export class ChatStore {
   private readonly cacheByItemId = new Map<number, ItemSessionState>();
   private readonly diskByItemKey = new Map<string, PersistedItemStateV2>();
   private readonly diskItemIdToKey = new Map<number, string>();
@@ -259,6 +259,7 @@ class ChatStore {
         ? digest.contextDigestTokenEstimate
         : undefined;
     session.contextDigestSource = digest.contextDigestSource;
+    session.codexThreadId = "";
     session.updatedAt = Date.now();
     this.markDirty(itemId);
   }

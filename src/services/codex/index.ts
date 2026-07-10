@@ -32,6 +32,7 @@ export {
 } from "./subprocess";
 
 export {
+  CodexTurnError,
   runCodexTurn,
   type CodexTurnInput,
   type CodexTurnResult,

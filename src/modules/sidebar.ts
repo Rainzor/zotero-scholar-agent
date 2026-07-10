@@ -8,31 +8,23 @@ import {
 } from "../utils/token-usage";
 import {
   CONTEXT_DIGEST_WARNING_PERCENT,
-  buildCodexResearchPrompt,
   generateContextDigest,
   shouldAutoCompactFromUsage,
   shouldWarnFromUsage,
 } from "../services/context-digest";
+import { buildQuotedQuestion } from "../services/research-turn/prompt";
+import { runResearchTurn } from "../services/research-turn/orchestrator";
 import type {
   ChatMessage,
-  ChatSession,
   CodexActivity,
   PaperContext,
   TokenUsage,
 } from "../addon";
 import { chatStore } from "../services/chat-store";
 import {
-  appendConversationTurn,
-  appendVaultLog,
-  commitVaultChanges,
-  ensurePaperVault,
   listVaultPapers,
-  readPaperCompactContext,
   readPaperMemory,
-  refreshPaperRecordProjection,
-  runCodexTurn,
   searchVaultMemory,
-  type CodexEvent,
   type PaperVaultMeta,
   type RunningLineProcess,
   type SemanticRelationship,
@@ -748,54 +740,6 @@ function memoryNotice(doc: Document, text: string): HTMLElement {
   return el;
 }
 
-/**
- * Accumulate Codex command-execution steps from the raw event stream so the
- * turn can show what Codex actually did (grep/cat/apply_patch/git...).
- * Returns true when the activity list changed.
- */
-function collectCodexActivity(
-  list: CodexActivity[],
-  byId: Map<string, CodexActivity>,
-  event: CodexEvent,
-): boolean {
-  const item = (event as any).item;
-  if (!item || item.type !== "command_execution") return false;
-  const id = String(item.id || "");
-  const command = String(item.command || "").trim();
-  if (event.type === "item.started") {
-    const entry: CodexActivity = {
-      command: command || "command",
-      status: "in_progress",
-    };
-    list.push(entry);
-    if (id) byId.set(id, entry);
-    return true;
-  }
-  if (event.type === "item.completed") {
-    let entry = id ? byId.get(id) : undefined;
-    if (!entry) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (list[i].status === "in_progress") {
-          entry = list[i];
-          break;
-        }
-      }
-    }
-    if (!entry) {
-      entry = { command: command || "command" };
-      list.push(entry);
-    }
-    const code = item.exit_code;
-    entry.exitCode = typeof code === "number" ? code : null;
-    entry.status =
-      String(item.status || "") ||
-      (typeof code === "number" && code !== 0 ? "failed" : "completed");
-    if (command) entry.command = command;
-    return true;
-  }
-  return false;
-}
-
 function ensureChatUI(body: HTMLElement) {
   if (body.querySelector("#zoteroagent-chat-panel")) return;
 
@@ -1285,36 +1229,6 @@ function normalizePaperContexts(
   return result;
 }
 
-async function buildMentionedPaperContexts(
-  papers: PaperContext[],
-): Promise<Array<PaperContext & { memory: string }>> {
-  const contexts: Array<PaperContext & { memory: string }> = [];
-  for (const paper of papers) {
-    contexts.push({
-      ...paper,
-      memory: await readPaperCompactContext({
-        itemId: 0,
-        itemKey: paper.itemKey,
-        title: paper.title,
-        creators: paper.creators,
-        year: paper.year,
-      }),
-    });
-  }
-  return contexts;
-}
-
-function getRecentMessagesForPrompt(
-  session: ChatSession | null,
-  messages: ChatMessage[],
-): ChatMessage[] {
-  const digestUpTo =
-    typeof session?.contextDigestUpToMessageIndex === "number"
-      ? session.contextDigestUpToMessageIndex
-      : -1;
-  return messages.slice(Math.max(0, digestUpTo + 1));
-}
-
 async function compactSessionContext(
   body: HTMLElement,
   itemId: number,
@@ -1347,26 +1261,6 @@ async function compactSessionContext(
     delete body.dataset.contextDigestBusy;
     if (isActivePane()) renderContextDigestStatus(body, itemId);
   }
-}
-
-function relationshipIdentity(rel: SemanticRelationship): string {
-  return [
-    rel.sourceItemKey,
-    rel.targetItemKey,
-    rel.type,
-    rel.rationale,
-    rel.evidence || "",
-  ].join("\u0000");
-}
-
-function diffRelationships(
-  before: SemanticRelationship[],
-  after: SemanticRelationship[],
-): SemanticRelationship[] {
-  const beforeKeys = new Set((before || []).map(relationshipIdentity));
-  return (after || []).filter(
-    (rel) => !beforeKeys.has(relationshipIdentity(rel)),
-  );
 }
 
 function resolvePdfAttachmentItemId(
@@ -1566,67 +1460,38 @@ async function submitQuestion(body: HTMLElement) {
     return;
   }
 
-  const quotedBlocks: string[] = [];
-  if (refText)
-    quotedBlocks.push(`[PDF Text]\n> ${refText.replace(/\n/g, "\n> ")}`);
-  if (responseQuote) {
-    quotedBlocks.push(
-      `[Previous Response]\n> ${responseQuote.replace(/\n/g, "\n> ")}`,
-    );
-  }
-  const aiQuestion = quotedBlocks.length
-    ? `${quotedBlocks.join("\n\n")}\n\n${question}`
-    : question;
+  const aiQuestion = buildQuotedQuestion({
+    question,
+    selectedText: refText,
+    responseQuote,
+  });
   const session = chatStore.getSession(itemId);
-  const recentMessages = getRecentMessagesForPrompt(
-    session,
-    priorVisibleMessages,
-  );
 
   try {
     let lastRefresh = 0;
-    await ensurePaperVault({
-      itemId,
-      itemKey: paperMeta.itemKey,
-      title: paperMeta.title,
-      creators: paperMeta.creators,
-      year: paperMeta.year,
+    const result = await runResearchTurn({
+      paper: paperMeta,
       pdfItemId,
       reader,
-      onStatus: (text) => {
-        if (isActivePane()) showAgentStatus(body, text);
-      },
-    });
-    const memoryBefore = await readPaperMemory(paperMeta.itemKey);
-    const relationshipsBefore = await refreshPaperRecordProjection(paperMeta);
-    const mentionedContexts =
-      await buildMentionedPaperContexts(mentionedPapers);
-    const prompt = buildCodexResearchPrompt({
-      itemKey: paperMeta.itemKey,
-      title: paperMeta.title,
-      creators: paperMeta.creators,
-      year: paperMeta.year,
       question: aiQuestion,
-      mentionedPapers: mentionedContexts,
-      contextDigest: session?.contextDigest,
-      recentMessages,
-    });
-    const activities: CodexActivity[] = [];
-    const activityById = new Map<string, CodexActivity>();
-    const result = await runCodexTurn({
-      prompt,
-      threadId: session?.codexThreadId || "",
-      sandbox: "workspace-write",
+      mentionedPapers,
+      session: {
+        sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
+        codexThreadId: session?.codexThreadId || "",
+        contextDigest: session?.contextDigest,
+        contextDigestUpToMessageIndex: session?.contextDigestUpToMessageIndex,
+      },
+      priorVisibleMessages,
+      userDisplayContent: displayContent,
+    }, {
       onStatus: (text) => {
         if (isActivePane()) showAgentStatus(body, text);
       },
       onProcess: (proc) => {
         activeCodexProcess = proc;
       },
-      onEvent: (event) => {
-        if (collectCodexActivity(activities, activityById, event)) {
-          assistant.activities = activities.slice();
-        }
+      onActivities: (activities) => {
+        assistant.activities = activities.slice();
       },
       onChunk: (state) => {
         assistant.content = state.content;
@@ -1642,7 +1507,15 @@ async function submitQuestion(body: HTMLElement) {
     assistant.content = result.content || assistant.content;
     assistant.reasoning = result.reasoning || assistant.reasoning;
     if (result.usage) assistant.usage = result.usage;
-    if (activities.length) assistant.activities = activities.slice();
+    if (result.activities.length) assistant.activities = result.activities.slice();
+    if (result.resumedFreshThread) {
+      if (isActivePane()) {
+        showAgentStatus(
+          body,
+          "Previous Codex thread failed; continued in a fresh thread from hidden context.",
+        );
+      }
+    }
     if (result.threadId) {
       chatStore.updateCodexThreadId(
         itemId,
@@ -1650,34 +1523,13 @@ async function submitQuestion(body: HTMLElement) {
         session?.sessionId,
       );
     }
-    await appendConversationTurn({
-      itemKey: paperMeta.itemKey,
-      sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
-      userMessage: displayContent,
-      assistantMessage: assistant.content,
-      codexThreadId: result.threadId,
-    });
-    const memoryAfter = await readPaperMemory(paperMeta.itemKey);
-    assistant.memoryUpdated = memoryAfter.trim() !== memoryBefore.trim();
-    const relationshipsAfter = await refreshPaperRecordProjection(paperMeta);
-    assistant.relationshipUpdates = diffRelationships(
-      relationshipsBefore,
-      relationshipsAfter,
-    );
-    assistant.committed = await commitVaultChanges(
-      `turn: ${paperMeta.itemKey} ${session?.sessionId || ""}`.trim(),
-    );
+    assistant.memoryUpdated = result.memoryUpdated;
+    assistant.relationshipUpdates = result.relationshipUpdates;
+    assistant.committed = result.committed;
     if (shouldAutoCompactFromUsage(assistant.usage)) {
       await compactSessionContext(body, itemId, "auto");
     }
   } catch (e: any) {
-    await appendVaultLog("chat-turn-error", e?.message || String(e), {
-      itemId,
-      itemKey: paperMeta.itemKey,
-      title: paperMeta.title,
-      sessionId: session?.sessionId,
-      codexThreadId: session?.codexThreadId,
-    });
     if (!assistant.content && !assistant.reasoning) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
     }
