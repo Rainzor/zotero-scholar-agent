@@ -179,4 +179,5 @@
 
 ## 7. 进展记录
 
+- **2026-07** `76d5fbd` Research Turn Orchestration 抽离: `src/services/research-turn/`(orchestrator/prompt/activity/relationships)承接 Codex/Vault turn 生命周期,`sidebar.ts` 回归 UI 职责;条件化上下文注入(resume 不注入 digest/recent);compact 后清空 `codexThreadId`;resume 非超时失败降级 fresh thread 重试一次;`message-format.ts` 中立模块消除分层倒置。61 个单测覆盖。
 - **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(70% 提示 / 85% 自动压缩,cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型上下文窗口,per-turn token usage 统计与前端指标,compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。遗留项见 §2.5。
