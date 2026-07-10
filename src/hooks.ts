@@ -107,6 +107,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 async function onShutdown() {
   addon.data.alive = false;
+  await coldStartQueue.pause();
   await chatStore.flushAll();
   if (tabNotifierID) {
     try {

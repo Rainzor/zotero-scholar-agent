@@ -44,6 +44,7 @@ export class ColdStartQueue {
   private state: ColdStartQueueState = { version: 1, jobs: [] };
   private running = false;
   private cancelRequested = false;
+  private pauseRequested = false;
   private currentProcess: RunningLineProcess | null = null;
   private readonly listeners = new Set<(state: ColdStartQueueState) => void>();
 
@@ -105,9 +106,10 @@ export class ColdStartQueue {
     if (this.running) return;
     this.running = true;
     this.cancelRequested = false;
+    this.pauseRequested = false;
     try {
       for (const job of this.state.jobs) {
-        if (this.cancelRequested) break;
+        if (this.cancelRequested || this.pauseRequested) break;
         if (job.status !== "pending") continue;
         job.status = "running";
         job.error = "";
@@ -128,12 +130,17 @@ export class ColdStartQueue {
               ? "Knowledge quality gate failed."
               : "";
         } catch (error) {
-          job.status = this.cancelRequested ? "cancelled" : "failed";
-          job.error = this.cancelRequested
-            ? ""
-            : error instanceof Error
-              ? error.message
-              : String(error);
+          job.status = this.pauseRequested
+            ? "pending"
+            : this.cancelRequested
+              ? "cancelled"
+              : "failed";
+          job.error =
+            this.pauseRequested || this.cancelRequested
+              ? ""
+              : error instanceof Error
+                ? error.message
+                : String(error);
         } finally {
           this.currentProcess = null;
           job.updatedAt = this.now();
@@ -157,6 +164,16 @@ export class ColdStartQueue {
         job.status = "cancelled";
         job.updatedAt = this.now();
       }
+    }
+    await this.persist();
+  }
+
+  async pause() {
+    this.pauseRequested = true;
+    try {
+      this.currentProcess?.kill();
+    } catch {
+      // Process may already have exited.
     }
     await this.persist();
   }

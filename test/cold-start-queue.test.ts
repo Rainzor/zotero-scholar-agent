@@ -84,4 +84,30 @@ describe("ColdStartQueue", () => {
       error: "",
     });
   });
+
+  it("pauses a running job back to pending for restart recovery", async () => {
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const queue = new ColdStartQueue({
+      load: async () => null,
+      save: async () => undefined,
+      execute: async (_job, controls) =>
+        new Promise((resolve, reject) => {
+          controls.setProcess({
+            kill: () => reject(new Error("paused")),
+          } as any);
+          markStarted?.();
+          void resolve;
+        }),
+    });
+    await queue.init();
+    await queue.enqueue([job("KEY1")]);
+    const running = queue.start();
+    await started;
+    await queue.pause();
+    await running;
+    expect(queue.getState().jobs[0].status).toBe("pending");
+  });
 });
