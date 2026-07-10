@@ -170,7 +170,7 @@
 | 1 | 文档同步 + ADR | 先固定 Paper Knowledge Record / Structured Projection / post-turn review 方向 | ✅ 完成(ADR 0003/0004,2026-07) |
 | 2 | 抽 Research Turn / Prompt Builder 服务 | 降低 `sidebar.ts` 复杂度，后续能力有稳定承载点 | ✅ 第一轮完成 — `runResearchTurn`、prompt/activity/relationship helpers 已抽出 |
 | 3 | Layered Paper Context + token/latency 指标 | 直接改善成本和日常体验 | 🔶 部分 — token 指标/context window/digest/条件化注入已落地;真实 benchmark 与 In-Focus compact surface 注入未做 |
-| 4 | 页码引用 chip | 提升可信度，成本低 | 未开始 |
+| 4 | 页码引用 chip | 提升可信度，成本低 | 🔶 代码完成 — 解析/渲染/跳转与禁用态已实现并单测;Zotero 运行时点验按 `docs/benchmarks/page-evidence-dogfooding.md` 进行中 |
 | 5 | post-turn Knowledge Review 增强 + 反向链接 | 让 Semantic Relationships 真正可见、可审查 | 未开始 |
 | 6 | opt-in 冷启动 | 改善首问体验，同时守住用户控制和成本边界 | 未开始 |
 | 7 | 截图/图表理解 | 增强论文输入质量 | 未开始 |
@@ -179,5 +179,6 @@
 
 ## 7. 进展记录
 
+- **2026-07** 页码证据 chip 落地: `src/services/page-evidence.ts` 纯解析层(`[page N]` → 分段),`src/modules/page-jump.ts` reader 跳页适配(navigate → internalReader → PDFViewerApplication 分级 fallback),sidebar 渲染 chip(跳过 pre/code/a,Knowledge review 块 Evidence 同样 chip 化),不可跳转显示禁用态且点击可自愈重判。dogfooding 清单与 token/latency、digest 质量记录表见 `docs/benchmarks/page-evidence-dogfooding.md`。
 - **2026-07** `76d5fbd` Research Turn Orchestration 抽离: `src/services/research-turn/`(orchestrator/prompt/activity/relationships)承接 Codex/Vault turn 生命周期,`sidebar.ts` 回归 UI 职责;条件化上下文注入(resume 不注入 digest/recent);compact 后清空 `codexThreadId`;resume 非超时失败降级 fresh thread 重试一次;`message-format.ts` 中立模块消除分层倒置。61 个单测覆盖。
 - **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(70% 提示 / 85% 自动压缩,cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型上下文窗口,per-turn token usage 统计与前端指标,compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。遗留项见 §2.5。

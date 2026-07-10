@@ -1426,6 +1426,36 @@
   text-decoration: underline;
 }
 
+.zoteroagent-page-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.zoteroagent-page-chip:hover:not(.is-disabled) {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.42);
+}
+
+.zoteroagent-page-chip.is-disabled {
+  border-color: #e5e7eb;
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 /* ===== Math (KaTeX) ===== */
 .zoteroagent-message-content .katex {
   font-size: 1em;

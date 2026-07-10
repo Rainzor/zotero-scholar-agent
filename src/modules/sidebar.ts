@@ -7,6 +7,10 @@ import {
   formatCodexUsageLine,
 } from "../utils/token-usage";
 import {
+  parsePageEvidenceText,
+  type PageEvidenceRef,
+} from "../services/page-evidence";
+import {
   CONTEXT_DIGEST_WARNING_PERCENT,
   generateContextDigest,
   shouldAutoCompactFromUsage,
@@ -14,6 +18,11 @@ import {
 } from "../services/context-digest";
 import { buildQuotedQuestion } from "../services/research-turn/prompt";
 import { runResearchTurn } from "../services/research-turn/orchestrator";
+import {
+  canJumpToPage,
+  jumpToReaderPage,
+  type PageJumpState,
+} from "./page-jump";
 import type {
   ChatMessage,
   CodexActivity,
@@ -2109,6 +2118,7 @@ function updateStreamingMessage(
       } catch (_e) {
         contentEl.textContent = state.content;
       }
+      enhancePageEvidenceChips(contentEl, body);
     }
     msgWrapper.dataset.rawContent = state.content || "";
     const usageEl = msgWrapper.querySelector(
@@ -2125,6 +2135,108 @@ function updateStreamingMessage(
   } catch (e) {
     ztoolkit.log("[Agent] updateStreamingMessage error:", e);
   }
+}
+
+function enhancePageEvidenceChips(root: HTMLElement, body: HTMLElement) {
+  const doc = root.ownerDocument;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = (node as Text).parentElement;
+      if (!parent || shouldSkipPageEvidenceNode(parent)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return /\[page\s+[0-9]+\]/i.test(node.textContent || "")
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_SKIP;
+    },
+  });
+  const nodes: Text[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    nodes.push(current as Text);
+    current = walker.nextNode();
+  }
+  for (const node of nodes) {
+    replacePageEvidenceTextNode(node, body);
+  }
+}
+
+function shouldSkipPageEvidenceNode(el: Element): boolean {
+  return Boolean(
+    el.closest(
+      "pre, code, a, script, style, button, .zoteroagent-page-chip",
+    ),
+  );
+}
+
+function replacePageEvidenceTextNode(node: Text, body: HTMLElement) {
+  const segments = parsePageEvidenceText(node.textContent || "");
+  if (
+    segments.length === 1 &&
+    segments[0].type === "text" &&
+    segments[0].text === (node.textContent || "")
+  ) {
+    return;
+  }
+  const doc = node.ownerDocument;
+  const fragment = doc.createDocumentFragment();
+  for (const segment of segments) {
+    if (segment.type === "text") {
+      fragment.appendChild(doc.createTextNode(segment.text));
+    } else {
+      fragment.appendChild(createPageEvidenceChip(doc, body, segment));
+    }
+  }
+  node.parentNode?.replaceChild(fragment, node);
+}
+
+function createPageEvidenceChip(
+  doc: Document,
+  body: HTMLElement,
+  ref: PageEvidenceRef,
+): HTMLButtonElement {
+  const chip = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  chip.type = "button";
+  chip.className = "zoteroagent-page-chip";
+  chip.dataset.pageNumber = String(ref.pageNumber);
+  chip.dataset.pageIndex = String(ref.pageIndex);
+  chip.textContent = `p.${ref.pageNumber}`;
+  applyPageChipState(chip, canJumpToPage(getActiveReader(), ref.pageIndex));
+  chip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void jumpToReaderPage(getActiveReader(), ref.pageIndex).then((result) => {
+      applyPageChipState(chip, result);
+      if (!result.ok) {
+        showAgentStatus(body, pageJumpFailureText(result, ref.pageNumber));
+      }
+    });
+  });
+  return chip;
+}
+
+function applyPageChipState(chip: HTMLButtonElement, state: PageJumpState) {
+  // Keep the button clickable even when unavailable: the reader may open
+  // later, and a click re-evaluates via jumpToReaderPage.
+  chip.classList.toggle("is-disabled", !state.ok);
+  chip.setAttribute("aria-disabled", String(!state.ok));
+  const pageNumber = Number(chip.dataset.pageNumber || "0");
+  chip.title = state.ok
+    ? `Jump to PDF page ${pageNumber}`
+    : pageJumpFailureText(state, pageNumber);
+}
+
+function pageJumpFailureText(
+  state: Extract<PageJumpState, { ok: false }>,
+  pageNumber: number,
+): string {
+  if (state.reason === "no-reader") return "No active PDF reader.";
+  if (state.reason === "out-of-range") {
+    return state.pageCount
+      ? `Page ${pageNumber} is outside this PDF (${state.pageCount} pages).`
+      : `Page ${pageNumber} is outside this PDF.`;
+  }
+  return `Could not jump to page ${pageNumber}.`;
 }
 
 function isNearBottom(el: HTMLElement, threshold = 60): boolean {
@@ -2173,6 +2285,7 @@ function buildActivityBlock(
 function buildRelationshipReviewBlock(
   doc: Document,
   relationships: SemanticRelationship[],
+  body: HTMLElement,
 ): HTMLElement {
   const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
   details.className = "zoteroagent-relationship-review";
@@ -2196,6 +2309,7 @@ function buildRelationshipReviewBlock(
     text.textContent = `${rel.targetItemKey}: ${rel.rationale}${
       rel.evidence ? ` Evidence: ${rel.evidence}` : ""
     }`;
+    enhancePageEvidenceChips(text as HTMLElement, body);
     row.appendChild(type);
     row.appendChild(text);
     list.appendChild(row);
@@ -2303,7 +2417,7 @@ function renderMessages(body: HTMLElement, itemId: number) {
         }
         if (msg.relationshipUpdates?.length) {
           main.appendChild(
-            buildRelationshipReviewBlock(doc, msg.relationshipUpdates),
+            buildRelationshipReviewBlock(doc, msg.relationshipUpdates, body),
           );
         }
         wrapper.dataset.rawContent = msg.content || "";
@@ -2318,6 +2432,7 @@ function renderMessages(body: HTMLElement, itemId: number) {
         } catch (_e) {
           inner.textContent = msg.content;
         }
+        enhancePageEvidenceChips(inner as HTMLElement, body);
       } else {
         renderUserMessage(inner, msg);
       }
