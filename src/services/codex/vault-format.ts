@@ -49,6 +49,9 @@ export type PaperRecordProjection = PaperVaultMeta & {
   signals: {
     rating: number | null;
     zoteroCollections: ZoteroCollectionSignal[];
+    zoteroTags: string[];
+    paperKeywords: string[];
+    codexKeywords: string[];
     keywords: Array<{
       value: string;
       source: "zotero" | "paper" | "codex";
@@ -66,6 +69,7 @@ export type TextParserSource =
   | "pdfjs"
   | "pdfworker-formfeed"
   | "pdfworker-plain"
+  | "codex-ocr"
   | "inferred";
 
 export type TextMeta = {
@@ -281,6 +285,7 @@ function isTextParserSource(value: unknown): value is TextParserSource {
     value === "pdfjs" ||
     value === "pdfworker-formfeed" ||
     value === "pdfworker-plain" ||
+    value === "codex-ocr" ||
     value === "inferred"
   );
 }
@@ -466,6 +471,9 @@ export function buildPaperSignalProjection(
   return {
     rating: signals.rating,
     zoteroCollections: signals.zoteroCollections,
+    zoteroTags: signals.zoteroTags,
+    paperKeywords: signals.paperKeywords,
+    codexKeywords: signals.codexKeywords,
     keywords: [
       ...signals.zoteroTags.map((value) => ({
         value,

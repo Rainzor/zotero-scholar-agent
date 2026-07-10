@@ -3,6 +3,7 @@ import { createZToolkit } from "./utils/ztoolkit";
 import type { ContextDigestSource } from "./services/context-digest";
 import type { SemanticRelationship } from "./services/codex/vault-format";
 import type { KnowledgeQualityReport } from "./services/knowledge-quality";
+import type { LocalImageRef } from "./services/local-images";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -42,6 +43,8 @@ export type ChatMessage = {
   contextPapers?: PaperContext[];
   relationshipUpdates?: SemanticRelationship[];
   quality?: KnowledgeQualityReport;
+  imageRefs?: LocalImageRef[];
+  keywordSuggestions?: string[];
 };
 export type ChatSession = {
   sessionId: string;
@@ -114,6 +117,7 @@ class Addon {
       referenceText: string;
       responseQuote: string;
       mentionedPapers: PaperContext[];
+      pendingImages: LocalImageRef[];
     };
   };
   public hooks: typeof hooks;
@@ -139,6 +143,7 @@ class Addon {
         referenceText: "",
         responseQuote: "",
         mentionedPapers: [],
+        pendingImages: [],
       },
     };
     this.hooks = hooks;

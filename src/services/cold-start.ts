@@ -2,9 +2,11 @@ import {
   commitVaultChanges,
   ensurePaperVault,
   readPaperMemory,
+  readPaperText,
   refreshPaperRecordProjection,
   runCodexTurn,
   writePaperMemory,
+  updatePaperSignals,
   type CodexTurnInput,
   type PaperVaultMeta,
   type RunningLineProcess,
@@ -14,6 +16,7 @@ import {
   type KnowledgeQualityReport,
 } from "./knowledge-quality";
 import { replaceKnowledgeSurfaceSection } from "./knowledge-surface";
+import { extractPaperKeywords } from "./keyword-suggestions";
 
 export type PaperColdStartRequest = {
   paper: PaperVaultMeta;
@@ -36,18 +39,22 @@ export type PaperColdStartResult = {
 export type PaperColdStartDeps = {
   ensurePaperVault: typeof ensurePaperVault;
   readPaperMemory: typeof readPaperMemory;
+  readPaperText: typeof readPaperText;
   writePaperMemory: typeof writePaperMemory;
   runCodexTurn: typeof runCodexTurn;
   refreshPaperRecordProjection: typeof refreshPaperRecordProjection;
+  updatePaperSignals: typeof updatePaperSignals;
   commitVaultChanges: typeof commitVaultChanges;
 };
 
 const defaultDeps: PaperColdStartDeps = {
   ensurePaperVault,
   readPaperMemory,
+  readPaperText,
   writePaperMemory,
   runCodexTurn,
   refreshPaperRecordProjection,
+  updatePaperSignals,
   commitVaultChanges,
 };
 
@@ -63,6 +70,11 @@ export async function runPaperColdStart(
     pdfItemId: request.pdfItemId,
     onStatus: events.onStatus,
   });
+  const paperText = await deps.readPaperText(request.paper.itemKey);
+  const paperKeywords = extractPaperKeywords(paperText);
+  if (paperKeywords.length) {
+    await deps.updatePaperSignals(request.paper, { paperKeywords });
+  }
   const before = await deps.readPaperMemory(request.paper.itemKey);
   await deps.runCodexTurn({
     prompt: buildColdStartPrompt(request.paper),

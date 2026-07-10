@@ -29,4 +29,10 @@ describe("Vault manifest", () => {
       ].join("\n"),
     );
   });
+
+  it("refuses to downgrade a newer Vault schema", () => {
+    expect(() => normalizeVaultManifest({ schemaVersion: 2 })).toThrow(
+      "newer than supported",
+    );
+  });
 });

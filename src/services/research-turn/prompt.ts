@@ -96,7 +96,14 @@ export function buildCodexResearchPrompt(options: {
     "- Allowed relationship types: cites, extends, contradicts, supports, uses_same_method, uses_same_dataset, uses_same_metric, solves_limitation_of, can_combine_with, inspired_question.",
     "- Do not modify mentioned papers unless the user explicitly asks for a cross-paper/library reconciliation.",
   ].join("\n");
-  return `${meta}\n\n${mentionedBlock}\n\n${contextBlock}\n\n${relationshipRules}\n\nUser question:\n${options.question.trim()}`;
+  const keywordRules = [
+    "Keyword suggestion rules:",
+    "- Do not edit YAML frontmatter.",
+    "- Only when this turn reveals durable retrieval keywords not already represented, append one hidden marker to the final answer:",
+    "  `<!-- keyword-suggestions: keyword one; keyword two -->`",
+    "- Suggestions require user review; omit the marker when there is nothing useful to suggest.",
+  ].join("\n");
+  return `${meta}\n\n${mentionedBlock}\n\n${contextBlock}\n\n${relationshipRules}\n\n${keywordRules}\n\nUser question:\n${options.question.trim()}`;
 }
 
 function buildFreshThreadContextBlock(

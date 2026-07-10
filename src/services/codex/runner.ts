@@ -18,6 +18,7 @@ export type CodexTurnInput = {
   prompt: string;
   threadId?: string;
   model?: string;
+  images?: string[];
   fallbackToDefaultModel?: boolean;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   timeoutMs?: number;
@@ -193,6 +194,7 @@ async function executeCodexProcess(options: {
     prompt: input.prompt,
     threadId: input.threadId,
     model,
+    images: input.images,
     sandbox: input.sandbox || "workspace-write",
   });
   let lastContent = "";
@@ -238,17 +240,19 @@ async function executeCodexProcess(options: {
   return { state, result, model };
 }
 
-function buildCodexArgs(options: {
+export function buildCodexArgs(options: {
   vaultDir: string;
   prompt: string;
   threadId?: string;
   model?: string;
+  images?: string[];
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
 }): string[] {
   const base = [
     "exec",
     "--json",
     ...(options.model ? ["--model", options.model] : []),
+    ...(options.images || []).flatMap((image) => ["-i", image]),
     "-C",
     options.vaultDir,
     "-s",

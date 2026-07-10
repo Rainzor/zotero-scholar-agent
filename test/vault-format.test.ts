@@ -158,6 +158,9 @@ codexKeywords:
       zoteroCollections: [
         { key: "C1", name: "Video", path: "Research / Video" },
       ],
+      zoteroTags: ["diffusion"],
+      paperKeywords: ["text-to-video"],
+      codexKeywords: ["causal distillation"],
       keywords: [
         { value: "diffusion", source: "zotero" },
         { value: "text-to-video", source: "paper" },

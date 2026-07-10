@@ -18,7 +18,16 @@ const REQUIRED_GITIGNORE_RULES = [
   "*/figures/generated/",
 ] as const;
 
-export function normalizeVaultManifest(_value: unknown): VaultManifest {
+export function normalizeVaultManifest(value: unknown): VaultManifest {
+  const version =
+    value && typeof value === "object"
+      ? Number((value as Partial<VaultManifest>).schemaVersion || 0)
+      : 0;
+  if (version > CURRENT_VAULT_MANIFEST.schemaVersion) {
+    throw new Error(
+      `Vault schema ${version} is newer than supported schema ${CURRENT_VAULT_MANIFEST.schemaVersion}.`,
+    );
+  }
   return { ...CURRENT_VAULT_MANIFEST };
 }
 

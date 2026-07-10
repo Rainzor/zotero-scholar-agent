@@ -62,6 +62,18 @@ export type PaperVaultPaths = {
 
 export const CODEX_VAULT_PATH_PREF = "codex.vaultPath";
 
+export class PaperTextUnavailableError extends Error {
+  constructor(
+    readonly itemKey: string,
+    readonly pdfItemId: number,
+  ) {
+    super(
+      `PDF attachment found, but full text could not be extracted for ${itemKey}.`,
+    );
+    this.name = "PaperTextUnavailableError";
+  }
+}
+
 const ROOT_AGENTS_MD = `# Knowledge Vault — Operating Rules
 
 This is a researcher's cross-paper knowledge base. Each subdirectory named by a
@@ -165,17 +177,56 @@ export async function writePaperMemory(
   );
 }
 
+export async function writeEnrichedPaperText(
+  itemKey: string,
+  text: string,
+  source: Extract<TextParserSource, "codex-ocr">,
+): Promise<void> {
+  const paths = await getPaperVaultPaths(itemKey);
+  await writeTextAndMeta(paths.textPath, paths.textMetaPath, {
+    text: String(text || "").trim(),
+    source,
+  });
+}
+
+export async function readPaperText(itemKey: string): Promise<string> {
+  const paths = await getPaperVaultPaths(itemKey);
+  return readTextIfExists(paths.textPath);
+}
+
+export async function updatePaperSignals(
+  paper: PaperVaultMeta,
+  update: PaperSignalUpdate,
+): Promise<boolean> {
+  const paths = await getPaperVaultPaths(paper.itemKey);
+  const existing = await readTextIfExists(paths.memoryPath);
+  const updated = updateKnowledgeSurfaceSignals(existing, update);
+  if (updated === existing) return false;
+  await getIOUtils().writeUTF8(paths.memoryPath, updated);
+  await refreshPaperRecordProjection(paper);
+  return true;
+}
+
 export async function updatePaperRating(
   paper: PaperVaultMeta,
   rating: number | null,
 ): Promise<void> {
-  const paths = await getPaperVaultPaths(paper.itemKey);
-  const existing = await readTextIfExists(paths.memoryPath);
-  const updated = updateKnowledgeSurfaceSignals(existing, { rating });
-  if (updated === existing) return;
-  await getIOUtils().writeUTF8(paths.memoryPath, updated);
-  await refreshPaperRecordProjection(paper);
+  const changed = await updatePaperSignals(paper, { rating });
+  if (!changed) return;
   await commitVaultChanges(`rating: ${paper.itemKey}`);
+}
+
+export async function acceptPaperKeyword(
+  paper: PaperVaultMeta,
+  keyword: string,
+): Promise<void> {
+  const memory = await readPaperMemory(paper.itemKey);
+  const signals = parseKnowledgeSurface(memory).signals;
+  const changed = await updatePaperSignals(paper, {
+    codexKeywords: [...signals.codexKeywords, keyword],
+  });
+  if (!changed) return;
+  await commitVaultChanges(`keyword: ${paper.itemKey} ${keyword}`.trim());
 }
 
 export async function readPaperCompactContext(
@@ -407,7 +458,12 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.paperDir);
   await ensureDirectory(paths.conversationsDir);
   await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
-  await ensureVaultManifest(paths.vaultDir);
+  await ensureGitRepo(paths.vaultDir);
+  const manifestMigrated = await ensureVaultManifest(paths.vaultDir);
+  await ensureGitignore(paths.vaultDir);
+  if (manifestMigrated) {
+    await untrackIgnoredVaultArtifacts(paths.vaultDir);
+  }
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
     initialMemoryMarkdown(options),
@@ -417,21 +473,20 @@ export async function ensurePaperVault(
     zoteroTags: options.zoteroTags,
     paperKeywords: options.paperKeywords,
   });
-  await ensureGitRepo(paths.vaultDir);
-  await ensureGitignore(paths.vaultDir);
-
   const textExists = ioUtils && (await safeExists(paths.textPath));
   if (options.forceTextRefresh || !textExists) {
     options.onStatus?.("Extracting paper text...");
     const result = await buildTextForPaper(options);
     if (!result.text.trim()) {
-      throw new Error(
-        "PDF attachment found, but full text could not be extracted. Please verify the PDF has a text layer or has been indexed.",
-      );
+      throw new PaperTextUnavailableError(options.itemKey, options.pdfItemId);
     }
     await writeTextAndMeta(paths.textPath, paths.textMetaPath, result);
   } else {
     await migrateTextIfParserOutdated(options, paths);
+    const currentText = await readTextIfExists(paths.textPath);
+    if (!currentText.trim()) {
+      throw new PaperTextUnavailableError(options.itemKey, options.pdfItemId);
+    }
   }
 
   await updateReadme(options);
@@ -669,7 +724,7 @@ async function ensureGitignore(vaultDir: string) {
   }
 }
 
-async function ensureVaultManifest(vaultDir: string) {
+async function ensureVaultManifest(vaultDir: string): Promise<boolean> {
   const path = joinPath(vaultDir, "vault.json");
   const raw = await readTextIfExists(path);
   let parsed: unknown = null;
@@ -682,7 +737,28 @@ async function ensureVaultManifest(vaultDir: string) {
   const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
   if (serialized !== raw) {
     await getIOUtils().writeUTF8(path, serialized);
+    return true;
   }
+  return false;
+}
+
+async function untrackIgnoredVaultArtifacts(vaultDir: string) {
+  await runGit(
+    vaultDir,
+    [
+      "rm",
+      "-r",
+      "--cached",
+      "--ignore-unmatch",
+      "--",
+      ".logs",
+      ".generated",
+      ":(glob)*/figures/local/**",
+      ":(glob)*/figures/generated/**",
+    ],
+    30000,
+    true,
+  );
 }
 
 async function syncPaperSignalMetadata(

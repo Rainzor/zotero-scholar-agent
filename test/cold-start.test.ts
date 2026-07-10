@@ -55,6 +55,7 @@ describe("runPaperColdStart", () => {
         return {} as any;
       },
       readPaperMemory: async () => memory,
+      readPaperText: async () => "",
       writePaperMemory: async (_key, value) => {
         calls.push("write");
         memory = value;
@@ -70,6 +71,7 @@ describe("runPaperColdStart", () => {
         calls.push(`quality:${quality?.status}`);
         return [];
       },
+      updatePaperSignals: async () => false,
       commitVaultChanges: async () => {
         calls.push("commit");
         return true;
@@ -99,6 +101,7 @@ describe("runPaperColdStart", () => {
     const deps: PaperColdStartDeps = {
       ensurePaperVault: async () => ({}) as any,
       readPaperMemory: async () => memory,
+      readPaperText: async () => "",
       writePaperMemory: async () => undefined,
       runCodexTurn: async () => ({
         content: "Done.",
@@ -106,6 +109,7 @@ describe("runPaperColdStart", () => {
         threadId: "cold",
       }),
       refreshPaperRecordProjection: async () => [],
+      updatePaperSignals: async () => false,
       commitVaultChanges: async () => false,
     };
     const result = await runPaperColdStart(
@@ -123,6 +127,7 @@ describe("runPaperColdStart", () => {
     const deps: PaperColdStartDeps = {
       ensurePaperVault: async () => ({}) as any,
       readPaperMemory: async () => memory,
+      readPaperText: async () => "",
       writePaperMemory: async (_key, value) => {
         memory = value;
       },
@@ -131,6 +136,7 @@ describe("runPaperColdStart", () => {
         return { content: "Done.", reasoning: "", threadId: "cold" };
       },
       refreshPaperRecordProjection: async () => [],
+      updatePaperSignals: async () => false,
       commitVaultChanges: async () => true,
     };
     await runPaperColdStart(

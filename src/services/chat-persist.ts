@@ -143,7 +143,12 @@ export function serializeItemState(state: {
       contextDigestSource: s.contextDigestSource,
       title: s.title,
       contextMode: "agent",
-      messages: s.messages.map((m) => ({ ...m })),
+      messages: s.messages.map((m) => ({
+        ...m,
+        imageRefs: m.imageRefs?.map(({ previewUrl: _previewUrl, ...ref }) => ({
+          ...ref,
+        })),
+      })),
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     })),

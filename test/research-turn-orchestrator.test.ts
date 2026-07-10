@@ -135,6 +135,7 @@ describe("runResearchTurn", () => {
           modelSlug: "gpt-5.6-terra",
           contextDigest: "# Context Digest",
         },
+        images: ["/vault/AAAA1111/figures/local/image.png"],
         priorVisibleMessages: [{ role: "user", content: "prior" }],
       }),
       {},
@@ -143,6 +144,10 @@ describe("runResearchTurn", () => {
           expect(input.threadId).toBe("thread-existing");
           expect(input.model).toBe("gpt-5.6-terra");
           expect(input.fallbackToDefaultModel).toBe(false);
+          expect(input.images).toEqual([
+            "/vault/AAAA1111/figures/local/image.png",
+          ]);
+          expect(input.prompt).toContain("Attached local screenshots: 1");
           expect(input.prompt).toContain("Thread context mode: resume");
           expect(input.prompt).not.toContain("# Context Digest");
           expect(input.prompt).not.toContain("prior");
@@ -324,5 +329,22 @@ describe("runResearchTurn", () => {
     ).rejects.toThrow("codex binary not found");
     expect(attempts).toBe(1);
     expect(logs).not.toContain("codex-resume-fallback");
+  });
+
+  it("returns review-gated keyword suggestions without exposing the marker", async () => {
+    const outcome = await runResearchTurn(
+      request(),
+      {},
+      deps({
+        runCodexTurn: async () => ({
+          content:
+            "Answer.\n\n<!-- keyword-suggestions: diffusion; causal video -->",
+          reasoning: "",
+          threadId: "thread",
+        }),
+      }),
+    );
+    expect(outcome.content).toBe("Answer.");
+    expect(outcome.keywordSuggestions).toEqual(["diffusion", "causal video"]);
   });
 });

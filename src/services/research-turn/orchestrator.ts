@@ -34,6 +34,7 @@ import {
   evaluateKnowledgeSurface,
   type KnowledgeQualityReport,
 } from "../knowledge-quality";
+import { extractKeywordSuggestions } from "../keyword-suggestions";
 
 export type ResearchTurnRequest = {
   paper: PaperVaultMeta;
@@ -49,6 +50,7 @@ export type ResearchTurnRequest = {
   };
   priorVisibleMessages: ChatMessage[];
   userDisplayContent: string;
+  images?: string[];
 };
 
 export type ResearchTurnEvents = {
@@ -73,6 +75,7 @@ export type ResearchTurnOutcome = {
   committed: boolean;
   resumedFreshThread: boolean;
   quality: KnowledgeQualityReport;
+  keywordSuggestions: string[];
 };
 
 export type ResearchTurnDeps = {
@@ -187,6 +190,8 @@ async function runResearchTurnInner(
     });
   }
 
+  const keywordOutput = extractKeywordSuggestions(result.content);
+  result = { ...result, content: keywordOutput.content };
   await deps.appendConversationTurn({
     itemKey: paper.itemKey,
     sessionId: request.session.sessionId,
@@ -223,6 +228,7 @@ async function runResearchTurnInner(
     committed,
     resumedFreshThread,
     quality,
+    keywordSuggestions: keywordOutput.suggestions,
   };
 }
 
@@ -238,7 +244,7 @@ async function runCodexAttempt(options: {
 }): Promise<CodexTurnResult> {
   const { request, mentionedContexts, recentMessages, threadId, mode, events, deps } =
     options;
-  const prompt = buildCodexResearchPrompt({
+  let prompt = buildCodexResearchPrompt({
     itemKey: request.paper.itemKey,
     title: request.paper.title,
     creators: request.paper.creators || "",
@@ -249,10 +255,20 @@ async function runCodexAttempt(options: {
     contextDigest: request.session.contextDigest,
     recentMessages,
   });
+  if (request.images?.length) {
+    prompt += [
+      "",
+      "",
+      `Attached local screenshots: ${request.images.length}.`,
+      "Use them only when relevant to the question.",
+      "Any durable conclusion derived from an image belongs in Reader Thinking or Evidence Pointers and must be labelled as local-only image evidence.",
+    ].join("\n");
+  }
   const result = await deps.runCodexTurn({
     prompt,
     threadId,
     model: request.session.modelSlug,
+    images: request.images,
     fallbackToDefaultModel: request.session.modelSlug ? false : undefined,
     sandbox: "workspace-write",
     onStatus: events.onStatus,

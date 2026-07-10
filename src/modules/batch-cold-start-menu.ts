@@ -52,7 +52,38 @@ async function enqueueSelectedPapers(win: Window) {
   const inputs = buildColdStartInputs(getSelectedItems(win));
   if (!inputs.length) return;
   await coldStartQueue.enqueue(inputs);
-  void coldStartQueue.start();
+  const progress = new ztoolkit.ProgressWindow("Knowledge Record Queue", {
+    window: win,
+    closeTime: -1,
+  })
+    .createLine({ text: "Queued", progress: 0 })
+    .show(-1);
+  const unsubscribe = coldStartQueue.subscribe((state) => {
+    const total = state.jobs.length;
+    const completed = state.jobs.filter((job) =>
+      ["passed", "needs-review", "failed", "cancelled"].includes(job.status),
+    ).length;
+    const running = state.jobs.find((job) => job.status === "running");
+    progress.changeLine({
+      text: running
+        ? `Building ${running.paper.title}`
+        : `${completed}/${total} complete`,
+      progress: total ? Math.round((completed / total) * 100) : 0,
+    });
+  });
+  await coldStartQueue.start();
+  unsubscribe();
+  const state = coldStartQueue.getState();
+  const failed = state.jobs.filter((job) => job.status === "failed").length;
+  progress
+    .changeLine({
+      type: failed ? "fail" : "success",
+      text: failed
+        ? `Finished with ${failed} failed item${failed === 1 ? "" : "s"}`
+        : "Knowledge Records complete",
+      progress: 100,
+    })
+    .startCloseTimer(5000);
 }
 
 function buildColdStartInputs(items: any[]): ColdStartJobInput[] {

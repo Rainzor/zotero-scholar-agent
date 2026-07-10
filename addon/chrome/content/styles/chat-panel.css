@@ -803,6 +803,61 @@
   border-left: 3px solid #2563eb;
 }
 
+.zoteroagent-context-chip.image-context {
+  border-left: 3px solid #0f766e;
+}
+
+.zoteroagent-context-image-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.zoteroagent-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.zoteroagent-msg-image {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 112px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid #dbe2e8;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.zoteroagent-msg-image img {
+  width: 100%;
+  height: 72px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.zoteroagent-msg-image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  color: #6b7280;
+  background: #eef2f5;
+  font-size: 11px;
+}
+
+.zoteroagent-msg-image-name {
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .zoteroagent-context-chip-icon {
   font-size: 11px;
   flex-shrink: 0;
@@ -1586,6 +1641,18 @@
   background: var(--fill-quinary, rgba(0, 0, 0, 0.04));
 }
 
+.zoteroagent-memory-sort {
+  flex: 0 0 auto;
+  width: 76px;
+  height: 28px;
+  border: 1px solid var(--fill-quarternary, #e0e0e0);
+  border-radius: 6px;
+  background: var(--material-background, #fff);
+  color: var(--fill-secondary, #6b7280);
+  padding: 0 6px;
+  font-size: 11px;
+}
+
 .zoteroagent-memory-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -1613,10 +1680,27 @@
 .zoteroagent-paper-signals {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   padding: 7px 10px;
   border-bottom: 1px solid #eceff3;
   background: #fafbfc;
+}
+
+.zoteroagent-paper-signal-chip {
+  margin-left: 4px;
+  padding: 2px 5px;
+  border: 1px solid #dbeafe;
+  border-radius: 5px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 10px;
+}
+
+.zoteroagent-paper-signal-chip.is-tag {
+  border-color: #d1fae5;
+  background: #ecfdf5;
+  color: #065f46;
 }
 
 .zoteroagent-paper-signals-label {
@@ -1850,6 +1934,43 @@
   color: #6b7280;
   font-size: 11px;
   line-height: 1.4;
+}
+
+.zoteroagent-keyword-review {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0 8px;
+  padding: 7px 9px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.zoteroagent-keyword-review-label {
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.zoteroagent-keyword-review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  color: #374151;
+  font-size: 11px;
+}
+
+.zoteroagent-keyword-review-row button {
+  height: 24px;
+  border: 1px solid #dbe2e8;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4b5563;
+  padding: 0 7px;
+  font-size: 10px;
+  cursor: pointer;
 }
 
 .zoteroagent-relationship-review-summary {
