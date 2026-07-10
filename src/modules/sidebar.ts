@@ -14,7 +14,10 @@ import { generateContextDigest } from "../services/context-digest";
 import { parseKnowledgeSurface } from "../services/knowledge-surface";
 import { evaluateKnowledgeSurface } from "../services/knowledge-quality";
 import { runPaperColdStart } from "../services/cold-start";
-import { parseScannedPdfWithCodex } from "../services/pdf-enrichment";
+import {
+  parseScannedPdfWithCodex,
+  renderPdfPage,
+} from "../services/pdf-enrichment";
 import {
   deleteLocalImage,
   resolveLocalImagePaths,
@@ -1157,6 +1160,15 @@ function ensureChatUI(body: HTMLElement) {
   sendBtn.className = "zoteroagent-send-button";
   sendBtn.textContent = "Send";
 
+  const attachPageBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  attachPageBtn.id = "zoteroagent-attach-page";
+  attachPageBtn.className = "zoteroagent-compose-action icon-only";
+  setIconButton(attachPageBtn, "image", "Attach current PDF page");
+
+  actionsRight.appendChild(attachPageBtn);
   actionsRight.appendChild(sendBtn);
   actionsRow.appendChild(modelSelect);
   actionsRow.appendChild(actionsRight);
@@ -1242,6 +1254,14 @@ function bindChatEvents(body: HTMLElement) {
     .querySelector("#zoteroagent-chat-send")
     ?.addEventListener("click", () => {
       void submitQuestion(body);
+    });
+  body
+    .querySelector("#zoteroagent-attach-page")
+    ?.addEventListener("click", (event) => {
+      void attachCurrentPdfPage(
+        body,
+        event.currentTarget as HTMLButtonElement,
+      );
     });
   body
     .querySelector("#zoteroagent-chat-input")
@@ -1374,7 +1394,11 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   const modelSelect = body.querySelector(
     "#zoteroagent-model-select",
   ) as HTMLSelectElement | null;
+  const attachPage = body.querySelector(
+    "#zoteroagent-attach-page",
+  ) as HTMLButtonElement | null;
   if (modelSelect) modelSelect.disabled = generating;
+  if (attachPage) attachPage.disabled = generating;
   if (sendBtn) {
     if (generating) {
       sendBtn.classList.add("is-stop");
@@ -1895,6 +1919,7 @@ type IconName =
   | "attach"
   | "attachPdf"
   | "edit"
+  | "image"
   | "send";
 
 function getIconSvg(icon: IconName): string {
@@ -1909,6 +1934,8 @@ function getIconSvg(icon: IconName): string {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.6 3.6a2.1 2.1 0 013 3L7.3 15.8l-4 1 1-4L13.6 3.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "send":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h13M10.5 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    case "image":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="8" r="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 14l3.5-3.5 2.4 2.2 2.2-2.2 3 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "copy":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="4" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="4" y="7" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
     case "delete":
@@ -3310,6 +3337,86 @@ async function handleClipboardImages(
     }
   }
   if (isSafeBody(body)) syncContextChips(body);
+}
+
+async function attachCurrentPdfPage(
+  body: HTMLElement,
+  button: HTMLButtonElement,
+) {
+  if (isGenerating || button.disabled) return;
+  const itemId = Number(body.dataset.itemID) || 0;
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pageNumber = getCurrentReaderPageNumber(reader);
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+  const pdfItem = pdfItemId > 0 ? (Zotero.Items.get(pdfItemId) as any) : null;
+  const pdfPath = String(pdfItem?.getFilePath?.() || "");
+  if (!pageNumber || !pdfPath) {
+    button.title = "Could not resolve the current PDF page";
+    return;
+  }
+  const paper = getPaperMeta(itemId);
+  const session =
+    chatStore.getSession(itemId) || chatStore.createSession(itemId);
+  if (!session) return;
+  button.disabled = true;
+  button.title = `Rendering page ${pageNumber}...`;
+  try {
+    const absolutePath = await renderPdfPage({
+      itemKey: paper.itemKey,
+      pdfPath,
+      pageNumber,
+    });
+    const image: LocalImageRef = {
+      id: `page-${pageNumber}-${Date.now()}`,
+      sessionId: session.sessionId,
+      relativePath: `${paper.itemKey}/figures/generated/page-${pageNumber}.png`,
+      name: `page-${pageNumber}.png`,
+      mimeType: "image/png",
+      previewUrl: toLocalFileUri(absolutePath),
+    };
+    addon.data.chat.pendingImages = addon.data.chat.pendingImages.filter(
+      (entry) =>
+        !(
+          entry.sessionId === session.sessionId &&
+          entry.relativePath === image.relativePath
+        ),
+    );
+    addon.data.chat.pendingImages.push(image);
+    syncContextChips(body);
+  } catch (error) {
+    button.title = `Page rendering failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  } finally {
+    button.disabled = false;
+    if (!button.title.startsWith("Page rendering failed")) {
+      button.title = "Attach current PDF page";
+    }
+  }
+}
+
+function getCurrentReaderPageNumber(
+  reader: _ZoteroTypes.ReaderInstance | null,
+): number | undefined {
+  const raw = reader as any;
+  const zeroBased = [
+    raw?.state?.pageIndex,
+    raw?._internalReader?._state?.pageIndex,
+  ].find((value) => Number.isInteger(Number(value)));
+  if (zeroBased !== undefined) return Number(zeroBased) + 1;
+  const oneBased = [
+    raw?._internalReader?._primaryView?._pdfViewer?.currentPageNumber,
+    raw?._internalReader?._iframeWindow?.PDFViewerApplication?.page,
+  ].find((value) => Number.isInteger(Number(value)) && Number(value) > 0);
+  return oneBased === undefined ? undefined : Number(oneBased);
+}
+
+function toLocalFileUri(path: string): string | undefined {
+  try {
+    return (globalThis as any).PathUtils?.toFileURI?.(path) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function syncContextChips(body: HTMLElement) {

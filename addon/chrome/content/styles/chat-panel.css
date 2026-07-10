@@ -1253,6 +1253,23 @@
   flex-shrink: 0;
 }
 
+.zoteroagent-compose-action {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid #e2e5ea;
+  border-radius: 6px;
+  background: #f8f9fb;
+  color: #4b5563;
+  padding: 0;
+  cursor: pointer;
+}
+
+.zoteroagent-compose-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 /* ---- Send Button (primary, pill) ---- */
 .zoteroagent-send-button {
   min-width: 72px;

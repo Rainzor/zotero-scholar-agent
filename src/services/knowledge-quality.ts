@@ -124,9 +124,19 @@ export function evaluateKnowledgeSurface(options: {
 
 function extractSemanticRelationshipBlock(markdown: string): string {
   const text = String(markdown || "");
-  const heading = /^###\s+Semantic Relationships\s*$/im.exec(text);
+  const libraryHeading = /^##\s+Library Connections\s*$/im.exec(text);
+  if (!libraryHeading || typeof libraryHeading.index !== "number") return "";
+  const libraryRest = text.slice(
+    libraryHeading.index + libraryHeading[0].length,
+  );
+  const nextH2 = /^##\s+.+$/m.exec(libraryRest);
+  const libraryBlock =
+    nextH2 && typeof nextH2.index === "number"
+      ? libraryRest.slice(0, nextH2.index)
+      : libraryRest;
+  const heading = /^###\s+Semantic Relationships\s*$/im.exec(libraryBlock);
   if (!heading || typeof heading.index !== "number") return "";
-  const rest = text.slice(heading.index + heading[0].length);
+  const rest = libraryBlock.slice(heading.index + heading[0].length);
   const nextHeading = /^#{2,3}\s+.+$/m.exec(rest);
   return nextHeading && typeof nextHeading.index === "number"
     ? rest.slice(0, nextHeading.index)

@@ -352,8 +352,12 @@ export function mergeReadmeEntries(
     entries.set(row.itemKey, row);
   }
   entries.set(current.itemKey, current);
-  return Array.from(entries.values()).sort((a, b) =>
-    String(a.title || a.itemKey).localeCompare(String(b.title || b.itemKey)),
+  return Array.from(entries.values()).sort(
+    (a, b) =>
+      Number(b.rating || 0) - Number(a.rating || 0) ||
+      String(a.title || a.itemKey).localeCompare(
+        String(b.title || b.itemKey),
+      ),
   );
 }
 

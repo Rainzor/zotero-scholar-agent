@@ -213,6 +213,7 @@ export async function updatePaperRating(
 ): Promise<void> {
   const changed = await updatePaperSignals(paper, { rating });
   if (!changed) return;
+  await updateReadme({ ...paper, rating });
   await commitVaultChanges(`rating: ${paper.itemKey}`);
 }
 

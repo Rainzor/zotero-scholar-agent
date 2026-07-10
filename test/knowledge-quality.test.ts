@@ -91,6 +91,20 @@ describe("evaluateKnowledgeSurface", () => {
     expect(report.status).toBe("passed");
   });
 
+  it("ignores a Semantic Relationships heading outside Library Connections", () => {
+    const report = evaluateKnowledgeSurface({
+      after: COMPLETE.replace(
+        "## Method\nSpecific method.",
+        "## Method\nSpecific method.\n\n### Semantic Relationships\n- [extends] malformed",
+      ).replace(
+        "### Semantic Relationships\n\n## Evidence",
+        "### Other\n\n## Evidence",
+      ),
+      sourceAbstract: "Source abstract.",
+    });
+    expect(report.relationships).toEqual({ candidates: 0, parsed: 0 });
+  });
+
   it("flags append growth above 25 percent for an established record", () => {
     const report = evaluateKnowledgeSurface({
       before: COMPLETE,
