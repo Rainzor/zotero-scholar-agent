@@ -136,6 +136,20 @@
 - 扫描件从硬失败变为可引导的解析路径。
 - 校验不通过时明确报告失败原因,不写入半成品 `text.txt`。
 
+### 2.9 论文信号元数据(评分/分类/关键词)
+
+定位: Semantic Relationship 是论文间的「边」,信号元数据是论文节点上的「属性」——两者共同构成 M2 关系网络(过滤/分组/图谱)与 M3 Topic Note(分类 ≈ proto-topic)的地基。
+
+- **不建第二套分类体系**: Zotero collections/tags 是文献元数据权威源,vault prep 时镜像进 `record.json`(`zoteroCollections`/`zoteroTags`),存量归类零交互成本吸收。
+- **评分 = taste 的最小捕获形式**: 用户打分(建议简单三档或 1–5)归属 Reader Thinking 域,是用户判断而非论文事实;入口放 sidebar/Memory 视图,一键完成。README 索引与 Memory 视图可按评分排序。
+- **关键词三来源且标注出处**: Zotero tags(用户)、论文自带 keywords(paper-grounded)、Codex 建议(经 post-turn review 采纳,不静默写入)。
+- **存储**: 结构化信号入 `record.json`;人读展示于 memory.md,建议用 YAML frontmatter 承载(不动已批准的七节正文)。此变更属于 Knowledge Surface 结构迁移,**前置依赖 vault.json schema versioning(M1-6)**,两者连做。
+
+验收:
+
+- 已有 Zotero 归类/标签不经用户操作出现在 record.json 中。
+- 打分一步可达;Codex 建议的关键词只有经审查采纳才写入。
+
 ### 2.8 Vault 远程托管(GitHub)
 
 现状: git 是整个 Vault 级别的单一仓库(`vault.ts::commitVaultChanges`,每 turn 一次 `add -A` + commit),尚未配置 remote。单仓库层级是正确的(跨论文相对链接、一次 clone 整库迁移),保持不变。上传 GitHub 前需要:
@@ -198,29 +212,36 @@
 - 新论文入库后的自动 triage 只能产生建议，不静默写库。
 - 用户触发的 review digest 可巡检 Vault，报告知识空洞、过期结论、值得重读的论文。
 
-## 6. 执行顺序
+## 6. 里程碑与执行顺序
 
-原则: **代码交付已领先于真实验证——先用真实使用数据关闭 🔶 项,再开新功能。** 产品灵魂是 `memory.md` 的质量演进,知识质量验收机制先于一切扩展功能。
+战略基调: **单篇阅读路径的基础设施已建成(引擎/记忆/证据/context/模型选择),项目进入「重使用、轻开发」阶段。** 最大风险不再是功能不够,而是知识存量不够——Phase 3/4 的全部价值(网络/图谱/综述/发现)都是存量的函数。
 
-| 顺序 | 内容 | 理由 | 状态 |
+已完成/已关闭: 文档与 ADR 体系(0001–0006)、Research Turn 抽离、context 管理与 usage 语义修正、页码证据 chip(2026-07-10 冒烟点验通过)、会话级模型选择。
+
+### M1 — 单篇论文理解深化 + 高质量沉淀(当前里程碑)
+
+**北极星: Vault 中 30 篇过硬门槛、七节完整的 Paper Knowledge Record。** M1 的主题是把单篇论文的理解做深(输入面: 文本/扫描件/图表/选区),同时用自动守门保证沉淀质量。2026-07-10 按产品 owner 裁量重排。
+
+| 工作流 | 内容 | 价值 | 优先级 |
 | ---- | ---- | ---- | ---- |
-| 1 | 文档同步 + ADR | 先固定 Paper Knowledge Record / Structured Projection / post-turn review 方向 | ✅ 完成(ADR 0003/0004,2026-07) |
-| 2 | 抽 Research Turn / Prompt Builder 服务 | 降低 `sidebar.ts` 复杂度，后续能力有稳定承载点 | ✅ 第一轮完成 — `runResearchTurn`、prompt/activity/relationship helpers 已抽出 |
-| 3 | **真实使用验证(dogfooding)** | 填满 `docs/benchmarks/page-evidence-dogfooding.md` 三张空表: 页码 chip 9 场景、resume/fresh/digest 三路径 token+latency、digest 质量样例。这是关闭下面两行 🔶 的唯一途径 | 🚧 当前优先级最高 |
-| 4 | Layered Paper Context + token/latency 指标 | 机制已落地;等第 3 项实测数据验证「简单问答 input tokens 减半」目标 | 🔶 等 dogfooding 数据关闭 |
-| 5 | 页码引用 chip | 代码+单测完成;等第 3 项运行时点验关闭 | 🔶 等 dogfooding 点验关闭 |
-| 6 | Knowledge Surface 质量验收机制 | `docs/benchmarks/knowledge-surface-quality.md`: 核心七节完整性、Abstract 忠实度、无 blind-append 膨胀、关系行格式合规(决定 record.json 可解析);从 Codex activity 量化「知识复用率」(读 memory.md 命中 vs 重翻 text.txt) | 🔶 rubric、硬门槛和指标已建立;待 3–5 篇真实论文评分后固化阈值 |
-| 7 | opt-in 冷启动(§2.3) | 「沉淀」目标的直接杠杆;无冷启动则 memory.md 只靠问答副作用零散生长。用第 6 项 rubric 验收产出 | 未开始 |
-| 8 | post-turn Knowledge Review 增强 + 反向链接(§3.1) | 关系目前「只写不看」;做完后跨论文价值第一次对用户可见。动 Memory view 时顺势从 sidebar.ts 拆出 | 未开始 |
-| 9 | Vault schema versioning(根级 `vault.json`) | 任何 Knowledge Surface 结构迁移的前置;沿用 text.meta.json parser-version 先例 | 未开始 — 在大迁移前完成即可 |
-| 9b | Vault 远程托管准备(§2.8) | gitignore 加固 + `.logs/` 存量 untrack + private 仓库指引 + 手动 push 流程;与 #9 配对(跨机识别) | 未开始 — 工作量小,可随时插入;上传 GitHub 前必须完成 |
-| 10 | 扫描版 PDF 兜底(§2.7,ADR 0005) | 扫描件从硬失败变为可用路径;补齐入库覆盖面 | 未开始 |
-| 11 | 截图/图表理解(§2.6,ADR 0005) | 增强论文输入质量;与 §2.7 共享 pdftoppm 渲染与依赖探测基建 | 未开始 |
-| 12 | 源码抓取分析(clone → `{itemKey}/code/`,gitignore) | Codex 相对旧 RAG 的最强差异化能力,从 deferred 提升;比图谱更能体现产品独特价值 | 未开始 — 从 CONTEXT.md deferred 提升 |
-| 13 | 库级问答 + 关系图谱(§3.2/§3.3) | 进入跨论文知识网络;图谱在记录数量少时价值有限,后置 | 未开始 |
-| 14 | Topic Note / Living Survey(Phase 4) | 需要前面积累足够高质量的 Paper Knowledge Records | 未开始 |
-| 15 | 论文发现与定时巡检(§7.3) | browser_use/MCP 检索 + 插件调度,产出建议收件箱;受谨慎主动性约束 | 未开始 — 依赖 Topic/主题积累,置于 14 后 |
-| 16 | Notion 投影同步(§7.4) | 单向发布 Knowledge Surface/Topic Note/Survey;Vault 保持唯一可信源 | 未开始 — 双向同步需单独 ADR |
+| M1-1 冷启动(§2.3) | opt-in 单篇建档;之上支持 Zotero 多选 → 排队批量建档(队列/失败恢复/取消,默认 cheap model 建骨架、好模型写 Insight) | 「沉淀」的直接杠杆;批量是北极星加速器 | ★★★ 首先做 |
+| M1-2 post-turn 质量校验器 | rubric 硬门槛代码化: Abstract 改写检测(与首次提取比对)、七节缺失、关系行格式(决定 record.json 可解析)、体积膨胀(防 blind-append);违规打标到 review UI | 30 篇规模下人工评分不现实;语料可信的机制,全部可单测 | ★★★ 与 1 并行 |
+| M1-3 Codex PDF 增强解析(§2.7,ADR 0005) | 扫描件 opt-in Codex 解析(机械校验 + `parserSource` 溯源)+ 按需页面渲染;依赖探测降级 | **能力面联动的第一个范式**——同一套「探测→opt-in→校验→溯源」模式为后续 Notion/web 搜索/论文抓取/代码分析铺路 | ★★ |
+| M1-4 截图分析(§2.6) | 用户框选/截图 → `{itemKey}/figures/` → `codex exec -i` 附图;结论写入 Evidence Pointers 或 Reader Thinking | 图表/公式是纯文本抽取的盲区;与 M1-3 共享 poppler/依赖探测基建 | ★★ 与 3 连做 |
+| M1-5 选区引用提问收口 | ✅ 核心已实现(popup Ask → `[PDF Text]` 引用块入 prompt);收口: 聊天气泡显示被引选区、可选页码锚定 | 高频动作的体验补全,工作量小 | ★ 顺手 |
+| M1-6 耐久性 + schema versioning(§2.8 + vault.json) | gitignore 加固 + `.logs` untrack + private 远程 push 流程;根级 `vault.json` 版本标记 | 30 篇档案值得备份;也是 M1-8 信号元数据的 frontmatter 迁移前置 | ★★ 尽早插入 |
+| M1-7 沉淀体验后备项 | Zotero 划注导入(高亮→Evidence、批注→Reader Thinking)、memory diff 渲染+一键回滚、健康度徽标、会话要点手动沉淀按钮 | 差异化与信任机制;按实际使用痛点择机启动 | ★ 后备池 |
+| M1-8 论文信号元数据(§2.9) | Zotero collections/tags 镜像入 record.json;一键评分(taste 沉淀);关键词三来源标注出处,Codex 建议经审查采纳;memory.md frontmatter 承载 | M2 图谱/过滤与 M3 Topic 的节点属性地基;存量归类零成本吸收 | ★★ 依赖 M1-6,连做 |
+
+不属于 M1(明确不做): 关系浏览器/图谱、库级问答、源码抓取分析——等 M2。
+
+### M2 — 知识网络开始回报(存量 ~30 篇后)
+
+进入信号不是日期,而是行为: 用户开始自然地 `@` 旧论文、提出跨论文问题。内容: 库级问答(§3.3)、关系浏览/轻量图谱(§3.1/§3.2)、源码抓取分析(Codex 最强差异化,沿用 M1-3 的能力接入范式)。成功标准: 一个跨论文问题的回答能引用多篇 memory.md 并给出可验证的页码证据。
+
+### M3 — 领域级知识框架
+
+Topic Note / Living Survey(Phase 4)、论文发现建议收件箱(§7.3)、Notion 投影(§7.4)。系统开始反向驱动阅读: 告诉用户该读什么、领域理解哪里有洞。完全建立在 M1/M2 的存量与质量上。
 
 ## 7. Codex 能力面撬动策略
 
@@ -259,6 +280,10 @@ Codex 不只是一个问答引擎——它自带一整个可扩展的能力面: 
 
 ## 8. 进展记录
 
+- **2026-07-10** 论文信号元数据入档(§2.9,M1-8): 评分/分类/关键词作为论文节点属性,与 Semantic Relationship(边)共同构成 M2 图谱与 M3 Topic 地基。决策: 不建第二套分类体系(Zotero collections/tags 镜像入 record.json)、评分归 Reader Thinking 域(taste 捕获)、关键词三来源标出处且 Codex 建议经审查、frontmatter 承载依赖 vault.json versioning(与 M1-6 连做)。CONTEXT.md 新增 Paper Signal Metadata 术语。
+- **2026-07-10** M1 按产品 owner 裁量重排为「单篇理解深化」: 冷启动(1)与 post-turn 校验器(2)保持 ★★★;Codex PDF 增强解析(3)与截图分析(4)从 M2 提入 M1,并定位为能力面联动第一范式(探测→opt-in→校验→溯源,为 Notion/web 搜索/论文抓取/代码分析铺路);选区引用提问核实为已实现(popup Ask → `[PDF Text]` 引用块),M1 内仅做体验收口;划注导入/review 深化/健康度/手动沉淀降为后备池。
+- **2026-07-10** 里程碑重组 + M1 细化: 执行顺序表重构为 M1/M2/M3 里程碑(北极星: 30 篇合格档案);M1 细化为七个工作流——A 冷启动+批量建档(★★★)、B 质量自动守门 rubric 代码化(★★★)、C Zotero 划注导入(★★,差异化)、D Knowledge Review 深化、E 健康度徽标、F 会话手动沉淀、G 耐久性。冒烟点验通过,页码 chip 与 usage 指标项关闭。M2 进入信号定义为用户行为(自然 @ 旧论文)而非日期。
+- **2026-07-10** 验证流程分级精简: 正式验证只保留 1 篇论文的冒烟点验(chip 跳页/禁用态/Evidence chip);token/latency 3×5 矩阵取消,改日常随手记录;digest 质量样例与 occupancy 信号调研降级为非阻塞;Knowledge Surface rubric 评分样本改由冷启动(#7)产出提供。开发主线: 冒烟点验 → 9b 托管准备 → #7 冷启动。
 - **2026-07-10** 会话级 Codex 模型选择落地(ADR 0006): 侧栏从 `codex debug models` 动态加载当前 provider/account 可用模型，选择值按 Chat Session 持久化并用于 fresh/resume turn；保留 `thread_id` 连续性，用户显式选择失败时不静默回退，`Codex default` 继续继承本机配置。
 - **2026-07-10** Vault 远程托管规划入档(§2.8): 确认 git 为整 Vault 级单仓库(层级正确,保持);发现实际偏差——`.logs/` 被追踪(`.gitignore` 仅 `*/code/`),需加固 + 存量 untrack;托管默认 private 仓库(text.txt 版权/conversations 隐私),V1 单机单写 + 手动 push,多机 merge 留待独立 ADR。执行顺序新增 9b。
 - **2026-07-10** Codex 能力面撬动策略入档(§7): 接入判据四问(Vault 价值/真相源边界/配置边界/降级路径),本机验证的能力清单(skills、MCP、browser_use/computer_use stable、图像输入、模型路由)与产品映射,论文发现建议收件箱(§7.3)与 Notion 单向投影(§7.4)进入执行顺序 15/16。ADR 0005 定位为该策略的第一个实例。

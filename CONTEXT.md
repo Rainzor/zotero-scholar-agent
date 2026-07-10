@@ -48,6 +48,10 @@ _Avoid_: citation edge (when the relation type is unknown), generic related work
 A typed, meaning-bearing Library Connection between Paper Knowledge Records. It captures why papers matter to each other, not merely whether one cites another. Examples include extension, contradiction, shared method, shared dataset, solving a limitation, or inspiring a new question.
 _Avoid_: untyped related link, citation-only graph
 
+**Paper Signal Metadata**:
+Structured node-level attributes on a Paper Knowledge Record: user rating (a captured form of researcher taste, Reader Thinking domain), categories mirrored from Zotero collections, and keywords with labeled provenance (Zotero tags = user, paper's own keywords = paper-grounded, Codex suggestions = review-gated). Complements Semantic Relationships: relationships are edges between papers, signals are attributes on the nodes; together they ground filtering, ranking, graphs, and future Topic Notes. Zotero stays authoritative for its own collections/tags; the Vault mirrors them into the Structured Projection.
+_Avoid_: second taxonomy, silent agent-written tags, Zotero replacement
+
 **Paper Mention**:
 An explicit user reference to another paper during a reading conversation, such as through an `@`-style selector. A Paper Mention signals that the mentioned paper should be available to Codex for the current turn and is a strong candidate for creating or updating a Semantic Relationship.
 _Avoid_: implicit retrieval result, background recommendation
