@@ -32,6 +32,17 @@ describe("canJumpToPage", () => {
       pageCount: 2,
     });
   });
+
+  it("can recover when a reader becomes available later", () => {
+    expect(canJumpToPage(null, 1)).toEqual({
+      ok: false,
+      reason: "no-reader",
+    });
+    expect(canJumpToPage({ state: { pagesCount: 4 } } as any, 1)).toEqual({
+      ok: true,
+      pageCount: 4,
+    });
+  });
 });
 
 describe("jumpToReaderPage", () => {

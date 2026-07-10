@@ -84,29 +84,28 @@ describe("selectCatalogModel", () => {
 });
 
 describe("enrichUsageWithContext", () => {
-  it("adds context metadata and computes percent from the effective window", () => {
-    expect(
-      enrichUsageWithContext(
-        {
-          promptTokens: 25840,
-          completionTokens: 100,
-          totalTokens: 25940,
-          cachedInputTokens: 12000,
-          reasoningTokens: 80,
-        },
-        {
-          modelSlug: "gpt-5.5",
-          contextWindowTokens: 272000,
-          effectiveContextWindowTokens: 258400,
-          contextSource: "codex-config",
-        },
-      ),
-    ).toMatchObject({
+  it("adds model metadata without treating cumulative turn input as context occupancy", () => {
+    const usage = enrichUsageWithContext(
+      {
+        promptTokens: 25840,
+        completionTokens: 100,
+        totalTokens: 25940,
+        cachedInputTokens: 12000,
+        reasoningTokens: 80,
+      },
+      {
+        modelSlug: "gpt-5.5",
+        contextWindowTokens: 272000,
+        effectiveContextWindowTokens: 258400,
+        contextSource: "codex-config",
+      },
+    );
+    expect(usage).toMatchObject({
       contextWindowTokens: 272000,
       effectiveContextWindowTokens: 258400,
-      contextUsedPercent: 10,
       contextSource: "codex-config",
       modelSlug: "gpt-5.5",
     });
+    expect(usage?.contextUsedPercent).toBeUndefined();
   });
 });

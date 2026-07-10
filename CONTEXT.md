@@ -117,17 +117,18 @@ _Avoid_: the agent, the model, the LLM
 - **Structured Projection generation (RATIFIED):** the plugin generates `{itemKey}/record.json` from `memory.md`; Codex does not edit `record.json` directly.
 - **Paper Mention scope (RATIFIED for V1):** `@` mentions select papers already present in the Knowledge Vault. A Paper Mention injects compact Knowledge Surface context and is a Connection Trigger for Semantic Relationships.
 - **Review model (RATIFIED for V1):** normal turns use post-turn review. Codex may update the In-Focus Paper during the turn; the UI then shows Knowledge/relationship updates for review. Pre-commit approval would be a separate architecture.
-- **Context usage display:** sidebar usage is grounded in Codex JSONL `turn.completed.usage`; `input_tokens` is the canonical input-context count, `cached_input_tokens` is displayed as cache hit metadata and is not subtracted. Context window percentage is shown only when the plugin can resolve the active Codex model window from Codex config/catalog or an explicit user override.
+- **Turn usage display:** sidebar usage is grounded in Codex JSONL `turn.completed.usage`; `input_tokens` is cumulative input processed across model calls in the turn, and `cached_input_tokens` is the cached subset of that input. Neither value is active context-window occupancy. The `codex exec --json` event currently used by the plugin does not expose trustworthy active-context usage, so the sidebar must not derive a percentage or trigger auto-compaction by dividing turn input by the model window. Manual Context Digest compaction remains available; automatic threshold compaction requires a future active/last-context signal.
 - **Cheap Codex model for temporary turns:** lightweight/temporary Codex workflows may pass a user-configured cheap model via `--model`; normal research chat continues to inherit the user's default Codex config. If the cheap model is absent from the Codex model catalog, or a cheap-model run fails before producing content, the runner falls back to the default Codex model.
 - **Context Digest (RATIFIED):** long sidebar chats compact earlier visible turns into hidden session metadata. The full transcript remains visible; the digest is injected only for fresh-thread prompts with recent visible turns and is never appended to Conversation Logs or written into `memory.md`. Saving a digest clears the session's `codexThreadId` so the next turn starts fresh from compacted context.
 - **Resume fallback (RATIFIED):** if resuming an existing Codex thread fails without timing out, the research turn retries once as a fresh thread using hidden digest and recent visible messages.
+- **Layered PDF parsing (RATIFIED, ADR 0005):** PDFWorker deterministic extraction is the only writer of `text.txt` on the default path. Codex pdf-skill-based parsing (a poppler+python prompt workflow, not a built-in parser) is opt-in enrichment only: scanned-PDF fallback and on-demand figure/page rendering, gated by mechanical validation (page count, `[page N]` markers), recorded via `parserSource` in `text.meta.json`, with dependency probing and graceful degradation. Original PDFs still never enter the Vault.
 - Vault layout:
 
 ```
 ~/papers/
 ├── AGENTS.md              # memory discipline (Codex auto-reads)
 ├── README.md              # human index: title/author/year → link to {itemKey}/
-├── .logs/                 # plugin diagnostics (gitignored or local)
+├── .logs/                 # plugin diagnostics — SHOULD be gitignored (current real vaults track it; needs one-time untrack migration, see roadmap §2.8)
 └── {itemKey}/
     ├── text.txt           # extracted PDF text (plugin-generated)
     ├── record.json        # plugin-generated Structured Projection
@@ -158,4 +159,7 @@ _Avoid_: the agent, the model, the LLM
 
 ## Future capabilities (deferred)
 
-- **Source-code fetch & analysis**: detect a paper's associated code repo (GitHub URL in the PDF / Papers-with-Code), clone it, and let Codex analyze it. This is Codex's strongest differentiator over the old RAG pipeline. Tentative placement: clone into `{itemKey}/code/` but git-ignore it so the Vault's memory history stays small; Codex reads it via the working dir. Not designed in detail yet.
+- **Source-code fetch & analysis**: detect a paper's associated code repo (GitHub URL in the PDF / Papers-with-Code), clone it, and let Codex analyze it. This is Codex's strongest differentiator over the old RAG pipeline. Tentative placement: clone into `{itemKey}/code/` but git-ignore it so the Vault's memory history stays small; Codex reads it via the working dir. _Scheduled: roadmap execution order #12._
+- **Codex capability-surface leverage** (roadmap §7): treat Codex's native extensibility — skills, MCP servers (`codex mcp add`), browser_use/computer_use, image input, model routing — as product input/output channels rather than rebuilding them. Every integration must pass four gates: Vault-value, single-source-of-truth boundary (external systems are projections or suggestion sources, never a second truth), no silent `~/.codex` config changes (opt-in + capability probing), and graceful degradation of the default path.
+- **Paper Discovery** (roadmap §7.3): plugin-scheduled read-only `codex exec` sweeps (browser_use / arXiv-class MCP) that surface new relevant papers into a suggestion inbox with Vault-grounded rationale. Suggestions only — no silent library writes or downloads; adoption flows through Zotero import + cold start.
+- **Notion projection** (roadmap §7.4): one-way publish of Knowledge Surfaces / Topic Notes / Living Surveys via a Notion MCP server on explicit user trigger. Two-way sync would need its own ADR; default is no.

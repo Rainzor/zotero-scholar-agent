@@ -1265,6 +1265,17 @@
   pointer-events: none;
 }
 
+.zoteroagent-agent-status.is-notice::before {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.zoteroagent-agent-status.is-notice::after {
+  display: none;
+  animation: none;
+}
+
 @keyframes zoteroagent-status-ping {
   0%,
   100% {

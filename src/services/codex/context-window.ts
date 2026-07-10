@@ -114,16 +114,10 @@ export function enrichUsageWithContext(
 ): TokenUsage | undefined {
   if (!usage) return undefined;
   if (!context) return usage;
-  const window =
-    context.effectiveContextWindowTokens || context.contextWindowTokens || 0;
-  const input = positiveInteger(usage.promptTokens) || 0;
-  const percent =
-    window > 0 && input > 0 ? Number(((input / window) * 100).toFixed(1)) : undefined;
   return {
     ...usage,
     contextWindowTokens: context.contextWindowTokens,
     effectiveContextWindowTokens: context.effectiveContextWindowTokens,
-    contextUsedPercent: percent,
     contextSource: context.contextSource,
     modelSlug: context.modelSlug,
   };

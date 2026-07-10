@@ -10,14 +10,13 @@ import {
   parsePageEvidenceText,
   type PageEvidenceRef,
 } from "../services/page-evidence";
-import {
-  CONTEXT_DIGEST_WARNING_PERCENT,
-  generateContextDigest,
-  shouldAutoCompactFromUsage,
-  shouldWarnFromUsage,
-} from "../services/context-digest";
+import { generateContextDigest } from "../services/context-digest";
 import { buildQuotedQuestion } from "../services/research-turn/prompt";
 import { runResearchTurn } from "../services/research-turn/orchestrator";
+import {
+  getAgentStatusPresentation,
+  type AgentStatusKind,
+} from "../services/agent-status";
 import {
   canJumpToPage,
   jumpToReaderPage,
@@ -1097,7 +1096,11 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   }
 }
 
-function showAgentStatus(body: HTMLElement, text: string) {
+function showAgentStatus(
+  body: HTMLElement,
+  text: string,
+  kind: AgentStatusKind = "progress",
+) {
   if (!isSafeBody(body)) return;
   const container = body.querySelector(
     "#zoteroagent-chat-messages",
@@ -1123,7 +1126,6 @@ function showAgentStatus(body: HTMLElement, text: string) {
       "http://www.w3.org/1999/xhtml",
       "div",
     ) as HTMLElement;
-    statusEl.className = "zoteroagent-agent-status";
     const insertRef =
       mainEl.querySelector(".zoteroagent-thinking") ||
       mainEl.querySelector(".zoteroagent-message-content");
@@ -1133,6 +1135,9 @@ function showAgentStatus(body: HTMLElement, text: string) {
       mainEl.appendChild(statusEl);
     }
   }
+  const presentation = getAgentStatusPresentation(kind);
+  statusEl.className = presentation.className;
+  statusEl.dataset.animated = String(presentation.animated);
   statusEl.textContent = text || "Generating...";
 
   if (isNearBottom(container)) {
@@ -1534,9 +1539,6 @@ async function submitQuestion(body: HTMLElement) {
     assistant.memoryUpdated = result.memoryUpdated;
     assistant.relationshipUpdates = result.relationshipUpdates;
     assistant.committed = result.committed;
-    if (shouldAutoCompactFromUsage(assistant.usage)) {
-      await compactSessionContext(body, itemId, "auto");
-    }
   } catch (e: any) {
     if (!assistant.content && !assistant.reasoning) {
       assistant.content = `[Error] ${e?.message || String(e)}`;
@@ -2218,7 +2220,11 @@ function createPageEvidenceChip(
     void jumpToReaderPage(getActiveReader(), ref.pageIndex).then((result) => {
       applyPageChipState(chip, result);
       if (!result.ok) {
-        showAgentStatus(body, pageJumpFailureText(result, ref.pageNumber));
+        showAgentStatus(
+          body,
+          pageJumpFailureText(result, ref.pageNumber),
+          "notice",
+        );
       }
     });
   });
@@ -3112,9 +3118,7 @@ function renderContextDigestStatus(
   }
 
   const doc = bar.ownerDocument;
-  const latestUsage = findLatestAssistantUsage(session.messages);
   const hasDigest = Boolean(session.contextDigest?.trim());
-  const warn = shouldWarnFromUsage(latestUsage);
   const busy = body.dataset.contextDigestBusy === "true";
   bar.style.display = "flex";
 
@@ -3123,19 +3127,13 @@ function renderContextDigestStatus(
 
   const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   chip.className = `zoteroagent-context-digest-chip ${
-    hasDigest ? "is-compacted" : warn ? "is-warning" : ""
+    hasDigest ? "is-compacted" : ""
   }`;
   if (transientText) {
     chip.textContent = transientText;
   } else if (hasDigest) {
     const covered = (session.contextDigestUpToMessageIndex ?? -1) + 1;
     chip.textContent = `Context compacted · covers ${Math.max(0, covered)} turns`;
-  } else if (warn) {
-    const pct =
-      typeof latestUsage?.contextUsedPercent === "number"
-        ? latestUsage.contextUsedPercent.toFixed(1).replace(/\.0$/, "")
-        : String(CONTEXT_DIGEST_WARNING_PERCENT);
-    chip.textContent = `Context near limit · ${pct}%`;
   } else {
     chip.textContent = "Context ready";
   }
@@ -3163,16 +3161,6 @@ function renderContextDigestStatus(
     details.appendChild(pre);
     bar.appendChild(details);
   }
-}
-
-function findLatestAssistantUsage(
-  messages: ChatMessage[],
-): TokenUsage | undefined {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role === "assistant" && message.usage) return message.usage;
-  }
-  return undefined;
 }
 
 function renderHistoryPanel(body: HTMLElement, itemId: number) {

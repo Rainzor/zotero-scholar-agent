@@ -22,9 +22,6 @@ export type ContextDigestState = {
 
 export type ContextDigestResult = Required<ContextDigestState>;
 
-export const CONTEXT_DIGEST_WARNING_PERCENT = 70;
-export const CONTEXT_DIGEST_AUTO_PERCENT = 85;
-
 const COMPACT_INSTRUCTION = `You are compacting a Zotero research chat for future Codex turns.
 
 Goal:
@@ -194,20 +191,6 @@ export async function generateContextDigest(options: {
     messages: messagesToCompact,
   });
   return buildDigestResult(fallback, endIndex, timestamp, "deterministic");
-}
-
-export function shouldAutoCompactFromUsage(usage?: {
-  contextUsedPercent?: number;
-}): boolean {
-  return Number(usage?.contextUsedPercent || 0) >= CONTEXT_DIGEST_AUTO_PERCENT;
-}
-
-export function shouldWarnFromUsage(usage?: {
-  contextUsedPercent?: number;
-}): boolean {
-  return (
-    Number(usage?.contextUsedPercent || 0) >= CONTEXT_DIGEST_WARNING_PERCENT
-  );
 }
 
 function normalizeDigest(result: CodexTurnResult): string {

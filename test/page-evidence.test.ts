@@ -19,6 +19,13 @@ describe("parsePageEvidenceText", () => {
     ]);
   });
 
+  it("maps the first two displayed pages to zero-based reader indices", () => {
+    expect(extractPageEvidence("[page 1] [PAGE 2]")).toEqual([
+      { type: "page", raw: "[page 1]", pageNumber: 1, pageIndex: 0 },
+      { type: "page", raw: "[PAGE 2]", pageNumber: 2, pageIndex: 1 },
+    ]);
+  });
+
   it("parses multiple and repeated page references", () => {
     expect(extractPageEvidence("[page 2], [page 2], [page 10]")).toEqual([
       { type: "page", raw: "[page 2]", pageNumber: 2, pageIndex: 1 },
@@ -28,9 +35,9 @@ describe("parsePageEvidenceText", () => {
   });
 
   it("ignores invalid page zero and malformed markers", () => {
-    expect(parsePageEvidenceText("Bad [page 0], [page -1], [page x].")).toEqual([
-      { type: "text", text: "Bad [page 0], [page -1], [page x]." },
-    ]);
+    expect(parsePageEvidenceText("Bad [page 0], [page -1], [page x].")).toEqual(
+      [{ type: "text", text: "Bad [page 0], [page -1], [page x]." }],
+    );
   });
 
   it("preserves adjacent text around adjacent markers", () => {

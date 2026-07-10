@@ -64,10 +64,10 @@
 
 ### 2.2 Layered Paper Context 与成本压降
 
-状态: context 管理基础已完成，真实 token/latency benchmark 待做。
+状态: context 管理基础已完成，真实 token/latency benchmark 待做；dogfooding 已纠正 `turn.completed.input_tokens` 的累计工作量语义。
 
-- 已实现 Context Window usage display: 基于 Codex JSONL usage 与模型 context window 计算占用。
-- 已实现 Hidden Context Digest: 长会话可手动/自动 compact，digest 作为隐藏机器上下文保存。
+- 已实现 per-turn usage display: Codex JSONL `input_tokens`/`cached_input_tokens` 用于成本观测，不再伪装成 active context 占用率。
+- 已实现 Hidden Context Digest: 长会话可手动 compact，digest 作为隐藏机器上下文保存。自动阈值 compact 暂停，直到 `codex exec` 提供可信 active/last-context 信号。
 - 已实现条件化注入: resume 已有 Codex thread 时不注入 digest/recent messages；fresh thread 和 resume fallback 才注入。
 - `@` Paper Mention 默认注入 compact Knowledge Surface；全文、图表、截图、源码仍按需读取。
 - 下一步需要记录多轮真实使用的 token usage 和 wall-clock，比较 resume / fresh / digest fallback 的成本。
@@ -107,15 +107,48 @@
 
 ### 2.5 Context 管理后续优化
 
-2026-07 已落地 hidden Context Digest、context window 解析、条件化注入与 prompt builder 归位(见 ADR 0004),遗留一件事:
+2026-07 已落地 hidden Context Digest、context window 解析、条件化注入与 prompt builder 归位(见 ADR 0004)。Dogfooding 发现 `turn.completed.input_tokens` 是一轮内多次模型调用的累计输入，不能用来计算 active context 百分比；错误百分比与 70%/85% 自动阈值已移除，遗留两件事:
 
 - **digest 质量回归**: digest 的压缩指令与确定性兜底已有单测,但缺少"digest 注入后回答质量不退化"的人工评估清单;至少记录几个长会话样例作为回归用例。
+- **可信 occupancy 信号**: 调研 Codex app-server 的 active/last-context token usage，或等待 `codex exec --json` 暴露等价事件；在此之前只提供手动 Compact。
 
 ### 2.6 截图与图表理解
 
+设计基线见 ADR 0005(分层 PDF 解析): PDFWorker 确定性抽取是 `text.txt` 的唯一默认路径,Codex pdf-skill(pdftoppm 渲染 + Python 抽取)只做按需增强。
+
 - 用户框选/截图保存到 `{itemKey}/figures/` 或等价 derived artifact 目录。
-- Codex 可在相关 turn 中读取图像，并把关键结论写入 Evidence Pointers 或 Reader Thinking。
-- 图像资产是否进入 git 需要单独决策；默认倾向 derived、可回放、但避免 Vault 历史膨胀。
+- 当问题需要视觉细节时,按需将相关页渲染为 PNG(`pdftoppm`)放入 `{itemKey}/figures/`,用 `codex exec -i` 附图 — 与用户截图互补,不替代。
+- 增强路径先探测 poppler/python 可用性,缺失时提示安装;默认阅读路径永不依赖它们。
+- Codex 可在相关 turn 中读取图像,并把关键结论写入 Evidence Pointers 或 Reader Thinking。
+- 图像资产是否进入 git 需要单独决策;默认倾向: 渲染页可再生、gitignore,用户截图保留(在本节设计时定稿)。
+
+### 2.7 扫描版 PDF 兜底(opt-in Codex 解析)
+
+现状: PDFWorker 对扫描件返回空文本,vault prep 直接抛错,论文完全进不了知识系统。按 ADR 0005:
+
+- 空文本时 UI 提供显式「用 Codex 解析这篇 PDF」入口,opt-in、绝不自动触发。
+- Codex 产出的文本经过机械校验(页数与 PDF 一致、`[page N]` 标记齐全且单调)才被接受为 `text.txt`。
+- `text.meta.json` 用独立 `parserSource` 值记录来源,保留可追溯性。
+- 原始 PDF 不进 Vault;Codex 每次调用按需获得 Zotero storage 只读路径。
+
+验收:
+
+- 扫描件从硬失败变为可引导的解析路径。
+- 校验不通过时明确报告失败原因,不写入半成品 `text.txt`。
+
+### 2.8 Vault 远程托管(GitHub)
+
+现状: git 是整个 Vault 级别的单一仓库(`vault.ts::commitVaultChanges`,每 turn 一次 `add -A` + commit),尚未配置 remote。单仓库层级是正确的(跨论文相对链接、一次 clone 整库迁移),保持不变。上传 GitHub 前需要:
+
+- **默认 private 仓库**: `text.txt` 是版权论文全文,`conversations/*.md` 是私人研究思考,公开仓库有法律与隐私风险。文档中写死此默认,公开发布只能走 §7.4 投影路径(经筛选的 Knowledge Surface/Topic Note)。
+- **gitignore 加固 + 存量迁移**: 现实 `.gitignore` 只有 `*/code/`,`.logs/` 已被追踪(与 CONTEXT.md 意图不符)。补 `.logs/`、`.generated/`、渲染页 `figures/`(按 ADR 0005 定稿),并对存量做一次性 `git rm --cached` 迁移。
+- **同步策略 V1**: 单机单写者假设 + 用户手动/定期 push;插件不自动推送(网络失败与凭证不应阻塞研究 turn)。opt-in 后台自动 push 为后续增强;多机双写 merge 是独立 ADR 级决策,默认不做。
+- **提交者身份**: 目前硬编码 `zotero-agent <agent@local>`,托管后考虑读取用户 git 全局配置,保留 agent 标识为 fallback。
+
+验收:
+
+- 新建 Vault 的 `.gitignore` 覆盖全部非知识资产;存量 Vault 迁移后 `git ls-files` 无 `.logs/`。
+- 配好 remote 的 Vault 在另一台机器 clone 后,插件可识别并继续使用(与 #9 vault.json 版本标记配合)。
 
 ## 4. Phase 3 — 跨论文知识网络
 
@@ -167,20 +200,69 @@
 
 ## 6. 执行顺序
 
+原则: **代码交付已领先于真实验证——先用真实使用数据关闭 🔶 项,再开新功能。** 产品灵魂是 `memory.md` 的质量演进,知识质量验收机制先于一切扩展功能。
+
 | 顺序 | 内容 | 理由 | 状态 |
 | ---- | ---- | ---- | ---- |
 | 1 | 文档同步 + ADR | 先固定 Paper Knowledge Record / Structured Projection / post-turn review 方向 | ✅ 完成(ADR 0003/0004,2026-07) |
 | 2 | 抽 Research Turn / Prompt Builder 服务 | 降低 `sidebar.ts` 复杂度，后续能力有稳定承载点 | ✅ 第一轮完成 — `runResearchTurn`、prompt/activity/relationship helpers 已抽出 |
-| 3 | Layered Paper Context + token/latency 指标 | 直接改善成本和日常体验 | 🔶 部分 — token 指标/context window/digest/条件化注入已落地;真实 benchmark 与 In-Focus compact surface 注入未做 |
-| 4 | 页码引用 chip | 提升可信度，成本低 | 🔶 代码完成 — 解析/渲染/跳转与禁用态已实现并单测;Zotero 运行时点验按 `docs/benchmarks/page-evidence-dogfooding.md` 进行中 |
-| 5 | post-turn Knowledge Review 增强 + 反向链接 | 让 Semantic Relationships 真正可见、可审查 | 未开始 |
-| 6 | opt-in 冷启动 | 改善首问体验，同时守住用户控制和成本边界 | 未开始 |
-| 7 | 截图/图表理解 | 增强论文输入质量 | 未开始 |
-| 8 | 库级问答 + 关系图谱 | 进入跨论文知识网络 | 未开始 |
-| 9 | Topic Note / Living Survey | 需要前面积累足够高质量的 Paper Knowledge Records | 未开始 |
+| 3 | **真实使用验证(dogfooding)** | 填满 `docs/benchmarks/page-evidence-dogfooding.md` 三张空表: 页码 chip 9 场景、resume/fresh/digest 三路径 token+latency、digest 质量样例。这是关闭下面两行 🔶 的唯一途径 | 🚧 当前优先级最高 |
+| 4 | Layered Paper Context + token/latency 指标 | 机制已落地;等第 3 项实测数据验证「简单问答 input tokens 减半」目标 | 🔶 等 dogfooding 数据关闭 |
+| 5 | 页码引用 chip | 代码+单测完成;等第 3 项运行时点验关闭 | 🔶 等 dogfooding 点验关闭 |
+| 6 | Knowledge Surface 质量验收机制 | `docs/benchmarks/knowledge-surface-quality.md`: 核心七节完整性、Abstract 忠实度、无 blind-append 膨胀、关系行格式合规(决定 record.json 可解析);从 Codex activity 量化「知识复用率」(读 memory.md 命中 vs 重翻 text.txt) | 🔶 rubric、硬门槛和指标已建立;待 3–5 篇真实论文评分后固化阈值 |
+| 7 | opt-in 冷启动(§2.3) | 「沉淀」目标的直接杠杆;无冷启动则 memory.md 只靠问答副作用零散生长。用第 6 项 rubric 验收产出 | 未开始 |
+| 8 | post-turn Knowledge Review 增强 + 反向链接(§3.1) | 关系目前「只写不看」;做完后跨论文价值第一次对用户可见。动 Memory view 时顺势从 sidebar.ts 拆出 | 未开始 |
+| 9 | Vault schema versioning(根级 `vault.json`) | 任何 Knowledge Surface 结构迁移的前置;沿用 text.meta.json parser-version 先例 | 未开始 — 在大迁移前完成即可 |
+| 9b | Vault 远程托管准备(§2.8) | gitignore 加固 + `.logs/` 存量 untrack + private 仓库指引 + 手动 push 流程;与 #9 配对(跨机识别) | 未开始 — 工作量小,可随时插入;上传 GitHub 前必须完成 |
+| 10 | 扫描版 PDF 兜底(§2.7,ADR 0005) | 扫描件从硬失败变为可用路径;补齐入库覆盖面 | 未开始 |
+| 11 | 截图/图表理解(§2.6,ADR 0005) | 增强论文输入质量;与 §2.7 共享 pdftoppm 渲染与依赖探测基建 | 未开始 |
+| 12 | 源码抓取分析(clone → `{itemKey}/code/`,gitignore) | Codex 相对旧 RAG 的最强差异化能力,从 deferred 提升;比图谱更能体现产品独特价值 | 未开始 — 从 CONTEXT.md deferred 提升 |
+| 13 | 库级问答 + 关系图谱(§3.2/§3.3) | 进入跨论文知识网络;图谱在记录数量少时价值有限,后置 | 未开始 |
+| 14 | Topic Note / Living Survey(Phase 4) | 需要前面积累足够高质量的 Paper Knowledge Records | 未开始 |
+| 15 | 论文发现与定时巡检(§7.3) | browser_use/MCP 检索 + 插件调度,产出建议收件箱;受谨慎主动性约束 | 未开始 — 依赖 Topic/主题积累,置于 14 后 |
+| 16 | Notion 投影同步(§7.4) | 单向发布 Knowledge Surface/Topic Note/Survey;Vault 保持唯一可信源 | 未开始 — 双向同步需单独 ADR |
 
-## 7. 进展记录
+## 7. Codex 能力面撬动策略
 
+Codex 不只是一个问答引擎——它自带一整个可扩展的能力面: **skills**(`~/.codex/skills/`,本机已有 pdf/playwright)、**MCP 服务器**(`codex mcp add`,可挂 Notion/arXiv/Semantic Scholar 等)、**browser_use / computer_use**(本机 stable 且启用)、**图像输入**(`codex exec -i`)、**模型路由**(`--model` cheap model,已用于 digest)。产品战略是持续把这些原生能力转化为知识系统的输入和输出通道,而不是自己重造。ADR 0005 的 pdf-skill 分层只是该策略的第一个实例。
+
+### 7.1 接入判据(每个能力接入前必答四问)
+
+1. **价值判据**: 它是否让 Vault 知识更多、更准或更可用(§1 三条标准)?
+2. **真相源边界**: Vault 仍是唯一可信源。外部系统(如 Notion)只能是投影/发布目标或建议来源,绝不成为第二真相源。
+3. **配置边界**: 不静默修改用户 `~/.codex` 配置(§2 已有原则)。MCP/skill 的启用必须 opt-in,插件负责探测可用性并引导安装。
+4. **降级路径**: 能力缺失时默认主路径必须完整可用(参照 ADR 0005 的依赖探测降级)。
+
+### 7.2 能力 → 产品映射
+
+| Codex 原生能力 | 本机验证状态 | 产品用途 | 归属 |
+| ---- | ---- | ---- | ---- |
+| pdf skill(poppler+python 工作流) | ✅ 已装,已评审 | 扫描件兜底、按需页面渲染 | §2.6/§2.7,ADR 0005 |
+| 图像输入 `codex exec -i` | ✅ CLI 支持 | 截图/图表理解 | §2.6 |
+| cheap model `--model` | ✅ 已在用 | digest 压缩、轻量 turn | ADR 0004,已落地 |
+| shell + git(源码阅读) | ✅ 核心能力 | 论文代码库 clone 与分析 | 执行顺序 12 |
+| playwright skill / browser_use | ✅ 已装 / stable 启用 | 论文 landing page、Papers-with-Code、代码 repo 发现;关键论文网络检索 | §7.3 论文发现 |
+| MCP 服务器(`codex mcp add`) | ✅ CLI 支持 | arXiv/Semantic Scholar 检索;Notion 投影同步 | §7.3/§7.4 |
+| 定时调度 | ❌ Codex 无常驻调度 | 由插件/OS scheduler 触发 `codex exec` 巡检 | §7.3,受 §4.3 约束 |
+
+### 7.3 论文发现与定时巡检(Paper Discovery)
+
+- 用户定义关注方向(可从 Topic Note 或 Vault 高频主题推导),插件定时(或手动)触发一个只读 Codex turn,经 browser_use/MCP 检索新论文。
+- 产出进入**建议收件箱**(suggestion inbox): 候选论文 + 与 Vault 已有记录的关联理由。受 §4.3 谨慎主动性约束——只产生建议,不静默写库、不自动下载。
+- 用户采纳后走正常入库路径: 加入 Zotero → 建 Paper Directory → 冷启动建档。
+
+### 7.4 Notion 等外部系统联动
+
+- 方向: **单向投影优先**。把 Knowledge Surface / Topic Note / Living Survey 发布到 Notion 供分享与移动端阅读;Vault 保持唯一可信源。
+- 实现候选: Notion MCP server,由 Codex 在用户显式触发的「发布」turn 中执行。
+- 双向同步(Notion 笔记回流 Vault)是独立的大决策,需要单独 ADR,默认不做。
+
+## 8. 进展记录
+
+- **2026-07-10** Vault 远程托管规划入档(§2.8): 确认 git 为整 Vault 级单仓库(层级正确,保持);发现实际偏差——`.logs/` 被追踪(`.gitignore` 仅 `*/code/`),需加固 + 存量 untrack;托管默认 private 仓库(text.txt 版权/conversations 隐私),V1 单机单写 + 手动 push,多机 merge 留待独立 ADR。执行顺序新增 9b。
+- **2026-07-10** Codex 能力面撬动策略入档(§7): 接入判据四问(Vault 价值/真相源边界/配置边界/降级路径),本机验证的能力清单(skills、MCP、browser_use/computer_use stable、图像输入、模型路由)与产品映射,论文发现建议收件箱(§7.3)与 Notion 单向投影(§7.4)进入执行顺序 15/16。ADR 0005 定位为该策略的第一个实例。
+- **2026-07-10** Knowledge Surface 质量验收基线建立: 新增 `docs/benchmarks/knowledge-surface-quality.md`,定义 100 分 rubric、硬失败门槛、七节/Abstract/append-bloat/关系格式/grounding 的验收方法,以及基于 Codex activity 的 Knowledge reuse rate(`M-only`/`M→T`/`T-first`/`No-read`)。页码与 context dogfooding 协议扩展为 3–5 篇论文 × fresh/resume/digest 的固定提示词和证据矩阵;真实 Zotero 点击结果仍待人工填写,不以单测替代。
+- **2026-07-10** ADR 0005(分层 PDF 解析)落定: PDFWorker 确定性抽取保持 `text.txt` 唯一默认写入路径;Codex pdf-skill(实为 poppler+python prompt 工作流,非内置解析器)定位为 opt-in 增强层——扫描件兜底(§2.7)与图表理解(§2.6)——机械校验 + `parserSource` 溯源 + 依赖探测降级。执行顺序表重排: dogfooding 验证与 Knowledge Surface 质量验收机制前置,源码抓取分析从 deferred 提升。
 - **2026-07** 页码证据 chip 落地: `src/services/page-evidence.ts` 纯解析层(`[page N]` → 分段),`src/modules/page-jump.ts` reader 跳页适配(navigate → internalReader → PDFViewerApplication 分级 fallback),sidebar 渲染 chip(跳过 pre/code/a,Knowledge review 块 Evidence 同样 chip 化),不可跳转显示禁用态且点击可自愈重判。dogfooding 清单与 token/latency、digest 质量记录表见 `docs/benchmarks/page-evidence-dogfooding.md`。
 - **2026-07** `76d5fbd` Research Turn Orchestration 抽离: `src/services/research-turn/`(orchestrator/prompt/activity/relationships)承接 Codex/Vault turn 生命周期,`sidebar.ts` 回归 UI 职责;条件化上下文注入(resume 不注入 digest/recent);compact 后清空 `codexThreadId`;resume 非超时失败降级 fresh thread 重试一次;`message-format.ts` 中立模块消除分层倒置。61 个单测覆盖。
-- **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(70% 提示 / 85% 自动压缩,cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型上下文窗口,per-turn token usage 统计与前端指标,compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。遗留项见 §2.5。
+- **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型窗口元数据,per-turn token usage 统计,manual compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。原 70% 提示 / 85% 自动压缩因误用累计 `input_tokens` 已在 dogfooding 中撤回,遗留项见 §2.5。

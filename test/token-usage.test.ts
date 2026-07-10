@@ -14,7 +14,7 @@ describe("formatTokenCount", () => {
 });
 
 describe("formatCodexUsageLine", () => {
-  it("formats Codex context usage with a known window", () => {
+  it("formats compact per-turn usage without claiming context occupancy", () => {
     expect(
       formatCodexUsageLine({
         promptTokens: 38200,
@@ -24,29 +24,35 @@ describe("formatCodexUsageLine", () => {
         effectiveContextWindowTokens: 128000,
         contextUsedPercent: 29.8,
       }),
-    ).toBe("Context 38.2k / 128k (29.8%) · cached 31k · out 2.1k · reasoning 1.4k");
+    ).toBe("in 38.2k · cache 31k · out 2.1k · think 1.4k");
   });
 
-  it("does not invent a percent when the window is unknown", () => {
+  it("uses the same simple labels when the window is unknown", () => {
     expect(
       formatCodexUsageLine({
         promptTokens: 38200,
         completionTokens: 2100,
         cachedInputTokens: 31000,
       }),
-    ).toBe("Context input 38.2k · cached 31k · out 2.1k · window unknown");
+    ).toBe("in 38.2k · cache 31k · out 2.1k");
   });
 });
 
 describe("buildCodexUsageTitle", () => {
   it("surfaces model and context metadata", () => {
-    expect(
-      buildCodexUsageTitle({
-        modelSlug: "gpt-5.5",
-        contextSource: "codex-config",
-        contextWindowTokens: 272000,
-        effectiveContextWindowTokens: 258400,
-      }),
-    ).toContain("Model: gpt-5.5");
+    const title = buildCodexUsageTitle({
+      promptTokens: 38200,
+      cachedInputTokens: 31000,
+      completionTokens: 2100,
+      reasoningTokens: 1400,
+      contextUsedPercent: 29.8,
+      modelSlug: "gpt-5.5",
+      contextSource: "codex-config",
+      contextWindowTokens: 272000,
+      effectiveContextWindowTokens: 258400,
+    });
+    expect(title).toContain("Turn input (cumulative): 38200");
+    expect(title).toContain("Context usage: unavailable");
+    expect(title).toContain("Model: gpt-5.5");
   });
 });
