@@ -116,4 +116,34 @@ describe("runPaperColdStart", () => {
     expect(result.quality.status).toBe("failed");
     expect(result.quality.coreSections.missing).toContain("Method");
   });
+
+  it("uses a second fresh turn to deepen Insight when requested", async () => {
+    let memory = completedMemory;
+    const prompts: string[] = [];
+    const deps: PaperColdStartDeps = {
+      ensurePaperVault: async () => ({}) as any,
+      readPaperMemory: async () => memory,
+      writePaperMemory: async (_key, value) => {
+        memory = value;
+      },
+      runCodexTurn: async (input) => {
+        prompts.push(input.prompt);
+        return { content: "Done.", reasoning: "", threadId: "cold" };
+      },
+      refreshPaperRecordProjection: async () => [],
+      commitVaultChanges: async () => true,
+    };
+    await runPaperColdStart(
+      {
+        paper,
+        pdfItemId: 10,
+        model: "cheap-model",
+        deepenInsight: true,
+      },
+      {},
+      deps,
+    );
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("Deepen the Insight section");
+  });
 });

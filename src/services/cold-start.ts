@@ -19,6 +19,8 @@ export type PaperColdStartRequest = {
   paper: PaperVaultMeta;
   pdfItemId: number;
   model?: string;
+  deepenInsight?: boolean;
+  insightModel?: string;
 };
 
 export type PaperColdStartEvents = {
@@ -70,6 +72,17 @@ export async function runPaperColdStart(
     onStatus: events.onStatus,
     onProcess: events.onProcess,
   } satisfies CodexTurnInput);
+  if (request.deepenInsight) {
+    events.onStatus?.("Deepening the paper Insight...");
+    await deps.runCodexTurn({
+      prompt: buildInsightPrompt(request.paper),
+      model: request.insightModel,
+      fallbackToDefaultModel: request.insightModel ? false : undefined,
+      sandbox: "workspace-write",
+      onStatus: events.onStatus,
+      onProcess: events.onProcess,
+    } satisfies CodexTurnInput);
+  }
 
   let after = await deps.readPaperMemory(request.paper.itemKey);
   const sourceAbstract = String(request.paper.abstract || "").trim();
@@ -95,6 +108,18 @@ export async function runPaperColdStart(
     `initialize: ${request.paper.itemKey}`,
   );
   return { quality, committed };
+}
+
+function buildInsightPrompt(paper: PaperVaultMeta): string {
+  return `Deepen the Insight section of the Paper Knowledge Record for ${paper.itemKey}.
+
+Read ${paper.itemKey}/memory.md and ${paper.itemKey}/text.txt.
+Rewrite only the ## Insight section so it explains the paper-grounded reason the method works or matters.
+Preserve YAML frontmatter, Abstract, all other sections, and Reader Thinking.
+Use [page N] evidence where useful.
+Do not edit record.json or conversation logs.
+
+Return a short confirmation after the file is updated.`;
 }
 
 function buildColdStartPrompt(paper: PaperVaultMeta): string {

@@ -12,6 +12,11 @@ import {
 } from "./modules/sidebar";
 import { buildReaderPopup, updateReaderPopup } from "./modules/popup";
 import { chatStore } from "./services/chat-store";
+import { coldStartQueue } from "./services/cold-start-queue";
+import {
+  registerBatchColdStartMenu,
+  unregisterBatchColdStartMenu,
+} from "./modules/batch-cold-start-menu";
 let tabNotifierID: string | null = null;
 
 async function onStartup() {
@@ -28,6 +33,7 @@ async function onStartup() {
   registerPrefsWindow();
   registerReaderInitializer();
   await chatStore.init();
+  await coldStartQueue.init();
   registerAgentSection();
 
   try {
@@ -82,6 +88,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     );
     win.document.documentElement.appendChild(katexLink);
   }
+  registerBatchColdStartMenu(win);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
@@ -92,6 +99,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
       ?.remove();
     win.document.querySelector(`#${config.addonRef}-panel-style`)?.remove();
     win.document.querySelector(`#${config.addonRef}-katex-style`)?.remove();
+    unregisterBatchColdStartMenu(win);
   } catch (_e) {
     // Window may already be destroyed
   }
@@ -99,6 +107,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 async function onShutdown() {
   addon.data.alive = false;
+  await coldStartQueue.cancel();
   await chatStore.flushAll();
   if (tabNotifierID) {
     try {
