@@ -98,6 +98,8 @@
 - 点击 chip 跳转到 PDF 对应页。
 - Evidence Pointers 与 Semantic Relationship 的 `Evidence:` 字段复用同一页码格式。
 
+**前置缺口(2026-07-10 审查发现)**: 真实 Vault 中 `text.txt` 均无 `[page N]` 标记——PDF.js 结构化解析在运行时从未成功(每页 getTextContent 为空,疑似 Xray 边界问题,见 `.logs` 的 `pdf-text-empty-pdfjs`),实际全部走 PDFWorker 兜底。PDFWorker 文本自带 `\f` 分页符且与印刷页码一一对应,应在兜底路径按 `\f` 切分并补 `[page N]` 标记,并对无标记的存量 `text.txt` 做一次性强制刷新;否则 Codex 无页码依据,chip 无法通过验收。
+
 验收:
 
 - 从 `text.txt` 页码标记到回答页码 chip 的路径可用。
