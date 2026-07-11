@@ -24,7 +24,7 @@ describe("formatCodexUsageLine", () => {
         effectiveContextWindowTokens: 128000,
         contextUsedPercent: 29.8,
       }),
-    ).toBe("in 38.2k · cache 31k · out 2.1k · think 1.4k");
+    ).toBe("in 38.2k · cache 31k · out 2.1k · think 1.4k tok");
   });
 
   it("uses the same simple labels when the window is unknown", () => {

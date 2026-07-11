@@ -10,7 +10,7 @@ export function formatCodexUsageLine(usage: TokenUsage): string {
   if (input > 0) parts.push(`in ${formatTokenCount(input)}`);
   if (cached > 0) parts.push(`cache ${formatTokenCount(cached)}`);
   if (output > 0) parts.push(`out ${formatTokenCount(output)}`);
-  if (reasoning > 0) parts.push(`think ${formatTokenCount(reasoning)}`);
+  if (reasoning > 0) parts.push(`think ${formatTokenCount(reasoning)} tok`);
 
   if (parts.length) return parts.join(" · ");
 

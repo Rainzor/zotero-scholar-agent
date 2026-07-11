@@ -544,8 +544,8 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   sort.id = "zoteroagent-memory-sort";
   sort.className = "zoteroagent-memory-sort";
   for (const [value, label] of [
-    ["title", "Title"],
-    ["rating", "Rating"],
+    ["title", "Sort: Title"],
+    ["rating", "Sort: Rating"],
   ]) {
     const option = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
     option.value = value;
