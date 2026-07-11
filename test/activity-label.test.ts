@@ -28,6 +28,38 @@ describe("formatActivityLabel", () => {
       formatActivityLabel(
         "python very-long-custom-script.py --with-many --unfamiliar --arguments",
       ),
-    ).toBe("Run command: python very-long-custom-script.py --with-many --unfamiliar --arguments");
+    ).toBe(
+      "Run command: python very-long-custom-script.py --with-many --unfamiliar --arguments",
+    );
+  });
+
+  it("makes every step in an 11-step research run readable", () => {
+    const labels = [
+      "sed -n '1,80p' PAPER/text.txt",
+      "sed -n '81,160p' PAPER/text.txt",
+      "rg -n 'evaluation' PAPER/text.txt",
+      "cat PAPER/memory.md",
+      "ls PAPER",
+      "git status --short",
+      "git diff -- PAPER/memory.md",
+      "git log -1 --oneline",
+      "sed -n '160,240p' PAPER/text.txt",
+      "rg -n 'limitation' PAPER/text.txt",
+      "python check_quality.py PAPER/memory.md",
+    ].map(formatActivityLabel);
+
+    expect(labels).toEqual([
+      "Read text.txt (lines 1–80)",
+      "Read text.txt (lines 81–160)",
+      'Search text.txt for "evaluation"',
+      "Read memory.md",
+      "List files in PAPER",
+      "Check git status",
+      "Review git changes",
+      "Run git command",
+      "Read text.txt (lines 160–240)",
+      'Search text.txt for "limitation"',
+      "Run command: python check_quality.py PAPER/memory.md",
+    ]);
   });
 });

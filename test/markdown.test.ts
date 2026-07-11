@@ -16,4 +16,14 @@ describe("renderMarkdown", () => {
     expect(html).toContain('href="http://memory.md"');
     expect(html).not.toContain('title="memory.md"');
   });
+
+  it("escapes ordinary HTML while rendering a Vault memory link", () => {
+    const html = renderMarkdown(
+      '<img src=x onerror="alert(1)"> 2HMS9JJX/memory.md',
+    );
+
+    expect(html).toContain("&lt;img");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('href="2HMS9JJX/memory.md"');
+  });
 });

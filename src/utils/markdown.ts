@@ -28,10 +28,12 @@ md.renderer.rules.text = (tokens, idx) => {
     isVaultMemoryReference(previous.attrGet("href") || "");
   if (linkedPath && isVaultMemoryReference(token.content)) return "memory.md";
 
-  return token.content.replace(vaultMemoryReference, (reference) => {
-    const escaped = md.utils.escapeHtml(reference);
-    return `<a href="${escaped}" title="${escaped}">memory.md</a>`;
-  });
+  return md.utils
+    .escapeHtml(token.content)
+    .replace(vaultMemoryReference, (reference) => {
+      const escaped = md.utils.escapeHtml(reference);
+      return `<a href="${escaped}" title="${escaped}">memory.md</a>`;
+    });
 };
 
 md.use(texmath, {
