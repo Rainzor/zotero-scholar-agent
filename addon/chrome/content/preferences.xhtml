@@ -10,69 +10,6 @@
   onload="Zotero.__addonInstance__?.hooks?.onPrefsLoad?.(event)"
 >
   <groupbox>
-    <label><html:h2 data-l10n-id="pref-codex-title"></html:h2></label>
-    <description data-l10n-id="pref-codex-description"></description>
-    <hbox align="center">
-      <label data-l10n-id="pref-codex-path"></label>
-      <html:input
-        id="__addonRef__-codexPath"
-        type="text"
-        placeholder="/opt/homebrew/bin/codex"
-      ></html:input>
-    </hbox>
-    <hbox align="center">
-      <label data-l10n-id="pref-codex-model"></label>
-      <html:input
-        id="__addonRef__-codexModelSlug"
-        type="text"
-        placeholder="gpt-5.5"
-      ></html:input>
-      <label data-l10n-id="pref-codex-contextWindow"></label>
-      <html:input
-        id="__addonRef__-codexContextWindow"
-        type="number"
-        min="1"
-        step="1"
-        placeholder="128000"
-      ></html:input>
-    </hbox>
-    <hbox align="center">
-      <label data-l10n-id="pref-codex-cheapModel"></label>
-      <html:input
-        id="__addonRef__-codexCheapModelSlug"
-        type="text"
-        placeholder="gpt-5.5"
-      ></html:input>
-      <label data-l10n-id="pref-codex-coldStartEffort"></label>
-      <html:select id="__addonRef__-codexColdStartEffort">
-        <html:option
-          value=""
-          data-l10n-id="pref-codex-coldStartEffort-default"
-        ></html:option>
-        <html:option value="minimal">minimal</html:option>
-        <html:option value="low">low</html:option>
-        <html:option value="medium">medium</html:option>
-        <html:option value="high">high</html:option>
-        <html:option value="xhigh">xhigh</html:option>
-      </html:select>
-    </hbox>
-    <hbox align="center">
-      <button
-        id="__addonRef__-codexSave"
-        data-l10n-id="pref-codex-save"
-      ></button>
-      <button
-        id="__addonRef__-codexTest"
-        data-l10n-id="pref-codex-test"
-      ></button>
-    </hbox>
-    <html:div
-      id="__addonRef__-codexStatus"
-      class="zoteroagent-pref-status"
-    ></html:div>
-  </groupbox>
-
-  <groupbox>
     <label><html:h2 data-l10n-id="pref-vault-title"></html:h2></label>
     <description data-l10n-id="pref-vault-description"></description>
     <hbox align="center">
@@ -82,11 +19,9 @@
         type="text"
         placeholder="~/papers"
       ></html:input>
-    </hbox>
-    <hbox align="center">
       <button
-        id="__addonRef__-vaultSave"
-        data-l10n-id="pref-vault-save"
+        id="__addonRef__-vaultBrowse"
+        data-l10n-id="pref-vault-browse"
       ></button>
       <button
         id="__addonRef__-vaultDefault"
@@ -100,7 +35,81 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2 data-l10n-id="pref-codex-title"></html:h2></label>
+    <description data-l10n-id="pref-codex-description"></description>
+    <hbox align="center">
+      <label data-l10n-id="pref-codex-path"></label>
+      <html:input
+        id="__addonRef__-codexPath"
+        type="text"
+        placeholder="/opt/homebrew/bin/codex"
+      ></html:input>
+      <button
+        id="__addonRef__-codexBrowse"
+        data-l10n-id="pref-codex-browse"
+      ></button>
+    </hbox>
+    <hbox align="center">
+      <button
+        id="__addonRef__-codexDetect"
+        data-l10n-id="pref-codex-detect"
+      ></button>
+      <button
+        id="__addonRef__-codexTest"
+        data-l10n-id="pref-codex-test"
+      ></button>
+    </hbox>
+    <html:div
+      id="__addonRef__-codexStatus"
+      class="zoteroagent-pref-status"
+    ></html:div>
+    <html:details class="zoteroagent-pref-advanced">
+      <html:summary
+        class="zoteroagent-pref-advanced-summary"
+        data-l10n-id="pref-codex-advanced"
+      ></html:summary>
+      <hbox align="center">
+        <label data-l10n-id="pref-codex-model"></label>
+        <html:input
+          id="__addonRef__-codexModelSlug"
+          type="text"
+          placeholder="gpt-5.5"
+        ></html:input>
+        <label data-l10n-id="pref-codex-contextWindow"></label>
+        <html:input
+          id="__addonRef__-codexContextWindow"
+          type="number"
+          min="1"
+          step="1"
+          placeholder="128000"
+        ></html:input>
+      </hbox>
+      <hbox align="center">
+        <label data-l10n-id="pref-codex-cheapModel"></label>
+        <html:input
+          id="__addonRef__-codexCheapModelSlug"
+          type="text"
+          placeholder="gpt-5.5"
+        ></html:input>
+        <label data-l10n-id="pref-codex-coldStartEffort"></label>
+        <html:select id="__addonRef__-codexColdStartEffort">
+          <html:option
+            value=""
+            data-l10n-id="pref-codex-coldStartEffort-default"
+          ></html:option>
+          <html:option value="minimal">minimal</html:option>
+          <html:option value="low">low</html:option>
+          <html:option value="medium">medium</html:option>
+          <html:option value="high">high</html:option>
+          <html:option value="xhigh">xhigh</html:option>
+        </html:select>
+      </hbox>
+    </html:details>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2 data-l10n-id="pref-services-title"></html:h2></label>
+    <description data-l10n-id="pref-services-description"></description>
     <html:div id="__addonRef__-services-list"></html:div>
     <hbox align="center">
       <button id="__addonRef__-svcAdd" data-l10n-id="pref-svc-add"></button>
@@ -113,6 +122,21 @@
         data-l10n-id="pref-svc-setDefault"
       ></button>
     </hbox>
+    <html:div
+      id="__addonRef__-svcRemoveConfirm"
+      class="zoteroagent-pref-confirm"
+      style="display: none"
+    >
+      <html:span data-l10n-id="pref-svc-removeConfirm-text"></html:span>
+      <button
+        id="__addonRef__-svcRemoveConfirmCancel"
+        data-l10n-id="pref-svc-removeConfirm-cancel"
+      ></button>
+      <button
+        id="__addonRef__-svcRemoveConfirmAction"
+        data-l10n-id="pref-svc-removeConfirm-action"
+      ></button>
+    </html:div>
     <vbox id="__addonRef__-svcEditor">
       <hbox align="center">
         <label data-l10n-id="pref-svc-provider"></label>
@@ -144,6 +168,10 @@
       <hbox align="center">
         <label data-l10n-id="pref-svc-apiKey"></label>
         <html:input id="__addonRef__-svcApiKey" type="password"></html:input>
+        <button
+          id="__addonRef__-svcApiKeyToggle"
+          data-l10n-id="pref-svc-apiKey-show"
+        ></button>
       </hbox>
       <hbox align="center">
         <label data-l10n-id="pref-svc-model"></label>
@@ -156,9 +184,12 @@
         ></html:input>
       </hbox>
       <hbox align="center">
-        <button id="__addonRef__-svcSave" data-l10n-id="pref-svc-save"></button>
         <button id="__addonRef__-svcTest" data-l10n-id="pref-svc-test"></button>
       </hbox>
+      <html:div
+        id="__addonRef__-svcStatus"
+        class="zoteroagent-pref-status"
+      ></html:div>
     </vbox>
   </groupbox>
 

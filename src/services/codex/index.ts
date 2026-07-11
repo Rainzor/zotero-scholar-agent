@@ -14,6 +14,7 @@ export {
 
 export {
   CODEX_PATH_PREF,
+  detectCodexBinary,
   getConfiguredCodexPath,
   resolveCodexBinary,
   setConfiguredCodexPath,

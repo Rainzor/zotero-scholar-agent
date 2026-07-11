@@ -38,10 +38,7 @@ import {
 import { getIconSvg, insertSvgMarkup, setIconButton } from "./sidebar/icons";
 import { showUndoToast } from "./sidebar/feedback";
 import { autoResizeTextarea } from "./sidebar/composer";
-import {
-  isNearBottom,
-  scrollToBottomIfPinned,
-} from "./sidebar/scroll";
+import { isNearBottom, scrollToBottomIfPinned } from "./sidebar/scroll";
 import {
   bindSessionControls,
   createSessionActionElements,
@@ -570,6 +567,7 @@ function buildMemoryPanel(doc: Document): HTMLElement {
 }
 
 function switchChatView(body: HTMLElement, mode: "chat" | "memory") {
+  hideQuotePopup(body);
   body.dataset.chatMode = mode;
   const isMemory = mode === "memory";
   const setDisplay = (sel: string, value: string) => {
@@ -1317,7 +1315,10 @@ function bindChatEvents(body: HTMLElement) {
       const select = event.target as HTMLSelectElement;
       chatStore.updateSessionModel(itemId, select.value, session.sessionId);
       updateModelSelectorTitle(select, select.value);
-      void syncModelControls(body, itemId, { isGenerating: () => isGenerating, isSafeBody });
+      void syncModelControls(body, itemId, {
+        isGenerating: () => isGenerating,
+        isSafeBody,
+      });
     });
   body
     .querySelector("#zoteroagent-reasoning-select")
@@ -1546,7 +1547,12 @@ async function compactSessionContext(
   if (!session || session.messages.length === 0) return;
   if (body.dataset.contextDigestBusy === "true") return;
   body.dataset.contextDigestBusy = "true";
-  renderDigestStatus(body, itemId, isGenerating, "Compacting hidden context...");
+  renderDigestStatus(
+    body,
+    itemId,
+    isGenerating,
+    "Compacting hidden context...",
+  );
   const paperMeta = getPaperMeta(itemId);
   const isActivePane = () =>
     isSafeBody(body) && Number(body.dataset.itemID) === itemId;
@@ -1559,7 +1565,8 @@ async function compactSessionContext(
       previousDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
       onStatus: (text) => {
         if (trigger === "auto" && isActivePane()) showAgentStatus(body, text);
-        if (isActivePane()) renderDigestStatus(body, itemId, isGenerating, text);
+        if (isActivePane())
+          renderDigestStatus(body, itemId, isGenerating, text);
       },
     });
     chatStore.updateContextDigest(itemId, digest, session.sessionId);
@@ -3340,7 +3347,11 @@ function syncLayoutState(body: HTMLElement, itemId: number) {
   messages.style.flexDirection = "column";
   inputArea.style.display = "flex";
   if (itemId > 0) renderDigestStatus(body, itemId, isGenerating);
-  if (itemId > 0) void syncModelControls(body, itemId, { isGenerating: () => isGenerating, isSafeBody });
+  if (itemId > 0)
+    void syncModelControls(body, itemId, {
+      isGenerating: () => isGenerating,
+      isSafeBody,
+    });
 }
 
 function parseUserContent(content: string): {

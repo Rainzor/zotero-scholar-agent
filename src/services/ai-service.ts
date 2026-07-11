@@ -1,6 +1,11 @@
 import { getActiveService } from "../utils/services";
 import { getPreset } from "../utils/provider-presets";
-import type { ProviderKey, ApiFormat, AuthType } from "../addon";
+import type {
+  ProviderKey,
+  ApiFormat,
+  AuthType,
+  ServiceProvider,
+} from "../addon";
 
 type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -25,9 +30,10 @@ type ChatOptions = {
   timeoutMs?: number;
   model?: string;
   maxTokens?: number;
+  configOverride?: ServiceConfig;
 };
 
-type ServiceConfig = {
+export type ServiceConfig = {
   apiUrl: string;
   apiKey: string;
   model: string;
@@ -36,18 +42,23 @@ type ServiceConfig = {
   authType: AuthType;
 };
 
+export function buildConfigFromService(
+  svc: ServiceProvider | undefined,
+): ServiceConfig {
+  const preset = getPreset(svc?.provider || "custom");
+  return {
+    apiUrl: svc?.apiUrl || "",
+    apiKey: svc?.apiKey || "",
+    model: svc?.model || "",
+    provider: svc?.provider || "custom",
+    apiFormat: svc?.apiFormat || preset?.apiFormat || "chat-completions",
+    authType: preset?.authType || "bearer",
+  };
+}
+
 export class AIService {
   static getConfig(): ServiceConfig {
-    const svc = getActiveService();
-    const preset = getPreset(svc?.provider || "custom");
-    return {
-      apiUrl: svc?.apiUrl || "",
-      apiKey: svc?.apiKey || "",
-      model: svc?.model || "",
-      provider: svc?.provider || "custom",
-      apiFormat: svc?.apiFormat || preset?.apiFormat || "chat-completions",
-      authType: preset?.authType || "bearer",
-    };
+    return buildConfigFromService(getActiveService());
   }
 
   private static supportsThinking(provider: ProviderKey): boolean {
@@ -74,9 +85,7 @@ export class AIService {
           ? "/messages"
           : "/chat/completions";
     const defaultVersionedSuffix =
-      apiFormat === "anthropic"
-        ? "/v1/messages"
-        : `/v1${targetSuffix}`;
+      apiFormat === "anthropic" ? "/v1/messages" : `/v1${targetSuffix}`;
     const knownEndpointPattern =
       /\/(?:chat\/completions|responses|embeddings|files|models|messages)$/i;
     const versionPathPattern = /\/v\d+(?:beta)?$/i;
@@ -337,8 +346,9 @@ export class AIService {
       timeoutMs,
       model: modelOverride,
       maxTokens,
+      configOverride,
     } = options;
-    const cfg = AIService.getConfig();
+    const cfg = configOverride || AIService.getConfig();
     const requestUrl = AIService.resolveApiUrl(cfg.apiUrl, cfg.apiFormat);
     if (!requestUrl || !cfg.apiKey) {
       throw new Error(
@@ -453,6 +463,13 @@ export class AIService {
 
     onChunk?.({ ...state });
     return state;
+  }
+
+  static async testConnection(config: ServiceConfig): Promise<void> {
+    await AIService.chat(
+      [{ role: "user", content: "Reply with exactly: OK" }],
+      { stream: false, configOverride: config },
+    );
   }
 
   private static extractUsageFromSSE(

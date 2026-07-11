@@ -43,28 +43,114 @@ export async function resolveCodexBinary(
     if (await isWorkingCodexBinary(configured)) {
       return cache({ path: configured, source: "preference" });
     }
-    throw new Error(`Configured codex path is not executable or failed --version: ${configured}`);
+    throw new Error(
+      `Configured codex path is not executable or failed --version: ${configured}`,
+    );
   }
 
-  const shellPaths = await resolveViaLoginShell();
-  for (const shellPath of shellPaths) {
-    if (await isWorkingCodexBinary(shellPath)) {
-      return cache({ path: shellPath, source: "login-shell" });
-    }
-  }
-
-  for (const candidate of getPathCandidates()) {
-    if (await isWorkingCodexBinary(candidate.path)) {
-      return cache(candidate);
-    }
-  }
+  const found = await findByAutoDetection();
+  if (found) return cache(found);
 
   throw new Error(
     "Could not find the codex CLI. Set an absolute codex path in Zotero Agent preferences.",
   );
 }
 
-export async function testCodexBinary(path?: string): Promise<CodexVersionResult> {
+/**
+ * Auto-detects a codex binary, ignoring any configured path. Used by the
+ * preferences "Detect" action so it can recover from a previously persisted
+ * path that is no longer valid (e.g. an fnm multishell temp-directory
+ * symlink from a since-closed shell session).
+ */
+export async function detectCodexBinary(): Promise<CodexVersionResult> {
+  try {
+    const found = await findByAutoDetection();
+    if (!found) {
+      return {
+        ok: false,
+        path: "",
+        version: "",
+        error: "Could not find the codex CLI via auto-detection.",
+      };
+    }
+    const version = await readCodexVersion(found.path);
+    if (!version.ok) {
+      return {
+        ok: false,
+        path: found.path,
+        version: "",
+        source: found.source,
+        error: version.error || `codex --version failed: ${found.path}`,
+      };
+    }
+    cache(found);
+    return {
+      ok: true,
+      path: found.path,
+      version: version.version,
+      source: found.source,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      path: "",
+      version: "",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function findByAutoDetection(): Promise<CodexPathResolution | null> {
+  const shellPaths = await resolveViaLoginShell();
+  for (const shellPath of shellPaths) {
+    if (await isWorkingCodexBinary(shellPath)) {
+      return {
+        path: await resolveStablePath(shellPath),
+        source: "login-shell",
+      };
+    }
+  }
+
+  for (const candidate of getPathCandidates()) {
+    if (await isWorkingCodexBinary(candidate.path)) {
+      return { ...candidate, path: await resolveStablePath(candidate.path) };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves symlinks (including ones in ancestor directories, e.g. fnm's
+ * per-shell `fnm_multishells/<pid>_.../bin/` temp dirs) to a stable absolute
+ * path. Falls back to the original path if resolution fails or the
+ * resolved target doesn't exist.
+ */
+async function resolveStablePath(path: string): Promise<string> {
+  const resolved = resolveRealPath(path);
+  if (resolved && resolved !== path && (await pathExists(resolved))) {
+    return resolved;
+  }
+  return path;
+}
+
+function resolveRealPath(path: string): string {
+  try {
+    const Cc = (globalThis as any).Components?.classes;
+    const Ci = (globalThis as any).Components?.interfaces;
+    if (!Cc || !Ci || !path) return path;
+    const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+    file.initWithPath(path);
+    file.normalize();
+    return file.path || path;
+  } catch {
+    return path;
+  }
+}
+
+export async function testCodexBinary(
+  path?: string,
+): Promise<CodexVersionResult> {
   try {
     const resolved = path
       ? { path: normalizePath(path), source: undefined }
@@ -124,7 +210,8 @@ async function readCodexVersion(
     return {
       ok: result.exitCode === 0 && Boolean(output),
       version: result.exitCode === 0 ? output : "",
-      error: result.exitCode === 0 ? undefined : output || "codex --version failed.",
+      error:
+        result.exitCode === 0 ? undefined : output || "codex --version failed.",
     };
   } catch (error) {
     return {
@@ -150,7 +237,9 @@ function getPathCandidates(): CodexPathResolution[] {
     candidates.push({ path: normalized, source });
   };
 
-  const pathEnv = String((globalThis as any).Services?.env?.get?.("PATH") || "");
+  const pathEnv = String(
+    (globalThis as any).Services?.env?.get?.("PATH") || "",
+  );
   for (const dir of pathEnv.split(":")) {
     if (dir.trim()) add(joinPath(dir.trim(), "codex"), "environment-path");
   }
@@ -174,7 +263,16 @@ async function resolveViaLoginShell(): Promise<string[]> {
   try {
     const result = await runLineProcess({
       command: shell,
-      arguments: ["-l", "-c", "where codex 2>/dev/null || command -v codex"],
+      // -i forces rc-file sourcing (.zshrc/.bashrc) even for a single -c
+      // command. Version managers (fnm, nvm, etc.) usually wire PATH from
+      // there, not from the login-only profile files -l alone would source,
+      // so without -i this would silently miss anything they manage.
+      arguments: [
+        "-i",
+        "-l",
+        "-c",
+        "where codex 2>/dev/null || command -v codex",
+      ],
       timeoutMs: 15000,
     });
     if (result.exitCode !== 0) return [];
@@ -224,23 +322,29 @@ function normalizePath(path: string): string {
   return trimmed;
 }
 
-function extractCodexPath(input: string): string {
+export function extractCodexPath(input: string): string {
   // Users often paste the whole terminal transcript (`where codex`, prompts,
   // errors, multiple candidates). Prefer the first absolute path ending in
-  // `/codex` instead of treating the whole transcript as one invalid path.
-  const matches = input.match(/\/[^\s'"`<>|]+\/codex\b/g) || [];
+  // `/codex` (optionally with a script extension, e.g. an npm bin symlink
+  // resolved to its real `codex.js`/`codex.mjs`/`codex.cjs` target) instead
+  // of treating the whole transcript as one invalid path.
+  const matches = input.match(/\/[^\s'"`<>|]+\/codex(?:\.[cm]?js)?\b/g) || [];
   return matches[0] || "";
 }
 
 function getPreferredShell(): string {
-  const envShell = String((globalThis as any).Services?.env?.get?.("SHELL") || "");
+  const envShell = String(
+    (globalThis as any).Services?.env?.get?.("SHELL") || "",
+  );
   if (envShell.startsWith("/")) return envShell;
   if ((Zotero as any).isMac) return "/bin/zsh";
   return "/bin/bash";
 }
 
 function getHomeDir(): string {
-  const envHome = String((globalThis as any).Services?.env?.get?.("HOME") || "");
+  const envHome = String(
+    (globalThis as any).Services?.env?.get?.("HOME") || "",
+  );
   if (envHome) return envHome;
   try {
     const dirsvc = (globalThis as any).Services?.dirsvc;
@@ -274,7 +378,5 @@ function joinPath(...parts: string[]): string {
       // process. Fall back to string joining for candidate construction.
     }
   }
-  return filtered
-    .join("/")
-    .replace(/\/+/g, "/");
+  return filtered.join("/").replace(/\/+/g, "/");
 }
