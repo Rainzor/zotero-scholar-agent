@@ -61,7 +61,11 @@ import {
 import { filterEmptyMarkdownSections } from "./sidebar/memory-markdown";
 import type { ChatMessage, PaperContext, TokenUsage } from "../addon";
 import { chatStore } from "../services/chat-store";
-import { getZoteroPaperMeta } from "../services/zotero-paper-metadata";
+import {
+  getZoteroPaperMeta,
+  getZoteroPaperMetaByKey,
+  mergeVaultPaperMetadata,
+} from "../services/zotero-paper-metadata";
 import {
   listVaultPapers,
   readPaperMemory,
@@ -619,6 +623,9 @@ async function renderMemoryBrowse(body: HTMLElement) {
   let papers: PaperVaultMeta[] = [];
   try {
     papers = await listVaultPapers();
+    papers = papers.map((paper) =>
+      mergeVaultPaperMetadata(paper, getZoteroPaperMetaByKey(paper.itemKey)),
+    );
   } catch (error) {
     host.appendChild(
       memoryNotice(doc, `Failed to read vault: ${String(error)}`),

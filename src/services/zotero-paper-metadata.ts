@@ -4,6 +4,50 @@ import type { ZoteroCollectionSignal } from "./knowledge-surface";
 export function getZoteroPaperMeta(itemId: number): PaperVaultMeta {
   const attachment = Zotero.Items.get(itemId) as any;
   if (!attachment) throw new Error(`Zotero item ${itemId} was not found.`);
+  return buildPaperMeta(attachment, itemId);
+}
+
+export function getZoteroPaperMetaByKey(
+  itemKey: string,
+): PaperVaultMeta | null {
+  const key = String(itemKey || "").trim();
+  if (!key) return null;
+  try {
+    const zotero = Zotero as any;
+    const libraryIds = (zotero.Libraries?.getAll?.() || [])
+      .map((library: any) => Number(library?.libraryID))
+      .filter(Boolean);
+    if (zotero.Libraries?.userLibraryID) {
+      libraryIds.unshift(Number(zotero.Libraries.userLibraryID));
+    }
+    for (const libraryId of new Set(libraryIds)) {
+      const item = zotero.Items?.getByLibraryAndKey?.(libraryId, key);
+      if (item) return buildPaperMeta(item, Number(item.id) || 0);
+    }
+  } catch (error) {
+    (globalThis as any).ztoolkit?.log?.(
+      "[Agent] Failed to look up Zotero paper metadata by key:",
+      error,
+    );
+  }
+  return null;
+}
+
+export function mergeVaultPaperMetadata(
+  paper: PaperVaultMeta,
+  live?: PaperVaultMeta | null,
+): PaperVaultMeta {
+  const title = preferredPaperTitle(live?.title, paper.title, paper.itemKey);
+  return {
+    ...paper,
+    itemId: live?.itemId || paper.itemId,
+    title,
+    creators: live?.creators || paper.creators,
+    year: live?.year || paper.year,
+  };
+}
+
+function buildPaperMeta(attachment: any, itemId: number): PaperVaultMeta {
   const source =
     Number(attachment.parentItemID) > 0
       ? (Zotero.Items.get(Number(attachment.parentItemID)) as any) || attachment
@@ -58,9 +102,27 @@ export function getZoteroPaperMeta(itemId: number): PaperVaultMeta {
   }
 }
 
-function getCollectionSignals(
-  item: any,
-): ZoteroCollectionSignal[] | undefined {
+function preferredPaperTitle(
+  liveTitle: string | undefined,
+  cachedTitle: string | undefined,
+  itemKey: string,
+): string {
+  for (const title of [liveTitle, cachedTitle]) {
+    const clean = String(title || "")
+      .replace(/\.pdf\s*$/i, "")
+      .trim();
+    if (clean && !isGenericAttachmentTitle(clean)) return clean;
+  }
+  return `Untitled paper (${itemKey})`;
+}
+
+function isGenericAttachmentTitle(title: string): boolean {
+  return ["full text pdf", "attachment", "pdf"].includes(
+    title.toLowerCase().replace(/\s+/g, " "),
+  );
+}
+
+function getCollectionSignals(item: any): ZoteroCollectionSignal[] | undefined {
   if (typeof item?.getCollections !== "function") return undefined;
   const ids = Array.isArray(item.getCollections()) ? item.getCollections() : [];
   return ids

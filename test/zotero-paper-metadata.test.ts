@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getZoteroPaperMeta } from "../src/services/zotero-paper-metadata";
+import {
+  getZoteroPaperMeta,
+  getZoteroPaperMetaByKey,
+  mergeVaultPaperMetadata,
+} from "../src/services/zotero-paper-metadata";
 
 const originalZotero = (globalThis as any).Zotero;
 
@@ -78,5 +82,70 @@ describe("getZoteroPaperMeta", () => {
       itemKey: "PDFKEY",
       title: "Paper",
     });
+  });
+
+  it("looks up a Vault attachment key across libraries and uses its parent metadata", () => {
+    const attachment = {
+      id: 10,
+      key: "PDFKEY",
+      parentItemID: 1,
+      isAttachment: () => true,
+    };
+    const parent = {
+      id: 1,
+      getField: (field: string) =>
+        ({ title: "Live title", date: "2026-04-01" })[field] || "",
+      getCreators: () => [{ firstName: "Live", lastName: "Author" }],
+    };
+    (globalThis as any).Zotero = {
+      Items: {
+        get: (id: number) =>
+          id === 1 ? parent : id === 10 ? attachment : null,
+        getByLibraryAndKey: (libraryID: number, key: string) =>
+          libraryID === 7 && key === "PDFKEY" ? attachment : false,
+      },
+      Libraries: { getAll: () => [{ libraryID: 1 }, { libraryID: 7 }] },
+    };
+
+    expect(getZoteroPaperMetaByKey("PDFKEY")).toMatchObject({
+      itemId: 10,
+      itemKey: "PDFKEY",
+      title: "Live title",
+      creators: "Live Author",
+      year: "2026",
+    });
+  });
+
+  it("prefers live metadata and cleans stale attachment-name fallbacks", () => {
+    expect(
+      mergeVaultPaperMetadata(
+        { itemId: 0, itemKey: "PDFKEY", title: "Full Text PDF" },
+        {
+          itemId: 10,
+          itemKey: "PDFKEY",
+          title: "Live title",
+          creators: "Live Author",
+          year: "2026",
+        },
+      ),
+    ).toMatchObject({
+      title: "Live title",
+      creators: "Live Author",
+      year: "2026",
+    });
+    expect(
+      mergeVaultPaperMetadata({
+        itemId: 0,
+        itemKey: "PDFKEY",
+        title: "stale-paper.pdf",
+      }),
+    ).toMatchObject({ title: "stale-paper" });
+    expect(
+      mergeVaultPaperMetadata({
+        itemId: 0,
+        itemKey: "PDFKEY",
+        title: "Full Text PDF",
+      }),
+    ).toMatchObject({ title: "Untitled paper (PDFKEY)" });
   });
 });
