@@ -74,6 +74,42 @@ npm run lint
 
 Run the narrowest useful verification after edits. For shared Codex/Vault logic, prefer adding or updating Vitest tests.
 
+## Delivery Pipeline Constraints
+
+For work organized under `docs/plans/`, treat each confirmed phase as a
+bounded product delivery, not a general cleanup opportunity.
+
+1. Define the phase boundary before editing: one user-visible goal, explicit
+   acceptance criteria, and explicit non-goals.
+2. Implement the smallest vertical slices that satisfy that phase. Add focused
+   tests at stable logic seams; do not invent UI implementation tests that the
+   runtime cannot support.
+3. Do not combine a user-visible feature, its acceptance fixes, and a
+   large-scale module refactor in one phase. Once the feature passes its
+   acceptance criteria, stop. Plan structural refactoring as a separate phase
+   with its own tests and review.
+4. Verify in this order before asking for product confirmation:
+   - targeted tests and type check;
+   - full `npm test`;
+   - `npm run build`;
+   - focused formatting/static checks;
+   - Zotero runtime checks for affected light/dark, narrow-width, keyboard,
+     and workflow states.
+5. Perform a bounded review against the active phase specification. Fix
+   blocking correctness, data-loss, accessibility, and acceptance failures.
+   Record non-blocking architecture opportunities for a later phase instead
+   of expanding the current one.
+6. Do not mark a phase `Confirmed` until the user has completed the requested
+   runtime acceptance checks. If code is implemented but awaiting that review,
+   state `Implemented; awaiting confirmation`.
+7. Make one intentional commit per confirmed phase. Its diff must exclude
+   unrelated pre-existing work. Do not commit while the phase is in the middle
+   of a refactor or while required verification is incomplete.
+
+When a phase is redirected or a new user request arrives, pause the current
+implementation, report the exact state (implemented, verified, and
+unverified), then update the phase boundary before resuming.
+
 ## Documentation Rules
 
 - Read `README.md`, `CONTEXT.md`, and `docs/adr/` before changing architecture.

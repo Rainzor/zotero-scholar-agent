@@ -37,8 +37,8 @@ Knowledge that is grounded in the paper itself: its problem, claims, method, evi
 _Avoid_: user idea, speculation, unsupported conclusion
 
 **Reader Thinking**:
-The user's and Codex-assisted understanding that emerges during reading: questions, critiques, analogies, inspirations, hypotheses, and next-step ideas. It belongs in the Paper Knowledge Record, but must not be presented as if the paper itself claimed it.
-_Avoid_: paper claim, experimental result
+The user's and Codex-assisted understanding that emerges during reading: questions, critiques, analogies, inspirations, hypotheses, and next-step ideas. It belongs in the Paper Knowledge Record, but must not be presented as if the paper itself claimed it. Per ADR 0011 its carrier is the per-paper `notes.md` — append-only, wording preserved, entries dated and attributed (`[user]` / `[agent, user-confirmed]`); it is separated from Paper-grounded Knowledge by file boundary, not by in-file labels.
+_Avoid_: paper claim, experimental result, a section inside `memory.md` (post-ADR-0011)
 
 **Library Connection**:
 A relationship between papers in the Knowledge Vault, such as support, contradiction, extension, method similarity, shared dataset, shared metric, or composability. These relationships can be written in the Knowledge Surface and later represented in a Structured Projection or graph.
@@ -61,8 +61,8 @@ A user-intent signal that authorizes the system to look for or create Library Co
 _Avoid_: automatic global linking, passive background inference
 
 **Knowledge Surface Core Sections**:
-The default high-signal reading structure for a Paper Knowledge Record: Abstract, Contribution, Problem, Method, Insight, Results, and Takeaways. Contribution is preferred over Summary because Abstract already covers short summary, while Contribution forces the record to capture the paper's new research value. Method and Insight are parallel concepts: Method describes what the paper does; Insight captures the key reason the method matters or works. These sections capture the paper's key readable value before adding Reader Thinking and Library Connections.
-_Avoid_: exhaustive transcript, raw section copy, rigid universal schema
+The high-signal close-reading structure for a Paper Knowledge Record — per ADR 0012 this defines the **L2 (close reading) template**, not a universal requirement: Abstract (plugin block), Contribution, Problem, Method, Insight, Results, and Takeaways. Contribution is preferred over Summary because Abstract already covers short summary, while Contribution forces the record to capture the paper's new research value. Method and Insight are parallel concepts: Method describes what the paper does; Insight captures the key reason the method matters or works. Lower tiers use lighter templates (L0 one-sentence card; L1 TL;DR/Contribution/Method skeleton/Takeaways).
+_Avoid_: exhaustive transcript, raw section copy, rigid universal schema, applying the L2 shape to every tier
 
 **Insight**:
 The paper-grounded core idea that explains why the method matters or works: a key assumption, structure, inductive bias, observation, or design principle from the paper. User-generated ideas inspired by the paper do not belong here; they belong under Reader Thinking.
@@ -128,6 +128,8 @@ _Avoid_: the agent, the model, the LLM
 - **Context Digest (RATIFIED):** long sidebar chats compact earlier visible turns into hidden session metadata. The full transcript remains visible; the digest is injected only for fresh-thread prompts with recent visible turns and is never appended to Conversation Logs or written into `memory.md`. Saving a digest clears the session's `codexThreadId` so the next turn starts fresh from compacted context.
 - **Resume fallback (RATIFIED):** if resuming an existing Codex thread fails without timing out, the research turn retries once as a fresh thread using hidden digest and recent visible messages.
 - **Layered PDF parsing (RATIFIED, ADR 0005):** PDFWorker deterministic extraction is the only writer of `text.txt` on the default path. Codex pdf-skill-based parsing (a poppler+python prompt workflow, not a built-in parser) is opt-in enrichment only: scanned-PDF fallback and on-demand figure/page rendering, gated by mechanical validation (page count, `[page N]` markers), recorded via `parserSource` in `text.meta.json`, with dependency probing and graceful degradation. Original PDFs still never enter the Vault.
+- **Write-discipline file split (RATIFIED, ADR 0011):** each per-paper file has one write discipline and one maintainer. `memory.md` = plugin-marked bibliography/abstract block (model read-only) + model rewrite-and-dedupe interpretation area; `notes.md` carries Reader Thinking (append-only, dated, attributed, agent entries user-confirmed); Evidence Pointers is no longer a maintained section — the plugin derives a page-anchor index from inline `[page N]` anchors into `record.json`. Ships as `knowledgeSurfaceVersion` 2 / `recordProjectionVersion` 3 with a one-time git-committed migration.
+- **Tiered engagement depth (RATIFIED, ADR 0012):** plugin-owned `tier` frontmatter (`L0`–`L3`, cold-start default `L1`) with tier-specific interpretation templates (the seven-section shape is the L2 template; `code-notes.md`/`experiments/` exist only at L3), optional `valueTypes` retrieval-routing vocabulary, rewrite-not-append transitions (agent-proposed upgrades need UI confirmation; L3 is user-initiated), tier-aware quality gates with a repair path, and minimal cognitive labels (`[claimed by paper]`/`[verified]` in Results/Insight; `[superseded by [[KEY]]]` instead of deletion). Per-paper structure freezes once 0011+0012 land.
 - Vault layout:
 
 ```
@@ -143,6 +145,7 @@ _Avoid_: the agent, the model, the LLM
     ├── figures/           # local screenshots and regenerable rendered pages (gitignored)
     ├── conversations/     # ② episodic logs, one file per session (human-facing)
     │   └── {sessionId}.md
+    ├── notes.md           # ② Reader Thinking carrier (ADR 0011): append-only, dated, attributed
     └── memory.md          # ③ Knowledge Surface for the Paper Knowledge Record
 ```
 

@@ -1,294 +1,594 @@
-# Roadmap — Zotero Scholar Agent
+# Roadmap - Zotero Scholar Agent
 
-> 状态: 活文档，随阶段推进更新。术语与 `CONTEXT.md` 保持一致：Knowledge Vault、Paper Knowledge Record、Knowledge Surface、Structured Projection、Paper Mention、Semantic Relationship、In-Focus Paper。架构级决策以 `docs/adr/` 为准。
+> Status: Living document, updated as the project progresses. Terminology follows
+> `CONTEXT.md`: Knowledge Vault, Paper Knowledge Record, Knowledge Surface, Structured
+> Projection, Paper Mention, Semantic Relationship, and In-Focus Paper. Architectural
+> decisions are governed by `docs/adr/`; the memory system's design philosophy is documented
+> in `docs/memory-philosophy.md`.
 
-## 1. 产品定位
+## 1. Product Positioning
 
-**面向用户**: 学术研究员，尤其是以阅读、比较、综述论文为日常工作流的人。
+**Target users**: Academic researchers, especially those whose daily workflow involves
+reading, comparing, and reviewing papers.
 
-**产品目标**: 在 Codex agent 加持下，提炼论文关键价值，沉淀用户的对话记忆与思考，提升研究员的判断力与 taste，最终形成一个持续进化的领域知识框架。
+**Product goal**: With Codex as the agentic reasoning engine, extract the key value of papers,
+preserve the user's conversations and thinking, improve the researcher's judgment and taste,
+and ultimately form a continuously evolving knowledge framework for the field.
 
-产品形态的三级跃迁:
-
-```text
-单篇论文的问答工具
-   ↓
-跨论文的知识网络
-   ↓
-领域级的活知识框架
-```
-
-判断功能是否值得做的标准:
-
-- 它是否让 Knowledge Vault 里的知识更多、更准或更可用。
-- 它是否降低研究者把想法沉淀进 Vault 的交互成本。
-- 它是否让 Codex 更稳定地利用已有知识，而不是重复探索。
-
-## 2. 开发原则
-
-### 前端: Research Flow UX
-
-- 高频操作一步可达: 提问、`@` 提及论文、引用选区、查看页码证据、审查 Knowledge 更新。
-- 保持 Zotero reader 的密集、稳定、低干扰风格；先打磨真实阅读流，不先做大型 dashboard。
-- 所有 agent 行为要可解释: 本轮用了哪些论文、读了哪些文件、写了什么 Semantic Relationship、是否提交到 Vault。
-- 审查默认 **post-turn review**: Codex 完成回答和 Vault 写入后，用户查看 diff/关系摘要并可回滚。不要在普通 turn 中改成 pre-commit approval，除非另开架构设计。
-
-### 后端: Codex 编排与 Vault
-
-- turn 编排逻辑逐步从 `src/modules/sidebar.ts` 下沉到 service 层；prompt 构造、context 分层、关系 diff、projection 生成都应可单测。
-- 上下文窗口消耗是核心成本指标。执行 Layered Paper Context: 默认注入 Knowledge Surface 或 compact projection，`text.txt`、图表、截图、源码按需读取。
-- Vault 中人读优先的是 `memory.md`，机器处理使用 plugin-generated `record.json`。Codex 不直接编辑 `record.json`。
-- AGENTS.md 继续承载 Vault 行为规则，但关键 workflow 不应只靠 prompt 字符串散落在 UI 层。
-- 外部检索能力优先设计成可替换集成。MCP 是候选方向，但插件第一阶段不应静默修改用户 Codex 配置。
-
-## 3. Phase 2 — 日常阅读主路径优化
-
-目标: 把日常使用路径打磨成稳定闭环:
+The product evolves through three stages:
 
 ```text
-打开论文 → 建立 Paper Knowledge Record → 提问 → 引用页码证据 → @ 关联论文 → 审查 Knowledge 更新
+Question-answering tool for individual papers
+   ↓
+Cross-paper knowledge network
+   ↓
+Living knowledge framework for a field
 ```
 
-### 2.1 抽出 Research Turn Orchestration
+Criteria for deciding whether a feature is worth building:
 
-状态: 已完成第一轮抽离。`runResearchTurn()` 已承接 Codex/Vault turn 生命周期，`sidebar.ts` 保留 UI 状态与渲染职责。后续只做增量收口，不在 sidebar 继续堆业务编排。
+- Does it make the Knowledge Vault's knowledge richer, more accurate, or more useful?
+- Does it reduce the interaction cost of preserving a researcher's ideas in the Vault?
+- Does it help Codex use existing knowledge more reliably instead of exploring the same ground
+  repeatedly?
 
-- 已抽出 turn 编排服务，接收 In-Focus Paper、用户问题、选区引用、Paper Mentions，返回 assistant 内容、usage、activities、memory/relationship 更新结果。
-- 已抽出 prompt builder，覆盖无 mention、单 mention、多 mention、Knowledge Write Scope、relationship format。
-- 已抽出 activity aggregation 和 relationship diff 纯函数。
-- 已实现 resume 失败后 fresh thread 重试一次。
+## 2. Development Principles
 
-剩余收口:
+### Frontend: Research Flow UX
 
-- 如果后续继续拆 sidebar，优先拆 Memory view 与 message rendering；不要再扩大 `submitQuestion` 职责。
+- Make frequent actions one step away: ask a question, mention a paper with `@`, quote a
+  selection, view page evidence, and review Knowledge updates.
+- Preserve Zotero Reader's dense, stable, low-distraction style. Polish the real reading flow
+  before building a large dashboard.
+- Make every agent action explainable: which papers were used, which files were read, which
+  Semantic Relationships were written, and whether changes were committed to the Vault.
+- Default to **post-turn review**: after Codex completes its answer and writes to the Vault, the
+  user reviews the diff and relationship summary and can roll back. Do not turn ordinary turns
+  into pre-commit approval flows unless a separate architectural design is opened.
 
-### 2.2 Layered Paper Context 与成本压降
+### Backend: Codex Orchestration and the Vault
 
-状态: context 管理基础已完成，真实 token/latency benchmark 待做；dogfooding 已纠正 `turn.completed.input_tokens` 的累计工作量语义。
+- Gradually move turn orchestration from `src/modules/sidebar.ts` into the service layer.
+  Prompt construction, context layering, relationship diffs, and projection generation should
+  all be unit-testable.
+- Context-window consumption is a core cost metric. Use Layered Paper Context: inject the
+  Knowledge Surface or compact projection by default; read `text.txt`, figures, screenshots,
+  and source code only when needed.
+- `memory.md` is optimized for human reading; `record.json` is for machine processing and is
+  generated by the plugin. Codex must not edit `record.json` directly.
+- Keep Vault behavior rules in `AGENTS.md`, but do not scatter critical workflow rules across
+  prompt strings in the UI layer.
+- Design external retrieval capabilities as replaceable integrations. MCP is a candidate
+  direction, but the first plugin version must not silently modify the user's Codex
+  configuration.
 
-- 已实现 per-turn usage display: Codex JSONL `input_tokens`/`cached_input_tokens` 用于成本观测，不再伪装成 active context 占用率。
-- 已实现 Hidden Context Digest: 长会话可手动 compact，digest 作为隐藏机器上下文保存。自动阈值 compact 暂停，直到 `codex exec` 提供可信 active/last-context 信号。
-- 已实现条件化注入: resume 已有 Codex thread 时不注入 digest/recent messages；fresh thread 和 resume fallback 才注入。
-- `@` Paper Mention 默认注入 compact Knowledge Surface；全文、图表、截图、源码仍按需读取。
-- 下一步需要记录多轮真实使用的 token usage 和 wall-clock，比较 resume / fresh / digest fallback 的成本。
+## 3. Phase 2 - Optimizing the Daily Reading Path
 
-验收:
+Goal: turn the daily workflow into a stable loop:
 
-- 简单问答 input tokens 明显下降，目标是较 Phase 0 约 50k input tokens 减半。
-- Codex activity 中不再出现大量无效 Vault 探索步骤。
+```text
+Open paper -> Build Paper Knowledge Record -> Ask -> Cite page evidence
+-> Mention related papers with @ -> Review Knowledge updates
+```
 
-### 2.3 Paper Knowledge Record 冷启动
+### 2.1 Extract Research Turn Orchestration
 
-冷启动必须是 opt-in 或用户动作触发，不能在首次打开论文时静默跑 Codex。
+Status: First extraction completed. `runResearchTurn()` now owns the Codex/Vault turn
+lifecycle. `sidebar.ts` retains UI state and rendering responsibilities. Further work should
+only close remaining gaps incrementally; do not continue adding business orchestration to the
+sidebar.
 
-第一版入口:
+- Extracted a turn orchestration service that accepts the In-Focus Paper, user question,
+  selection quote, and Paper Mentions, and returns assistant content, usage, activities, and
+  memory/relationship update results.
+- Extracted a prompt builder covering no mention, single mention, multiple mentions, Knowledge
+  Write Scope, and relationship format.
+- Extracted pure functions for activity aggregation and relationship diffs.
+- Implemented one fresh-thread retry after resume failure.
 
-- Memory 视图显示 `Build Knowledge Record`。
-- 或用户第一次 Ask 时，如果 `memory.md` 仍为空骨架，先执行初始化。
-- UI 显示非阻塞、可取消的「正在建立论文档案」状态。
+Remaining cleanup:
 
-验收:
+- If the sidebar is split further, prioritize the Memory view and message rendering. Do not
+  expand the responsibilities of `submitQuestion` again.
 
-- 不经用户动作，不发起 Codex turn。
-- 初始化结果写入 Knowledge Surface，并生成/刷新 `record.json`。
+### 2.2 Layered Paper Context and Cost Reduction
 
-### 2.4 页码证据与引用 chip
+Status: Basic context management is complete. Real token/latency benchmarks remain to be
+done. Dogfooding corrected the interpretation of the cumulative workload represented by
+`turn.completed.input_tokens`.
 
-- Codex 回答中的 `[page N]` 可渲染为 chip。
-- 点击 chip 跳转到 PDF 对应页。
-- Evidence Pointers 与 Semantic Relationship 的 `Evidence:` 字段复用同一页码格式。
+- Implemented per-turn usage display: Codex JSONL `input_tokens` and `cached_input_tokens` are
+  used for cost observation and are no longer presented as active context utilization.
+- Implemented Hidden Context Digest: long sessions can be compacted manually, with the digest
+  retained as hidden machine context. Automatic threshold-based compaction is paused until
+  `codex exec` exposes a trustworthy active/last-context signal.
+- Implemented conditional injection: when a Codex thread already exists for a resume, do not
+  inject the digest or recent messages; inject them only for a fresh thread or resume fallback.
+- `@` Paper Mentions inject a compact Knowledge Surface by default. Full text, figures,
+  screenshots, and source code remain on-demand.
+- Next, record token usage and wall-clock time from real multi-turn sessions and compare the
+  cost of resume, fresh, and digest-fallback paths.
 
-**前置缺口(2026-07-10 审查发现)**: 真实 Vault 中 `text.txt` 均无 `[page N]` 标记——PDF.js 结构化解析在运行时从未成功(每页 getTextContent 为空,疑似 Xray 边界问题,见 `.logs` 的 `pdf-text-empty-pdfjs`),实际全部走 PDFWorker 兜底。PDFWorker 文本自带 `\f` 分页符且与印刷页码一一对应,应在兜底路径按 `\f` 切分并补 `[page N]` 标记,并对无标记的存量 `text.txt` 做一次性强制刷新;否则 Codex 无页码依据,chip 无法通过验收。
+Acceptance:
 
-验收:
+- Input tokens for simple questions should fall substantially, with a target of halving the
+  approximately 50k input tokens observed in Phase 0.
+- Codex activity should no longer contain large numbers of unproductive Vault exploration
+  steps.
 
-- 从 `text.txt` 页码标记到回答页码 chip 的路径可用。
-- 无法定位页码时显示不可跳转状态，而不是静默失败。
+### 2.3 Paper Knowledge Record Cold Start
 
-### 2.5 Context 管理后续优化
+Cold start must be opt-in or triggered by a user action. Codex must not run silently when a
+paper is opened for the first time.
 
-2026-07 已落地 hidden Context Digest、context window 解析、条件化注入与 prompt builder 归位(见 ADR 0004)。Dogfooding 发现 `turn.completed.input_tokens` 是一轮内多次模型调用的累计输入，不能用来计算 active context 百分比；错误百分比与 70%/85% 自动阈值已移除，遗留两件事:
+First-version entry points:
 
-- **digest 质量回归**: digest 的压缩指令与确定性兜底已有单测,但缺少"digest 注入后回答质量不退化"的人工评估清单;至少记录几个长会话样例作为回归用例。
-- **可信 occupancy 信号**: 调研 Codex app-server 的 active/last-context token usage，或等待 `codex exec --json` 暴露等价事件；在此之前只提供手动 Compact。
+- The Memory view displays `Build Knowledge Record`.
+- Alternatively, when the user asks the first question and `memory.md` is still an empty
+  skeleton, initialize it first.
+- The UI displays a non-blocking, cancellable "Building paper record" state.
 
-### 2.6 截图与图表理解
+Acceptance:
 
-设计基线见 ADR 0005(分层 PDF 解析): PDFWorker 确定性抽取是 `text.txt` 的唯一默认路径,Codex pdf-skill(pdftoppm 渲染 + Python 抽取)只做按需增强。
+- No Codex turn is started without a user action.
+- The initialization result is written to the Knowledge Surface and `record.json` is
+  generated or refreshed.
 
-- 用户框选/截图保存到 `{itemKey}/figures/` 或等价 derived artifact 目录。
-- 当问题需要视觉细节时,按需将相关页渲染为 PNG(`pdftoppm`)放入 `{itemKey}/figures/`,用 `codex exec -i` 附图 — 与用户截图互补,不替代。
-- 增强路径先探测 poppler/python 可用性,缺失时提示安装;默认阅读路径永不依赖它们。
-- Codex 可在相关 turn 中读取图像,并把关键结论写入 Evidence Pointers 或 Reader Thinking。
-- 图像资产是否进入 git 需要单独决策;默认倾向: 渲染页可再生、gitignore,用户截图保留(在本节设计时定稿)。
+### 2.4 Page Evidence and Citation Chips
 
-### 2.7 扫描版 PDF 兜底(opt-in Codex 解析)
+- Render `[page N]` references in Codex answers as chips.
+- Clicking a chip jumps to the corresponding page in the PDF.
+- Evidence Pointers and the `Evidence:` field of Semantic Relationships use the same page
+  format.
 
-现状: PDFWorker 对扫描件返回空文本,vault prep 直接抛错,论文完全进不了知识系统。按 ADR 0005:
+**Prerequisite gap (found during the 2026-07-10 review)**: No `text.txt` files in the real
+Vault contain `[page N]` markers. PDF.js structured extraction has never succeeded at runtime
+(`getTextContent` returns empty content for every page, probably an Xray boundary issue; see
+the `pdf-text-empty-pdfjs` entries in `.logs`), so the system always falls back to PDFWorker.
+PDFWorker text contains form-feed separators and corresponds one-to-one with printed pages.
+The fallback path should split on `\f` and add `[page N]` markers, then force a one-time refresh
+of existing `text.txt` files without markers. Otherwise Codex has no page evidence and the
+chips cannot pass acceptance.
 
-- 空文本时 UI 提供显式「用 Codex 解析这篇 PDF」入口,opt-in、绝不自动触发。
-- Codex 产出的文本经过机械校验(页数与 PDF 一致、`[page N]` 标记齐全且单调)才被接受为 `text.txt`。
-- `text.meta.json` 用独立 `parserSource` 值记录来源,保留可追溯性。
-- 原始 PDF 不进 Vault;Codex 每次调用按需获得 Zotero storage 只读路径。
+Acceptance:
 
-验收:
+- The path from page markers in `text.txt` to page citation chips in answers works.
+- When a page cannot be located, show a non-clickable state instead of failing silently.
 
-- 扫描件从硬失败变为可引导的解析路径。
-- 校验不通过时明确报告失败原因,不写入半成品 `text.txt`。
+### 2.5 Follow-up Context Management
 
-### 2.9 论文信号元数据(评分/分类/关键词)
+As of July 2026, Hidden Context Digest, context-window parsing, conditional injection, and
+prompt-builder extraction have landed (see ADR 0004). Dogfooding found that
+`turn.completed.input_tokens` is the cumulative input across multiple model calls in one
+turn, so it cannot calculate active-context percentages. The incorrect percentages and 70% /
+85% automatic thresholds have been removed. Two items remain:
 
-定位: Semantic Relationship 是论文间的「边」,信号元数据是论文节点上的「属性」——两者共同构成 M2 关系网络(过滤/分组/图谱)与 M3 Topic Note(分类 ≈ proto-topic)的地基。
+- **Digest quality regression**: The digest compression instruction and deterministic fallback
+  have unit tests, but there is no manual evaluation checklist for verifying that answer
+  quality does not regress after digest injection. Record several long-session examples as
+  regression cases.
+- **Trustworthy occupancy signal**: Investigate active/last-context token usage in the Codex
+  app-server, or wait for an equivalent event from `codex exec --json`. Until then, provide
+  manual Compact only.
 
-- **不建第二套分类体系**: Zotero collections/tags 是文献元数据权威源,vault prep 时镜像进 `record.json`(`zoteroCollections`/`zoteroTags`),存量归类零交互成本吸收。
-- **评分 = taste 的最小捕获形式**: 用户打分(建议简单三档或 1–5)归属 Reader Thinking 域,是用户判断而非论文事实;入口放 sidebar/Memory 视图,一键完成。README 索引与 Memory 视图可按评分排序。
-- **关键词三来源且标注出处**: Zotero tags(用户)、论文自带 keywords(paper-grounded)、Codex 建议(经 post-turn review 采纳,不静默写入)。
-- **存储**: 结构化信号入 `record.json`;人读展示于 memory.md,建议用 YAML frontmatter 承载(不动已批准的七节正文)。此变更属于 Knowledge Surface 结构迁移,**前置依赖 vault.json schema versioning(M1-6)**,两者连做。
+### 2.6 Screenshot and Figure Understanding
 
-验收:
+The design baseline is ADR 0005 (layered PDF parsing): deterministic PDFWorker extraction is
+the only default path for `text.txt`; the Codex pdf skill (pdftoppm rendering plus Python
+extraction) is an on-demand enhancement only.
 
-- 已有 Zotero 归类/标签不经用户操作出现在 record.json 中。
-- 打分一步可达;Codex 建议的关键词只有经审查采纳才写入。
+- Save user selections and screenshots under `{itemKey}/figures/` or an equivalent derived
+  artifact directory.
+- When a question requires visual detail, render the relevant pages on demand as PNG files
+  (`pdftoppm`) under `{itemKey}/figures/` and attach them with `codex exec -i`. This
+  complements user screenshots; it does not replace them.
+- Probe for poppler/Python availability before using the enhancement path and prompt the user
+  to install missing dependencies. The default reading path must never depend on them.
+- Codex can read images in the relevant turn and write important conclusions to Evidence
+  Pointers or Reader Thinking.
+- Whether image assets belong in git requires a separate decision. The current default
+  preference is that rendered pages are reproducible and gitignored, while user screenshots
+  are retained. Finalize this during the design of this section.
 
-### 2.8 Vault 远程托管(GitHub)
+### 2.7 Scanned-PDF Fallback (Opt-in Codex Parsing)
 
-现状: git 是整个 Vault 级别的单一仓库(`vault.ts::commitVaultChanges`,每 turn 一次 `add -A` + commit),尚未配置 remote。单仓库层级是正确的(跨论文相对链接、一次 clone 整库迁移),保持不变。上传 GitHub 前需要:
+Current state: PDFWorker returns empty text for scanned documents, and Vault preparation
+throws an error, so the paper cannot enter the knowledge system. Under ADR 0005:
 
-- **默认 private 仓库**: `text.txt` 是版权论文全文,`conversations/*.md` 是私人研究思考,公开仓库有法律与隐私风险。文档中写死此默认,公开发布只能走 §7.4 投影路径(经筛选的 Knowledge Surface/Topic Note)。
-- **gitignore 加固 + 存量迁移**: 现实 `.gitignore` 只有 `*/code/`,`.logs/` 已被追踪(与 CONTEXT.md 意图不符)。补 `.logs/`、`.generated/`、渲染页 `figures/`(按 ADR 0005 定稿),并对存量做一次性 `git rm --cached` 迁移。
-- **同步策略 V1**: 单机单写者假设 + 用户手动/定期 push;插件不自动推送(网络失败与凭证不应阻塞研究 turn)。opt-in 后台自动 push 为后续增强;多机双写 merge 是独立 ADR 级决策,默认不做。
-- **提交者身份**: 目前硬编码 `zotero-agent <agent@local>`,托管后考虑读取用户 git 全局配置,保留 agent 标识为 fallback。
+- When extracted text is empty, the UI provides an explicit `Parse this PDF with Codex`
+  entry point. It is opt-in and must never trigger automatically.
+- Accept Codex-produced text as `text.txt` only after mechanical validation confirms that the
+  page count matches the PDF and that `[page N]` markers are complete and monotonically
+  ordered.
+- Record the source in `text.meta.json` using a separate `parserSource` value to preserve
+  traceability.
+- Do not copy the original PDF into the Vault. Each Codex call receives the read-only Zotero
+  storage path only when needed.
 
-验收:
+Acceptance:
 
-- 新建 Vault 的 `.gitignore` 覆盖全部非知识资产;存量 Vault 迁移后 `git ls-files` 无 `.logs/`。
-- 配好 remote 的 Vault 在另一台机器 clone 后,插件可识别并继续使用(与 #9 vault.json 版本标记配合)。
+- A scanned paper changes from a hard failure into a guided parsing path.
+- When validation fails, report the exact reason and do not write a partial `text.txt`.
 
-## 4. Phase 3 — 跨论文知识网络
+### 2.9 Paper Signal Metadata (Rating, Classification, Keywords)
 
-目标: 让 Paper Knowledge Records 之间的 Semantic Relationships 可见、可审查、可检索。
+Positioning: Semantic Relationships are the "edges" between papers; signal metadata is the
+"attribute" on each paper node. Together they form the foundation for the M2 relationship
+network (filtering/grouping/graph) and M3 Topic Notes (classification as a proto-topic).
 
-### 3.1 Relationship Review 与反向链接
+- **Do not build a second classification system**: Zotero collections and tags are the
+  authoritative source for bibliographic metadata. Mirror them into
+  `record.json` (`zoteroCollections` / `zoteroTags`) during Vault preparation, absorbing
+  existing classifications without additional interaction.
+- **Rating is the smallest capture of taste**: A user rating (a simple three-level scale or
+  1-5 is recommended) belongs to the Reader Thinking domain. It represents the user's
+  judgment, not a fact about the paper. Put the entry point in the sidebar/Memory view and
+  make it a one-step action. The README index and Memory view can sort by rating.
+- **Three keyword sources, with provenance**: Zotero tags (user), paper-provided keywords
+  (paper-grounded), and Codex suggestions (accepted through post-turn review and never
+  written silently).
+- **Storage**: Store structured signals in `record.json`; present them for human reading in
+  `memory.md`, preferably in YAML frontmatter without changing the approved seven-section
+  body. This is a Knowledge Surface structure migration and depends on `vault.json` schema
+  versioning (M1-6); implement them together.
 
-- 保持 post-turn review: Codex 写入当前论文 Knowledge Surface，plugin 生成 `record.json`，前端展示新增关系摘要。
-- Memory 视图增加「Linked from」反向链接: 扫描其他 `record.json` 找到指向当前论文的关系。
-- 增加关系浏览器: 按 relationship type、target paper、source paper 过滤。
+Acceptance:
 
-验收:
+- Existing Zotero collections and tags appear in `record.json` without user action.
+- Rating takes one step; Codex-suggested keywords are written only after review and approval.
 
-- 打开论文 A 能看到哪些论文链接到 A。
-- 新增 Semantic Relationship 在回答下方和 Memory 视图中都可见。
+### 2.8 Remote Vault Hosting (GitHub)
 
-### 3.2 轻量关系图谱
+Current state: git is a single repository for the entire Vault
+(`vault.ts::commitVaultChanges`, with `add -A` plus one commit per turn), and no remote is
+configured yet. A single repository is the correct structure because it supports cross-paper
+relative links and migrating the entire library with one clone. Keep it unchanged. Before
+uploading to GitHub:
 
-- 优先做插件内 graph view，从 `record.json` 渲染，不把生成的 `graph.html` 提交进 Vault。
-- 如果生成静态 HTML，放到 `.generated/` 并 gitignore。
-- 第一版只需显示节点、关系类型颜色、点击跳转对应 `memory.md`。
+- **Private repository by default**: `text.txt` contains full paper text subject to copyright,
+  while `conversations/*.md` contains private research thinking. A public repository creates
+  legal and privacy risks. Documentation must make this the default; public release can only
+  use the filtered Knowledge Surface/Topic Note projection path in Section 7.4.
+- **Harden `.gitignore` and migrate existing data**: The actual `.gitignore` contains only
+  `*/code/`, while `.logs/` is already tracked, contrary to the intent of `CONTEXT.md`. Add
+  `.logs/`, `.generated/`, and rendered-page `figures/` (as finalized under ADR 0005), then
+  perform a one-time `git rm --cached` migration for existing files.
+- **V1 synchronization strategy**: Assume one machine and one writer, with manual or periodic
+  pushes by the user. The plugin must not push automatically; network failures and
+  credentials must not block a research turn. Opt-in background pushing is a later
+  enhancement. Multi-machine concurrent writes and merges require a separate ADR and are
+  out of scope by default.
+- **Committer identity**: The current hard-coded identity is
+  `zotero-agent <agent@local>`. After hosting is added, consider reading the user's global git
+  configuration while retaining the agent identity as a fallback.
 
-### 3.3 库级问答入口
+Acceptance:
 
-- 新增库级入口: “基于我读过的论文提问”。
-- 无 In-Focus Paper 时，Codex 只读 Vault，默认检索 `*/memory.md` 和 `record.json`。
-- 库级 turn 默认不修改任何 paper，除非用户明确触发 library reconciliation。
+- A new Vault's `.gitignore` covers all non-knowledge assets. After migrating an existing
+  Vault, `git ls-files` contains no `.logs/` files.
+- After a remote is configured, cloning the Vault on another machine lets the plugin
+  recognize and continue using it, together with the `vault.json` version marker in #9.
 
-## 5. Phase 4 — 领域级知识框架
+## 4. Phase 3 - Cross-Paper Knowledge Network
 
-核心思想: 在 per-paper Paper Knowledge Record 之上，引入 per-topic 聚合层。
+Goal: make Semantic Relationships between Paper Knowledge Records visible, reviewable, and
+searchable.
+
+### 3.1 Relationship Review and Backlinks
+
+- Keep post-turn review: Codex writes the current paper's Knowledge Surface, the plugin
+  generates `record.json`, and the frontend displays a summary of new relationships.
+- Add "Linked from" backlinks to the Memory view by scanning other `record.json` files for
+  relationships pointing to the current paper.
+- Add a relationship browser with filters for relationship type, target paper, and source
+  paper.
+
+Acceptance:
+
+- Opening paper A shows which papers link to A.
+- A new Semantic Relationship is visible both below the answer and in the Memory view.
+
+### 3.2 Lightweight Relationship Graph
+
+- Build an in-plugin graph view first. Render it from `record.json`; do not commit generated
+  `graph.html` files to the Vault.
+- If static HTML is generated, put it under `.generated/` and gitignore it.
+- The first version only needs to show nodes, relationship-type colors, and click-through
+  navigation to the corresponding `memory.md`.
+
+### 3.3 Library-Level Question Entry Point
+
+- Add a library-level entry point: "Ask about the papers I have read".
+- When there is no In-Focus Paper, Codex reads the Vault only and searches
+  `*/memory.md` and `record.json` by default.
+- A library-level turn must not modify any paper by default unless the user explicitly
+  triggers library reconciliation.
+
+## 5. Phase 4 - Field-Level Knowledge Framework
+
+Core idea: introduce a per-topic aggregation layer above the per-paper Paper Knowledge
+Records.
 
 ### 4.1 Topic Note
 
-- Vault 新增 `topics/{topic-slug}.md`，表示一个研究方向的活文档。
-- Topic Note 聚合问题定义、方法谱系、论文立场、支持/矛盾关系、开放问题、用户判断。
-- 只由用户显式触发生成或更新，例如「把这 5 篇整理成一个 topic」。
+- Add `topics/{topic-slug}.md` to the Vault as a living document for a research direction.
+- A Topic Note aggregates the problem definition, method lineage, paper positions,
+  supporting/contradictory relationships, open questions, and the user's judgment.
+- Generate or update it only through an explicit user action, such as "organize these five
+  papers into a topic".
 
 ### 4.2 Living Survey
 
-- 基于 Topic Note 和关联 Paper Knowledge Records 生成综述草稿。
-- 输出建议位置: `topics/{slug}/survey.md`。
-- 新论文加入后支持增量更新；git 历史记录理解演化。
+- Generate a survey draft from the Topic Note and its related Paper Knowledge Records.
+- Suggested location: `topics/{slug}/survey.md`.
+- Support incremental updates when new papers are added; git history records the evolution of
+  understanding.
 
-### 4.3 谨慎主动性
+### 4.3 Cautious Proactivity
 
-- 新论文入库后的自动 triage 只能产生建议，不静默写库。
-- 用户触发的 review digest 可巡检 Vault，报告知识空洞、过期结论、值得重读的论文。
+- Automatic triage after a new paper enters the Vault may produce suggestions only; it must
+  not write silently.
+- A user-triggered review digest may inspect the Vault and report knowledge gaps, outdated
+  conclusions, and papers worth rereading.
 
-## 6. 里程碑与执行顺序
+## 6. Milestones and Execution Order
 
-战略基调: **单篇阅读路径的基础设施已建成(引擎/记忆/证据/context/模型选择),项目进入「重使用、轻开发」阶段。** 最大风险不再是功能不够,而是知识存量不够——Phase 3/4 的全部价值(网络/图谱/综述/发现)都是存量的函数。
+Strategic direction: **The infrastructure for the individual-paper reading path is in place
+(engine, memory, evidence, context, and model selection), so the project is entering a
+"use more, build less" phase.** The largest risk is no longer missing functionality but
+insufficient knowledge inventory. The full value of Phase 3/4 (network, graph, survey, and
+discovery) is a function of that inventory.
 
-已完成/已关闭: 文档与 ADR 体系(0001–0006)、Research Turn 抽离、context 管理与 usage 语义修正、页码证据 chip(2026-07-10 冒烟点验通过)、会话级模型选择。
+Completed/closed: documentation and ADR system (0001-0006), Research Turn extraction,
+context management and usage semantics correction, page-evidence chips (smoke test passed on
+2026-07-10), and session-level model selection.
 
-### M1 — 单篇论文理解深化 + 高质量沉淀(当前里程碑)
+### M1 - Deep Individual-Paper Understanding and High-Quality Preservation (Current Milestone)
 
-**北极星: Vault 中 30 篇过硬门槛、七节完整的 Paper Knowledge Record。** M1 的主题是把单篇论文的理解做深(输入面: 文本/扫描件/图表/选区),同时用自动守门保证沉淀质量。2026-07-10 按产品 owner 裁量重排。
+**North star: 30 Paper Knowledge Records in the Vault that meet the quality bar and contain
+all seven sections.** M1 focuses on deepening understanding of individual papers (inputs:
+text, scanned documents, figures, and selections) while using automated gates to protect the
+quality of preserved knowledge. Reordered at the product owner's discretion on 2026-07-10.
 
-| 工作流 | 内容 | 价值 | 优先级 |
+| Workflow | Content | Value | Priority |
 | ---- | ---- | ---- | ---- |
-| M1-1 冷启动(§2.3) | opt-in 单篇建档;之上支持 Zotero 多选 → 排队批量建档(队列/失败恢复/取消,默认 cheap model 建骨架、好模型写 Insight) | 「沉淀」的直接杠杆;批量是北极星加速器 | ★★★ 首先做 |
-| M1-2 post-turn 质量校验器 | rubric 硬门槛代码化: Abstract 改写检测(与首次提取比对)、七节缺失、关系行格式(决定 record.json 可解析)、体积膨胀(防 blind-append);违规打标到 review UI | 30 篇规模下人工评分不现实;语料可信的机制,全部可单测 | ★★★ 与 1 并行 |
-| M1-3 Codex PDF 增强解析(§2.7,ADR 0005) | 扫描件 opt-in Codex 解析(机械校验 + `parserSource` 溯源)+ 按需页面渲染;依赖探测降级 | **能力面联动的第一个范式**——同一套「探测→opt-in→校验→溯源」模式为后续 Notion/web 搜索/论文抓取/代码分析铺路 | ★★ |
-| M1-4 截图分析(§2.6) | 用户框选/截图 → `{itemKey}/figures/` → `codex exec -i` 附图;结论写入 Evidence Pointers 或 Reader Thinking | 图表/公式是纯文本抽取的盲区;与 M1-3 共享 poppler/依赖探测基建 | ★★ 与 3 连做 |
-| M1-5 选区引用提问收口 | ✅ 核心已实现(popup Ask → `[PDF Text]` 引用块入 prompt);收口: 聊天气泡显示被引选区、可选页码锚定 | 高频动作的体验补全,工作量小 | ★ 顺手 |
-| M1-6 耐久性 + schema versioning(§2.8 + vault.json) | gitignore 加固 + `.logs` untrack + private 远程 push 流程;根级 `vault.json` 版本标记 | 30 篇档案值得备份;也是 M1-8 信号元数据的 frontmatter 迁移前置 | ★★ 尽早插入 |
-| M1-7 沉淀体验后备项 | Zotero 划注导入(高亮→Evidence、批注→Reader Thinking)、memory diff 渲染+一键回滚、健康度徽标、会话要点手动沉淀按钮 | 差异化与信任机制;按实际使用痛点择机启动 | ★ 后备池 |
-| M1-8 论文信号元数据(§2.9) | Zotero collections/tags 镜像入 record.json;一键评分(taste 沉淀);关键词三来源标注出处,Codex 建议经审查采纳;memory.md frontmatter 承载 | M2 图谱/过滤与 M3 Topic 的节点属性地基;存量归类零成本吸收 | ★★ 依赖 M1-6,连做 |
+| M1-1 Cold start (Section 2.3) | Opt-in single-paper record creation; additionally support Zotero multi-select -> queued batch creation (queue/failure recovery/cancellation; cheap model builds the skeleton by default, stronger model writes Insight) | The direct lever for preservation; batch creation accelerates the north star | ✅ Complete - single-paper creation is cancellable; context-menu batch creation, retry after failure, and recovery after closing are implemented |
+| M1-2 Post-turn quality checker | Codify hard rubric gates: abstract rewrite detection (compare with first extraction), missing sections, relationship-line format (which determines whether `record.json` is parseable), and size inflation (prevent blind append); flag violations in the review UI | Manual scoring is impractical at 30 papers; creates a trustworthy corpus and is fully unit-testable | ✅ Complete - four check categories, displayed in turn review |
+| M1-3 Codex PDF enhancement parsing (Section 2.7, ADR 0005) | Opt-in Codex parsing for scans (mechanical validation + `parserSource` provenance) plus on-demand page rendering; dependency detection and fallback | **The first pattern for integrating Codex capabilities** - the same "detect -> opt in -> validate -> trace" pattern prepares the way for Notion, web search, paper retrieval, and code analysis | ✅ Complete - opt-in scan parsing with mechanical validation; current PDF pages can be attached as images |
+| M1-4 Screenshot analysis (Section 2.6) | User selection/screenshot -> `{itemKey}/figures/` -> attach with `codex exec -i`; write conclusions to Evidence Pointers or Reader Thinking | Figures and formulas are blind spots in plain-text extraction; shares poppler/dependency detection infrastructure with M1-3 | ✅ Complete - screenshots pasted with Cmd/Ctrl+V in the chat composer and sent with the turn through `codex -i` |
+| M1-5 Close the loop on selection-based questions | ✅ Core implemented (popup Ask -> `[PDF Text]` quote block in the prompt); remaining polish: show the quoted selection in the chat bubble and optionally anchor it to a page | Completes a high-frequency interaction with small effort | ✅ Complete - page numbers in user messages are clickable |
+| M1-6 Durability + schema versioning (Section 2.8 + `vault.json`) | Harden gitignore + untrack `.logs` + private remote push flow; root-level `vault.json` version marker | A 30-paper archive is worth backing up; also a prerequisite for the M1-8 frontmatter migration | ✅ Code complete (ADR 0007, `docs/vault-remote.md`) - ⚠️ existing Vault migration takes effect on the next plugin run; runtime verification is required (`git ls-files` has no `.logs`, `vault.json` exists) + user must configure the private remote for the first push |
+| M1-7 Preservation-experience backlog | Zotero annotation import (highlights -> Evidence, comments -> Reader Thinking), memory diff rendering + one-click rollback, health badge, and a manual session-summary preservation button | Differentiation and trust mechanisms; start when actual usage pain justifies it | ★ Backlog (the only unfinished M1 item; start as needed) |
+| M1-8 Paper Signal Metadata (Section 2.9) | Mirror Zotero collections/tags into `record.json`; one-click rating (preserve taste); label the provenance of the three keyword sources and accept Codex suggestions through review; carry the data in `memory.md` frontmatter | Foundation for node attributes in M2 graph/filtering and M3 Topic; absorbs existing classifications at zero interaction cost | ✅ Complete - 1-5 star rating, collections/tags mirror, three keyword sources, `record.json` v2 (ADR 0007) |
 
-不属于 M1(明确不做): 关系浏览器/图谱、库级问答、源码抓取分析——等 M2。
+Explicitly outside M1: relationship browser/graph, library-level questions, and source-code
+retrieval/analysis. These wait for M2.
 
-### M2 — 知识网络开始回报(存量 ~30 篇后)
+### M1.5 - Memory System Alignment (Current Milestone, from `docs/memory-philosophy.md`)
 
-进入信号不是日期,而是行为: 用户开始自然地 `@` 旧论文、提出跨论文问题。内容: 库级问答(§3.3)、关系浏览/轻量图谱(§3.1/§3.2)、源码抓取分析(Codex 最强差异化,沿用 M1-3 的能力接入范式)。成功标准: 一个跨论文问题的回答能引用多篇 memory.md 并给出可验证的页码证据。
+Rationale: `docs/memory-philosophy.md` redefines the target shape of a Paper Knowledge
+Record (tiered engagement depth, write-discipline file split, trust labels, proactive
+linking). The Vault currently holds only a handful of papers, so the structural migration
+costs almost nothing today and scales linearly with inventory. **Align the structure first,
+then backfill.** Backfilling 30 papers under the old uniform template would turn one cheap
+migration into thirty.
 
-### M3 — 领域级知识框架
+**North-star revision**: replace "30 records with all seven sections" with **"30 records at
+the appropriate engagement tier, each passing tier-aware quality gates, with relationship
+candidates proposed by linking passes."** The uniform seven-section requirement conflicts
+with P1 (a single template denies both axes); the seven-section shape survives as the L2
+close-reading template.
 
-Topic Note / Living Survey(Phase 4)、论文发现建议收件箱(§7.3)、Notion 投影(§7.4)。系统开始反向驱动阅读: 告诉用户该读什么、领域理解哪里有洞。完全建立在 M1/M2 的存量与质量上。
-
-## 7. Codex 能力面撬动策略
-
-Codex 不只是一个问答引擎——它自带一整个可扩展的能力面: **skills**(`~/.codex/skills/`,本机已有 pdf/playwright)、**MCP 服务器**(`codex mcp add`,可挂 Notion/arXiv/Semantic Scholar 等)、**browser_use / computer_use**(本机 stable 且启用)、**图像输入**(`codex exec -i`)、**模型路由**(`--model` cheap model,已用于 digest)。产品战略是持续把这些原生能力转化为知识系统的输入和输出通道,而不是自己重造。ADR 0005 的 pdf-skill 分层只是该策略的第一个实例。
-
-### 7.1 接入判据(每个能力接入前必答四问)
-
-1. **价值判据**: 它是否让 Vault 知识更多、更准或更可用(§1 三条标准)?
-2. **真相源边界**: Vault 仍是唯一可信源。外部系统(如 Notion)只能是投影/发布目标或建议来源,绝不成为第二真相源。
-3. **配置边界**: 不静默修改用户 `~/.codex` 配置(§2 已有原则)。MCP/skill 的启用必须 opt-in,插件负责探测可用性并引导安装。
-4. **降级路径**: 能力缺失时默认主路径必须完整可用(参照 ADR 0005 的依赖探测降级)。
-
-### 7.2 能力 → 产品映射
-
-| Codex 原生能力 | 本机验证状态 | 产品用途 | 归属 |
+| Item | Content | Source | Notes |
 | ---- | ---- | ---- | ---- |
-| pdf skill(poppler+python 工作流) | ✅ 已装,已评审 | 扫描件兜底、按需页面渲染 | §2.6/§2.7,ADR 0005 |
-| 图像输入 `codex exec -i` | ✅ CLI 支持 | 截图/图表理解 | §2.6 |
-| model catalog + `--model` | ✅ 已在用 | 每个 Chat Session 动态选模型；digest 使用独立 cheap model 回退 | ADR 0004/0006,已落地 |
-| shell + git(源码阅读) | ✅ 核心能力 | 论文代码库 clone 与分析 | 执行顺序 12 |
-| playwright skill / browser_use | ✅ 已装 / stable 启用 | 论文 landing page、Papers-with-Code、代码 repo 发现;关键论文网络检索 | §7.3 论文发现 |
-| MCP 服务器(`codex mcp add`) | ✅ CLI 支持 | arXiv/Semantic Scholar 检索;Notion 投影同步 | §7.3/§7.4 |
-| 定时调度 | ❌ Codex 无常驻调度 | 由插件/OS scheduler 触发 `codex exec` 巡检 | §7.3,受 §4.3 约束 |
+| M1.5-1 Write-discipline file split | Plugin-marked block (bibliography/abstract) in `memory.md`; move Reader Thinking to `notes.md` (append-only, dated, attributed); migrate existing data | Philosophy §4.1, P3/P4/P5 | **ADR 0011 written** (revises the ADR-0002/0003 file layout); `knowledgeSurfaceVersion` 1→2, `recordProjectionVersion` 2→3 |
+| M1.5-2 Engagement tiers | `tier` field in frontmatter + L0/L1/L2 tiered templates; upgrades proposed by the agent via hidden marker + UI confirmation; downgrades compress to an L0 card | Philosophy §4.2, P1 | **ADR 0012 written** (extends the ADR-0007 frontmatter schema; adds `valueTypes`). L1 is the cold-start default; migrates in the same version step as 0011 |
+| M1.5-3 Close the quality loop (**reopens M1-2**) | Make gates tier-aware (an L1 record must not fail for "missing sections"); every detection result gets an action path - injection into a repair turn or a UI action; backfill missing `record.json` | Philosophy §4.3, P3 | `docs/benchmarks/knowledge-surface-quality.md` rubric must also become tier-aware |
+| M1.5-4 Cold-start linking pass | After a Knowledge Surface is generated, run a pass that proposes candidate Semantic Relationships against existing `*/memory.md` | Philosophy §4.4, P6 | **Proposals only, user-reviewed** - this reconciles P6 with the Connection Trigger discipline (no silent graph growth). Acceptance: the LingBot-World 1.0/2.0/CausVid chain in the library |
+| M1.5-5 Language policy | Vault `AGENTS.md`: body text follows the user's language; terminology and canonical wording stay in English | Philosophy §4.5 | Small; cross-language retrieval failures are a real defect |
+| M1.5-6 Minimal cognitive labels | `[claimed by paper]` / `[verified]` in Results/Insight only; `[superseded by [[KEY]]]` instead of deletion | Philosophy §4.6, P5 | Small; lands inside the M1.5-2 templates |
 
-### 7.3 论文发现与定时巡检(Paper Discovery)
+Sequencing inside M1.5: 1 → 2 → 3 (structure before gates), 4 after 2 (linking prompts need
+the tier context), 5/6 anytime. During the M1.5-1/2 ADRs, update `CONTEXT.md` terms:
+Knowledge Surface Core Sections (becomes the L2 template definition), the Reader Thinking
+carrier (`notes.md`), and Evidence Pointers (derived from inline anchors, no longer a
+maintained section).
 
-- 用户定义关注方向(可从 Topic Note 或 Vault 高频主题推导),插件定时(或手动)触发一个只读 Codex turn,经 browser_use/MCP 检索新论文。
-- 产出进入**建议收件箱**(suggestion inbox): 候选论文 + 与 Vault 已有记录的关联理由。受 §4.3 谨慎主动性约束——只产生建议,不静默写库、不自动下载。
-- 用户采纳后走正常入库路径: 加入 Zotero → 建 Paper Directory → 冷启动建档。
+**The 30-paper backfill starts after M1.5-1/2/3 land**, so every record is born in its final
+shape.
 
-### 7.4 Notion 等外部系统联动
+### M2 - The Knowledge Network Begins to Pay Off (After Approximately 30 Existing Papers)
 
-- 方向: **单向投影优先**。把 Knowledge Surface / Topic Note / Living Survey 发布到 Notion 供分享与移动端阅读;Vault 保持唯一可信源。
-- 实现候选: Notion MCP server,由 Codex 在用户显式触发的「发布」turn 中执行。
-- 双向同步(Notion 笔记回流 Vault)是独立的大决策,需要单独 ADR,默认不做。
+The signal to enter this phase is behavior, not a date: the user naturally starts mentioning
+old papers with `@` and asking cross-paper questions. Note that the M1.5-4 linking pass seeds
+the relationship layer during record creation, so the backlink/review UI (Section 3.1) gains
+value earlier than originally assumed. Scope: library-level questions
+(Section 3.3), relationship browsing/lightweight graph (Sections 3.1/3.2), and source-code
+retrieval/analysis (Codex's strongest differentiation, using the capability integration
+pattern from M1-3; L3 outputs land in `code-notes.md` per the philosophy's target shape).
+Success criterion: an answer to a cross-paper question cites multiple `memory.md` files and
+provides verifiable page evidence.
 
-## 8. 进展记录
+### M3 - Field-Level Knowledge Framework
 
-- **2026-07-10** 论文信号元数据入档(§2.9,M1-8): 评分/分类/关键词作为论文节点属性,与 Semantic Relationship(边)共同构成 M2 图谱与 M3 Topic 地基。决策: 不建第二套分类体系(Zotero collections/tags 镜像入 record.json)、评分归 Reader Thinking 域(taste 捕获)、关键词三来源标出处且 Codex 建议经审查、frontmatter 承载依赖 vault.json versioning(与 M1-6 连做)。CONTEXT.md 新增 Paper Signal Metadata 术语。
-- **2026-07-10** M1 按产品 owner 裁量重排为「单篇理解深化」: 冷启动(1)与 post-turn 校验器(2)保持 ★★★;Codex PDF 增强解析(3)与截图分析(4)从 M2 提入 M1,并定位为能力面联动第一范式(探测→opt-in→校验→溯源,为 Notion/web 搜索/论文抓取/代码分析铺路);选区引用提问核实为已实现(popup Ask → `[PDF Text]` 引用块),M1 内仅做体验收口;划注导入/review 深化/健康度/手动沉淀降为后备池。
-- **2026-07-10** 里程碑重组 + M1 细化: 执行顺序表重构为 M1/M2/M3 里程碑(北极星: 30 篇合格档案);M1 细化为七个工作流——A 冷启动+批量建档(★★★)、B 质量自动守门 rubric 代码化(★★★)、C Zotero 划注导入(★★,差异化)、D Knowledge Review 深化、E 健康度徽标、F 会话手动沉淀、G 耐久性。冒烟点验通过,页码 chip 与 usage 指标项关闭。M2 进入信号定义为用户行为(自然 @ 旧论文)而非日期。
-- **2026-07-10** 验证流程分级精简: 正式验证只保留 1 篇论文的冒烟点验(chip 跳页/禁用态/Evidence chip);token/latency 3×5 矩阵取消,改日常随手记录;digest 质量样例与 occupancy 信号调研降级为非阻塞;Knowledge Surface rubric 评分样本改由冷启动(#7)产出提供。开发主线: 冒烟点验 → 9b 托管准备 → #7 冷启动。
-- **2026-07-10** 会话级 Codex 模型选择落地(ADR 0006): 侧栏从 `codex debug models` 动态加载当前 provider/account 可用模型，选择值按 Chat Session 持久化并用于 fresh/resume turn；保留 `thread_id` 连续性，用户显式选择失败时不静默回退，`Codex default` 继续继承本机配置。
-- **2026-07-10** Vault 远程托管规划入档(§2.8): 确认 git 为整 Vault 级单仓库(层级正确,保持);发现实际偏差——`.logs/` 被追踪(`.gitignore` 仅 `*/code/`),需加固 + 存量 untrack;托管默认 private 仓库(text.txt 版权/conversations 隐私),V1 单机单写 + 手动 push,多机 merge 留待独立 ADR。执行顺序新增 9b。
-- **2026-07-10** Codex 能力面撬动策略入档(§7): 接入判据四问(Vault 价值/真相源边界/配置边界/降级路径),本机验证的能力清单(skills、MCP、browser_use/computer_use stable、图像输入、模型路由)与产品映射,论文发现建议收件箱(§7.3)与 Notion 单向投影(§7.4)进入执行顺序 15/16。ADR 0005 定位为该策略的第一个实例。
-- **2026-07-10** Knowledge Surface 质量验收基线建立: 新增 `docs/benchmarks/knowledge-surface-quality.md`,定义 100 分 rubric、硬失败门槛、七节/Abstract/append-bloat/关系格式/grounding 的验收方法,以及基于 Codex activity 的 Knowledge reuse rate(`M-only`/`M→T`/`T-first`/`No-read`)。页码与 context dogfooding 协议扩展为 3–5 篇论文 × fresh/resume/digest 的固定提示词和证据矩阵;真实 Zotero 点击结果仍待人工填写,不以单测替代。
-- **2026-07-10** ADR 0005(分层 PDF 解析)落定: PDFWorker 确定性抽取保持 `text.txt` 唯一默认写入路径;Codex pdf-skill(实为 poppler+python prompt 工作流,非内置解析器)定位为 opt-in 增强层——扫描件兜底(§2.7)与图表理解(§2.6)——机械校验 + `parserSource` 溯源 + 依赖探测降级。执行顺序表重排: dogfooding 验证与 Knowledge Surface 质量验收机制前置,源码抓取分析从 deferred 提升。
-- **2026-07** 页码证据 chip 落地: `src/services/page-evidence.ts` 纯解析层(`[page N]` → 分段),`src/modules/page-jump.ts` reader 跳页适配(navigate → internalReader → PDFViewerApplication 分级 fallback),sidebar 渲染 chip(跳过 pre/code/a,Knowledge review 块 Evidence 同样 chip 化),不可跳转显示禁用态且点击可自愈重判。dogfooding 清单与 token/latency、digest 质量记录表见 `docs/benchmarks/page-evidence-dogfooding.md`。
-- **2026-07** `76d5fbd` Research Turn Orchestration 抽离: `src/services/research-turn/`(orchestrator/prompt/activity/relationships)承接 Codex/Vault turn 生命周期,`sidebar.ts` 回归 UI 职责;条件化上下文注入(resume 不注入 digest/recent);compact 后清空 `codexThreadId`;resume 非超时失败降级 fresh thread 重试一次;`message-format.ts` 中立模块消除分层倒置。61 个单测覆盖。
-- **2026-07** `7973850` Codex context 管理落地: hidden Context Digest(cheap model → default model → 确定性兜底),`context-window.ts` 从 Codex 配置/catalog 解析模型窗口元数据,per-turn token usage 统计,manual compact 状态条与 digest debug 视图;ADR 0003(Paper Knowledge Record / Structured Projection)、ADR 0004(Hidden Context Digest)。原 70% 提示 / 85% 自动压缩因误用累计 `input_tokens` 已在 dogfooding 中撤回,遗留项见 §2.5。
+Topic Note / Living Survey (Phase 4), a paper-discovery suggestion inbox (Section 7.3), and
+Notion projection (Section 7.4). The system begins to drive reading in the reverse direction:
+it tells the user what to read and where the field's understanding has gaps. This depends
+entirely on the inventory and quality built in M1/M2.
+
+## 7. Strategy for Activating Codex Capabilities
+
+Codex is more than a question-answering engine. It comes with an extensible capability
+surface: **skills** (`~/.codex/skills/`, including pdf/playwright on this machine),
+**MCP servers** (`codex mcp add`, which can connect Notion/arXiv/Semantic Scholar and others),
+**browser_use / computer_use** (stable and enabled locally), **image input**
+(`codex exec -i`), and **model routing** (`--model` with a cheap model, already used for
+digests). The product strategy is to continually turn these native capabilities into input
+and output channels for the knowledge system instead of rebuilding them. The layered pdf-skill
+design in ADR 0005 is the first example of this strategy.
+
+### 7.1 Integration Criteria (Four Questions Before Every Integration)
+
+1. **Value**: Does it make Vault knowledge richer, more accurate, or more useful (the three
+   criteria in Section 1)?
+2. **Source-of-truth boundary**: The Vault remains the only source of truth. External systems
+   such as Notion may only be projection/publishing targets or sources of suggestions; they
+   must never become a second source of truth.
+3. **Configuration boundary**: Do not silently modify the user's `~/.codex` configuration
+   (the principle already established in Section 2). Enabling an MCP server or skill must be
+   opt-in; the plugin is responsible for detecting availability and guiding installation.
+4. **Fallback path**: When a capability is unavailable, the default primary path must remain
+   fully usable (following the dependency-detection fallback in ADR 0005).
+
+### 7.2 Capability-to-Product Mapping
+
+| Native Codex capability | Local verification | Product use | Destination |
+| ---- | ---- | ---- | ---- |
+| pdf skill (poppler + Python workflow) | ✅ Installed and reviewed | Scanned-document fallback, on-demand page rendering | Sections 2.6/2.7, ADR 0005 |
+| Image input `codex exec -i` | ✅ CLI supported | Screenshot/figure understanding | Section 2.6 |
+| Model catalog + `--model` | ✅ In use | Dynamically choose a model per Chat Session; use a separate cheap-model fallback for digests | ADR 0004/0006, implemented |
+| shell + git (source-code reading) | ✅ Core capability | Clone and analyze paper code repositories | Execution order 12 |
+| playwright skill / browser_use | ✅ Installed / stable and enabled | Discover paper landing pages, Papers with Code, and code repositories; search the key paper network | Section 7.3 Paper Discovery |
+| MCP servers (`codex mcp add`) | ✅ CLI supported | arXiv/Semantic Scholar search; Notion projection sync | Sections 7.3/7.4 |
+| Scheduled execution | ❌ Codex has no resident scheduler | Plugin/OS scheduler triggers `codex exec` inspections | Section 7.3, constrained by Section 4.3 |
+
+### 7.3 Paper Discovery and Scheduled Inspections
+
+- The user defines areas of interest (which may be derived from Topic Notes or frequent Vault
+  topics). The plugin periodically, or manually, triggers a read-only Codex turn that uses
+  browser_use/MCP to search for new papers.
+- Results enter a **suggestion inbox**: candidate papers plus reasons they relate to existing
+  Vault records. This is constrained by the cautious-proactivity rule in Section 4.3:
+  produce suggestions only, do not write silently and do not download automatically.
+- After the user accepts a suggestion, follow the normal ingestion path: add it to Zotero,
+  create the Paper Directory, and perform a cold-start record build.
+
+### 7.4 Integration with Notion and Other External Systems
+
+- Direction: **prefer one-way projection**. Publish Knowledge Surfaces, Topic Notes, and
+  Living Surveys to Notion for sharing and mobile reading while keeping the Vault as the sole
+  source of truth.
+- Candidate implementation: a Notion MCP server executed by Codex during a user-triggered
+  "publish" turn.
+- Two-way synchronization (bringing Notion notes back into the Vault) is a separate major
+  decision that requires its own ADR and is out of scope by default.
+
+## 8. Progress Log
+
+- **2026-07-11** ADR 0011 (write-discipline file split) and ADR 0012 (tiered engagement
+  depth) written. 0011: `memory.md` = plugin-marked block (bibliography/abstract, model
+  read-only) + interpretation area; Reader Thinking moves to append-only, attributed
+  `notes.md`; Evidence Pointers becomes a derived anchor index in `record.json`
+  (`knowledgeSurfaceVersion` 1→2, `recordProjectionVersion` 2→3). 0012: plugin-owned `tier`
+  frontmatter (L0-L3, cold-start default L1), tier templates (seven-section shape = L2),
+  optional `valueTypes` vocabulary, rewrite-not-append transitions with UI-confirmed
+  upgrades, tier-aware gates with a repair path, minimal cognitive labels. Both migrate in
+  one `vault.json` version step; per-paper structure freezes after landing (P7).
+- **2026-07-10** Memory-philosophy alignment (M1.5 inserted as the current milestone):
+  `docs/memory-philosophy.md` (P1-P7) redefines the record's target shape - tiered engagement
+  (L0-L3), write-discipline file split (`notes.md` for Reader Thinking, plugin-marked
+  bibliography block), trust labels, and a proactive cold-start linking pass. Consequences
+  recorded in the roadmap: the north star is redefined from "30 records with all seven
+  sections" to "30 records at the appropriate tier passing tier-aware gates"; M1-2 is
+  reopened (gates and the quality rubric must become tier-aware and gain a repair path);
+  the P6 linking pass is reconciled with the Connection Trigger discipline as
+  proposals-only; **the 30-paper backfill is deferred until M1.5-1/2/3 land** because
+  structural migration cost scales with inventory (the Vault holds only a handful of papers
+  today). New ADRs required: file-layout revision (landed as 0011) and tier schema (landed
+  as 0012); `CONTEXT.md` terms to update during those ADRs.
+- **2026-07-10** M1 development scope completed (8 commits, 120 unit tests, build passing):
+  single-paper and batch cold start (cancellable/retryable/recoverable after closing),
+  post-turn four-category quality checks in review, opt-in Codex parsing with mechanical
+  validation for scans, PDF-page attachments and Cmd/Ctrl+V screenshots (`codex -i`),
+  clickable page numbers in user messages, `vault.json` schema + `memory.md` frontmatter +
+  `record.json` v2, Paper Signal Metadata (rating/collections/tags mirror/three keyword
+  sources), and per-session model + thinking-intensity selection; ADR 0007/0008 and
+  `docs/vault-remote.md`. **Closeout items**: (1) existing Vault migration takes effect on
+  the next plugin run and requires verification (`git ls-files` has no `.logs`,
+  `vault.json` exists); (2) the user must configure the private remote for the first push;
+  (3) enter the "use more" phase - build records for existing papers toward the 30-paper
+  north star and manually sample 3-5 outputs with the rubric. Start the M1-7 backlog when
+  usage pain justifies it.
+- **2026-07-10** Paper Signal Metadata was recorded (Section 2.9, M1-8): rating,
+  classification, and keywords are paper-node attributes, which together with Semantic
+  Relationships (edges) form the foundation for the M2 graph and M3 Topics. Decisions:
+  do not build a second classification system (mirror Zotero collections/tags into
+  `record.json`), place ratings in the Reader Thinking domain (taste capture), label the
+  provenance of the three keyword sources and review Codex suggestions, and make frontmatter
+  depend on `vault.json` versioning (implemented with M1-6). Added the Paper Signal Metadata
+  term to `CONTEXT.md`.
+- **2026-07-10** M1 was reordered at the product owner's discretion around "deep individual
+  paper understanding": cold start (1) and post-turn checker (2) remain ★★★; Codex PDF
+  enhancement parsing (3) and screenshot analysis (4) moved from M2 into M1 and were
+  positioned as the first capability-integration pattern (detect -> opt in -> validate ->
+  traceability, preparing for Notion/web search/paper retrieval/code analysis); selection
+  quoting was verified as implemented (popup Ask -> `[PDF Text]` quote block), with only
+  experience polish remaining in M1; annotation import/review deepening/health/manual
+  preservation were moved to the backlog.
+- **2026-07-10** Milestones reorganized and M1 refined: the execution-order table was
+  restructured into M1/M2/M3 milestones (north star: 30 qualified records); M1 was refined
+  into seven workflows - A cold start + batch creation (★★★), B automated quality-gate rubric
+  (★★★), C Zotero annotation import (★★, differentiation), D deeper Knowledge Review,
+  E health badge, F manual session preservation, and G durability. Smoke testing passed;
+  page chips and usage metrics were closed. M2 entry is defined by user behavior (naturally
+  mentioning old papers with `@`), not by date.
+- **2026-07-10** Verification was simplified into tiers: formal verification retains only the
+  smoke test for one paper (chip page jump/disabled state/Evidence chip); the token/latency
+  3x5 matrix was cancelled and replaced by casual daily notes; digest quality examples and
+  occupancy-signal research were downgraded to non-blocking; Knowledge Surface rubric samples
+  are now produced by cold start (#7). Main development path: smoke test -> 9b hosting
+  preparation -> #7 cold start.
+- **2026-07-10** Session-level Codex model selection landed (ADR 0006): the sidebar dynamically
+  loads the models available to the current provider/account from `codex debug models`; the
+  selection is persisted per Chat Session and used for fresh/resume turns; `thread_id`
+  continuity is retained; an explicit user selection does not silently fall back on failure;
+  `Codex default` continues to inherit the local machine configuration.
+- **2026-07-10** Remote Vault hosting planning was recorded (Section 2.8): confirmed that git
+  is one repository for the entire Vault (the hierarchy is correct and remains unchanged);
+  found the actual mismatch that `.logs/` is tracked (`.gitignore` contains only `*/code/`),
+  requiring hardening and an existing-data untrack; hosting defaults to a private repository
+  (copyright in `text.txt`, privacy in `conversations`), V1 assumes one machine and one
+  writer with manual pushes, and multi-machine merges are deferred to a separate ADR.
+  Execution order 9b was added.
+- **2026-07-10** The Codex capability activation strategy was recorded (Section 7):
+  four integration criteria (Vault value/source-of-truth/configuration/fallback), a locally
+  verified capability inventory (skills, MCP, stable browser_use/computer_use, image input,
+  and model routing), and product mappings. The paper-discovery suggestion inbox (Section
+  7.3) and one-way Notion projection (Section 7.4) were added to execution order 15/16.
+  ADR 0005 is positioned as the first example of this strategy.
+- **2026-07-10** Knowledge Surface quality acceptance baseline established:
+  added `docs/benchmarks/knowledge-surface-quality.md`, defining a 100-point rubric, hard
+  failure gates, acceptance methods for the seven sections/abstract/append bloat/relationship
+  format/grounding, and a Knowledge reuse rate based on Codex activity (`M-only`/`M→T`/
+  `T-first`/`No-read`). The page-evidence and context dogfooding protocol was expanded to a
+  fixed prompt and evidence matrix across 3-5 papers x fresh/resume/digest; real Zotero
+  click results still require manual entry and are not replaced by unit tests.
+- **2026-07-10** ADR 0005 (layered PDF parsing) finalized: deterministic PDFWorker extraction
+  remains the only default write path for `text.txt`; the Codex pdf skill (actually a
+  poppler + Python prompt workflow, not a built-in parser) is an opt-in enhancement layer for
+  scanned-document fallback (Section 2.7) and figure understanding (Section 2.6), with
+  mechanical validation, `parserSource` traceability, and dependency-detection fallback.
+  The execution-order table was reordered to bring dogfooding validation and the Knowledge
+  Surface quality-acceptance mechanism forward, and source-code retrieval/analysis was
+  promoted from deferred.
+- **2026-07** Page-evidence chips landed: `src/services/page-evidence.ts` is the pure parsing
+  layer (`[page N]` -> segments); `src/modules/page-jump.ts` adapts reader page navigation
+  (`navigate` -> `internalReader` -> `PDFViewerApplication` fallback levels); the sidebar
+  renders chips (skipping `pre`/`code`/`a`, with Evidence in Knowledge Review blocks also
+  rendered as chips); unclickable chips show a disabled state and clicking can re-evaluate
+  their status. The dogfooding checklist and token/latency and digest-quality logs are in
+  `docs/benchmarks/page-evidence-dogfooding.md`.
+- **2026-07** `76d5fbd` extracted Research Turn Orchestration:
+  `src/services/research-turn/` (orchestrator/prompt/activity/relationships) now owns the
+  Codex/Vault turn lifecycle; `sidebar.ts` returns to UI responsibilities; context injection
+  is conditional (resume does not inject digest/recent messages); compact clears
+  `codexThreadId`; non-timeout resume failures retry once with a fresh thread; and
+  `message-format.ts` is a neutral module that removes a layering inversion. Covered by 61
+  unit tests.
+- **2026-07** `7973850` implemented Codex context management: Hidden Context Digest (cheap
+  model -> default model -> deterministic fallback), `context-window.ts` parses model-window
+  metadata from Codex configuration/catalog, per-turn token usage statistics, a manual
+  compact status bar, and a digest debug view; ADR 0003 (Paper Knowledge Record / Structured
+  Projection) and ADR 0004 (Hidden Context Digest). The original 70% prompt / 85% automatic
+  compaction was withdrawn during dogfooding because it misused cumulative `input_tokens`;
+  remaining work is listed in Section 2.5.
