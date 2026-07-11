@@ -12,7 +12,8 @@ function installZoteroStub() {
     Items: {
       get: (itemId: number) => ({
         key: `KEY${itemId}`,
-        getField: (field: string) => (field === "title" ? `Paper ${itemId}` : ""),
+        getField: (field: string) =>
+          field === "title" ? `Paper ${itemId}` : "",
         getDisplayTitle: () => `Paper ${itemId}`,
       }),
     },
@@ -81,5 +82,69 @@ describe("ChatStore context digest", () => {
     const updated = store.getSession(7);
     expect(updated?.contextDigest).toBeUndefined();
     expect(updated?.contextDigestUpToMessageIndex).toBeUndefined();
+  });
+
+  it("restores a deleted message at its original position", () => {
+    installZoteroStub();
+    const store = new ChatStore();
+    store.createSession(7, "Main");
+    store.addMessage(7, { role: "user", content: "first" });
+    store.addMessage(7, { role: "assistant", content: "second" });
+    store.updateContextDigest(7, {
+      contextDigest: "# Context Digest",
+      contextDigestUpToMessageIndex: 1,
+      contextDigestUpdatedAt: 123,
+      contextDigestTokenEstimate: 4,
+      contextDigestSource: "deterministic",
+    });
+
+    const receipt = store.deleteMessage(7, 0);
+    expect(store.getMessages(7).map((message) => message.content)).toEqual([
+      "second",
+    ]);
+
+    expect(store.restoreMessage(receipt)).toEqual({ restored: true });
+    expect(store.getMessages(7).map((message) => message.content)).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(store.getSession(7)?.contextDigest).toBe("# Context Digest");
+  });
+
+  it("does not restore a message after a newer session change", () => {
+    installZoteroStub();
+    const store = new ChatStore();
+    store.createSession(7, "Main");
+    store.addMessage(7, { role: "user", content: "first" });
+    store.addMessage(7, { role: "assistant", content: "second" });
+
+    const receipt = store.deleteMessage(7, 0);
+    store.addMessage(7, { role: "user", content: "newer" });
+
+    expect(store.restoreMessage(receipt)).toEqual({
+      restored: false,
+      reason: "stale",
+    });
+    expect(store.getMessages(7).map((message) => message.content)).toEqual([
+      "second",
+      "newer",
+    ]);
+  });
+
+  it("restores a deleted active session and selects it again", () => {
+    installZoteroStub();
+    const store = new ChatStore();
+    const first = store.createSession(7, "First");
+    const second = store.createSession(7, "Second");
+    expect(second?.sessionId).toBe(store.getActiveSessionId(7));
+
+    const receipt = store.deleteSession(7, second?.sessionId);
+    expect(store.getSession(7)?.title).toBe("First");
+
+    expect(store.restoreSession(receipt)).toEqual({ restored: true });
+    expect(store.getSession(7)?.sessionId).toBe(second?.sessionId);
+    expect(store.listSessions(7).map((session) => session.title)).toContain(
+      first?.title,
+    );
   });
 });

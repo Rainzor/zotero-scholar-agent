@@ -22,11 +22,35 @@ export type ChatSessionSummary = {
   messageCount: number;
 };
 
+export type MessageDeleteReceipt = {
+  kind: "message";
+  itemId: number;
+  sessionId: string;
+  message: ChatMessage;
+  index: number;
+  contextDigest: ContextDigestState;
+  revision: number;
+};
+
+export type SessionDeleteReceipt = {
+  kind: "session";
+  itemId: number;
+  session: ChatSession;
+  index: number;
+  activeSessionId: string | null;
+  revision: number;
+};
+
+export type RestoreResult =
+  | { restored: true }
+  | { restored: false; reason: "missing" | "stale" };
+
 export class ChatStore {
   private readonly cacheByItemId = new Map<number, ItemSessionState>();
   private readonly diskByItemKey = new Map<string, PersistedItemStateV2>();
   private readonly diskItemIdToKey = new Map<number, string>();
   private readonly dirtyItemIds = new Set<number>();
+  private readonly revisionByItemId = new Map<number, number>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
 
@@ -185,28 +209,98 @@ export class ChatStore {
     this.markDirty(itemId);
   }
 
-  async deleteSession(itemId: number, sessionId?: string) {
+  deleteSession(
+    itemId: number,
+    sessionId?: string,
+  ): SessionDeleteReceipt | null {
     const state = this.getItemState(itemId);
-    if (!state) return;
+    if (!state) return null;
     const targetId = sessionId || state.activeSessionId || "";
     const idx = state.sessions.findIndex((s) => s.sessionId === targetId);
-    if (idx < 0) return;
+    if (idx < 0) return null;
+    const receipt: Omit<SessionDeleteReceipt, "revision"> = {
+      kind: "session",
+      itemId,
+      session: cloneSession(state.sessions[idx]),
+      index: idx,
+      activeSessionId: state.activeSessionId,
+    };
     state.sessions.splice(idx, 1);
     state.activeSessionId = state.sessions[0]?.sessionId || null;
     if (state.sessions.length === 0) {
       this.cacheByItemId.set(itemId, state);
     }
     this.markDirty(itemId);
+    return { ...receipt, revision: this.getRevision(itemId) };
   }
 
-  deleteMessage(itemId: number, msgIndex: number) {
+  deleteMessage(itemId: number, msgIndex: number): MessageDeleteReceipt | null {
     const session = this.getSession(itemId);
-    if (!session) return;
-    if (msgIndex < 0 || msgIndex >= session.messages.length) return;
+    if (!session) return null;
+    if (msgIndex < 0 || msgIndex >= session.messages.length) return null;
+    const receipt: Omit<MessageDeleteReceipt, "revision"> = {
+      kind: "message",
+      itemId,
+      sessionId: session.sessionId,
+      message: cloneMessage(session.messages[msgIndex]),
+      index: msgIndex,
+      contextDigest: this.snapshotSessionDigest(session),
+    };
     session.messages.splice(msgIndex, 1);
     this.clearSessionDigest(session);
     session.updatedAt = Date.now();
     this.markDirty(itemId);
+    return { ...receipt, revision: this.getRevision(itemId) };
+  }
+
+  restoreMessage(
+    receipt: MessageDeleteReceipt | null | undefined,
+  ): RestoreResult {
+    if (!receipt) return { restored: false, reason: "missing" };
+    if (this.getRevision(receipt.itemId) !== receipt.revision) {
+      return { restored: false, reason: "stale" };
+    }
+    const state = this.getItemState(receipt.itemId);
+    if (!state) return { restored: false, reason: "missing" };
+    const session = state.sessions.find(
+      (entry) => entry.sessionId === receipt.sessionId,
+    );
+    if (!session) return { restored: false, reason: "missing" };
+    session.messages.splice(
+      Math.min(receipt.index, session.messages.length),
+      0,
+      cloneMessage(receipt.message),
+    );
+    this.restoreSessionDigest(session, receipt.contextDigest);
+    session.updatedAt = Date.now();
+    this.markDirty(receipt.itemId);
+    return { restored: true };
+  }
+
+  restoreSession(
+    receipt: SessionDeleteReceipt | null | undefined,
+  ): RestoreResult {
+    if (!receipt) return { restored: false, reason: "missing" };
+    if (this.getRevision(receipt.itemId) !== receipt.revision) {
+      return { restored: false, reason: "stale" };
+    }
+    const state = this.getItemState(receipt.itemId);
+    if (!state) return { restored: false, reason: "missing" };
+    if (
+      state.sessions.some(
+        (entry) => entry.sessionId === receipt.session.sessionId,
+      )
+    ) {
+      return { restored: false, reason: "stale" };
+    }
+    state.sessions.splice(
+      Math.min(receipt.index, state.sessions.length),
+      0,
+      cloneSession(receipt.session),
+    );
+    state.activeSessionId = receipt.activeSessionId;
+    this.markDirty(receipt.itemId);
+    return { restored: true };
   }
 
   truncateMessagesFrom(itemId: number, fromIndex: number) {
@@ -375,13 +469,36 @@ export class ChatStore {
     delete session.contextDigestSource;
   }
 
+  private snapshotSessionDigest(session: ChatSession): ContextDigestState {
+    return {
+      contextDigest: session.contextDigest,
+      contextDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
+      contextDigestUpdatedAt: session.contextDigestUpdatedAt,
+      contextDigestTokenEstimate: session.contextDigestTokenEstimate,
+      contextDigestSource: session.contextDigestSource,
+    };
+  }
+
+  private restoreSessionDigest(
+    session: ChatSession,
+    digest: ContextDigestState,
+  ): void {
+    this.clearSessionDigest(session);
+    Object.assign(session, digest);
+  }
+
   private markDirty(itemId: number) {
+    this.revisionByItemId.set(itemId, this.getRevision(itemId) + 1);
     this.dirtyItemIds.add(itemId);
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       void this.flushDirty();
     }, 500);
+  }
+
+  private getRevision(itemId: number): number {
+    return this.revisionByItemId.get(itemId) || 0;
   }
 
   private async flushDirty() {
@@ -491,6 +608,14 @@ export class ChatStore {
       ignoreExisting: true,
     });
   }
+}
+
+function cloneMessage(message: ChatMessage): ChatMessage {
+  return JSON.parse(JSON.stringify(message)) as ChatMessage;
+}
+
+function cloneSession(session: ChatSession): ChatSession {
+  return JSON.parse(JSON.stringify(session)) as ChatSession;
 }
 
 export const chatStore = new ChatStore();

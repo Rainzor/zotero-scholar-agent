@@ -35,27 +35,45 @@ import {
   jumpToReaderPage,
   type PageJumpState,
 } from "./page-jump";
-import type {
-  ChatMessage,
-  CodexActivity,
-  PaperContext,
-  TokenUsage,
-} from "../addon";
+import { getIconSvg, insertSvgMarkup, setIconButton } from "./sidebar/icons";
+import { showUndoToast } from "./sidebar/feedback";
+import { autoResizeTextarea } from "./sidebar/composer";
+import {
+  isNearBottom,
+  scrollToBottomIfPinned,
+} from "./sidebar/scroll";
+import {
+  bindSessionControls,
+  createSessionActionElements,
+  syncSessionTitle,
+} from "./sidebar/session-controls";
+import {
+  syncModelControls,
+  updateModelSelectorTitle,
+} from "./sidebar/model-controls";
+import { renderContextDigestStatus as renderDigestStatus } from "./sidebar/context-digest-view";
+import {
+  createMessageAvatar,
+  createMessageHeader,
+  renderMessageList,
+} from "./sidebar/message-list-view";
+import {
+  extractRawUserText,
+  renderUserMessage as renderUserMessageView,
+} from "./sidebar/user-message-view";
+import type { ChatMessage, PaperContext, TokenUsage } from "../addon";
 import { chatStore } from "../services/chat-store";
 import { getZoteroPaperMeta } from "../services/zotero-paper-metadata";
 import {
-  listCodexModels,
   listVaultPapers,
   readPaperMemory,
   searchVaultMemory,
   PaperTextUnavailableError,
   acceptPaperKeyword,
   updatePaperRating,
-  type CodexModelCatalogEntry,
   type CodexReasoningEffort,
   type PaperVaultMeta,
   type RunningLineProcess,
-  type SemanticRelationship,
   type VaultSearchHit,
 } from "../services/codex";
 
@@ -64,7 +82,6 @@ let activeBody: HTMLElement | null = null;
 let activeCodexProcess: RunningLineProcess | null = null;
 let isGenerating = false;
 let mentionRequestSeq = 0;
-let modelRequestSeq = 0;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
@@ -524,8 +541,7 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   const refresh = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   refresh.id = "zoteroagent-memory-refresh";
   refresh.className = "zoteroagent-memory-refresh";
-  refresh.title = "Refresh";
-  refresh.textContent = "\u21bb";
+  setIconButton(refresh, "refresh", "Refresh");
 
   const sort = doc.createElementNS(XHTML, "select") as HTMLSelectElement;
   sort.id = "zoteroagent-memory-sort";
@@ -698,9 +714,7 @@ async function appendPaperMemoryCard(
   const content = await readPaperMemory(itemKey);
   const surface = parseKnowledgeSurface(content);
   if (paper) {
-    card.appendChild(
-      buildPaperSignalBar(body, host, paper, surface.signals),
-    );
+    card.appendChild(buildPaperSignalBar(body, host, paper, surface.signals));
     const quality = evaluateKnowledgeSurface({
       after: content,
       sourceAbstract: paper.abstract,
@@ -778,10 +792,11 @@ async function startPaperColdStart(
   body.dataset.coldStartBusy = "true";
   button.textContent = "Cancel";
   setGenerating(body, true);
-  const model = chatStore.getSession(paper.itemId)?.modelSlug || "";
+  const session = chatStore.getSession(paper.itemId);
+  const model = session?.modelSlug || "";
   try {
     const result = await runPaperColdStart(
-      { paper, pdfItemId, model },
+      { paper, pdfItemId, model, reasoningEffort: session?.reasoningEffort },
       {
         onStatus: (text) => {
           if (isSafeBody(body)) status.textContent = text;
@@ -1026,14 +1041,6 @@ function ensureChatUI(body: HTMLElement) {
   sessionRow.id = "zoteroagent-session-row";
   sessionRow.className = "zoteroagent-session-row";
 
-  const sessionSelect = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "select",
-  ) as HTMLSelectElement;
-  sessionSelect.id = "zoteroagent-session-select";
-  sessionSelect.className = "zoteroagent-session-select";
-  sessionSelect.style.display = "none";
-
   const sessionTitle = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "span",
@@ -1058,21 +1065,11 @@ function ensureChatUI(body: HTMLElement) {
   historyBtn.className = "zoteroagent-session-action icon-only";
   setIconButton(historyBtn, "history", "History");
 
-  const renameSessionBtn = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "button",
-  ) as HTMLButtonElement;
-  renameSessionBtn.id = "zoteroagent-session-rename";
-  renameSessionBtn.className = "zoteroagent-session-action icon-only";
-  setIconButton(renameSessionBtn, "rename", "Rename session");
-
-  const deleteSessionBtn = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "button",
-  ) as HTMLButtonElement;
-  deleteSessionBtn.id = "zoteroagent-session-delete";
-  deleteSessionBtn.className = "zoteroagent-session-action danger icon-only";
-  setIconButton(deleteSessionBtn, "delete", "Delete session");
+  const {
+    menuToggle: sessionMenuBtn,
+    menu: sessionMenu,
+    deleteConfirm: sessionDeleteConfirm,
+  } = createSessionActionElements(doc);
 
   const historyPanel = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -1083,11 +1080,9 @@ function ensureChatUI(body: HTMLElement) {
   historyPanel.style.display = "none";
 
   sessionRow.appendChild(sessionTitle);
-  sessionRow.appendChild(sessionSelect);
   sessionRow.appendChild(newSessionBtn);
   sessionRow.appendChild(historyBtn);
-  sessionRow.appendChild(renameSessionBtn);
-  sessionRow.appendChild(deleteSessionBtn);
+  sessionRow.appendChild(sessionMenuBtn);
 
   const contextDigestBar = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -1113,7 +1108,7 @@ function ensureChatUI(body: HTMLElement) {
     "textarea",
   ) as HTMLTextAreaElement;
   textarea.id = "zoteroagent-chat-input";
-  textarea.rows = 3;
+  textarea.rows = 1;
   textarea.placeholder = "Ask about this paper...";
 
   const contextChips = doc.createElementNS(
@@ -1221,6 +1216,8 @@ function ensureChatUI(body: HTMLElement) {
   headerWrap.className = "zoteroagent-header-wrap";
   headerWrap.appendChild(viewTabs);
   headerWrap.appendChild(sessionRow);
+  headerWrap.appendChild(sessionMenu);
+  headerWrap.appendChild(sessionDeleteConfirm);
   headerWrap.appendChild(contextDigestBar);
   headerWrap.appendChild(historyPanel);
 
@@ -1237,11 +1234,12 @@ function ensureChatUI(body: HTMLElement) {
   quotePopup.id = "zoteroagent-quote-popup";
   quotePopup.className = "zoteroagent-quote-popup";
   quotePopup.type = "button";
-  quotePopup.textContent = "❞ Quote";
+  setIconButton(quotePopup, "quote", "Quote selection");
   container.appendChild(quotePopup);
   body.appendChild(container);
 
   bindChatEvents(body);
+  autoResizeTextarea(textarea);
 }
 
 function bindChatEvents(body: HTMLElement) {
@@ -1275,10 +1273,7 @@ function bindChatEvents(body: HTMLElement) {
   body
     .querySelector("#zoteroagent-attach-page")
     ?.addEventListener("click", (event) => {
-      void attachCurrentPdfPage(
-        body,
-        event.currentTarget as HTMLButtonElement,
-      );
+      void attachCurrentPdfPage(body, event.currentTarget as HTMLButtonElement);
     });
   body
     .querySelector("#zoteroagent-chat-input")
@@ -1298,6 +1293,10 @@ function bindChatEvents(body: HTMLElement) {
   body
     .querySelector("#zoteroagent-chat-input")
     ?.addEventListener("input", () => {
+      const input = body.querySelector(
+        "#zoteroagent-chat-input",
+      ) as HTMLTextAreaElement | null;
+      if (input) autoResizeTextarea(input);
       void updateMentionAutocomplete(body);
     });
   body
@@ -1306,17 +1305,6 @@ function bindChatEvents(body: HTMLElement) {
       body.ownerDocument.defaultView?.setTimeout(() => {
         hideMentionAutocomplete(body);
       }, 150);
-    });
-  body
-    .querySelector("#zoteroagent-session-select")
-    ?.addEventListener("change", (event) => {
-      const sessionId = (event.target as HTMLSelectElement).value;
-      const itemId = Number(body.dataset.itemID);
-      if (itemId > 0 && sessionId) {
-        chatStore.setActiveSession(itemId, sessionId);
-        renderMessages(body, itemId);
-        syncLayoutState(body, itemId);
-      }
     });
   body
     .querySelector("#zoteroagent-model-select")
@@ -1329,7 +1317,7 @@ function bindChatEvents(body: HTMLElement) {
       const select = event.target as HTMLSelectElement;
       chatStore.updateSessionModel(itemId, select.value, session.sessionId);
       updateModelSelectorTitle(select, select.value);
-      void syncModelSelector(body, itemId);
+      void syncModelControls(body, itemId, { isGenerating: () => isGenerating, isSafeBody });
     });
   body
     .querySelector("#zoteroagent-reasoning-select")
@@ -1354,7 +1342,7 @@ function bindChatEvents(body: HTMLElement) {
       const session = chatStore.createSession(itemId);
       if (!session) return;
       body.dataset.chatMode = "chat";
-      syncSessionSelector(body, itemId);
+      syncSessionHeader(body, itemId);
       renderMessages(body, itemId);
       syncLayoutState(body, itemId);
       (
@@ -1363,40 +1351,17 @@ function bindChatEvents(body: HTMLElement) {
         ) as HTMLTextAreaElement | null
       )?.focus();
     });
-  body
-    .querySelector("#zoteroagent-session-rename")
-    ?.addEventListener("click", () => {
-      const itemId = Number(body.dataset.itemID);
-      if (itemId <= 0) return;
-      const session = chatStore.getSession(itemId);
-      if (!session) return;
-      const currentTitle = session.title;
-      const next = body.ownerDocument.defaultView?.prompt(
-        "Session title",
-        currentTitle,
-      );
-      if (!next || !next.trim()) return;
-      chatStore.renameSession(itemId, next, session.sessionId);
-      syncSessionSelector(body, itemId);
-    });
-  body
-    .querySelector("#zoteroagent-session-delete")
-    ?.addEventListener("click", () => {
-      const itemId = Number(body.dataset.itemID);
-      if (itemId <= 0) return;
-      const ok = body.ownerDocument.defaultView?.confirm(
-        "Delete this session history?",
-      );
-      if (!ok) return;
-      const active = chatStore.getSession(itemId);
-      if (!active) return;
-      void chatStore.deleteSession(itemId, active.sessionId).then(() => {
-        if (!isSafeBody(body)) return;
-        renderMessages(body, itemId);
-        syncSessionSelector(body, itemId);
-        syncLayoutState(body, itemId);
-      });
-    });
+  bindSessionControls(body, {
+    isGenerating: () => isGenerating,
+    compact: (itemId) => {
+      void compactSessionContext(body, itemId, "manual");
+    },
+    refresh: (itemId) => {
+      renderMessages(body, itemId);
+      syncSessionHeader(body, itemId);
+      syncLayoutState(body, itemId);
+    },
+  });
   body
     .querySelector("#zoteroagent-session-history")
     ?.addEventListener("click", () => {
@@ -1433,9 +1398,22 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   const attachPage = body.querySelector(
     "#zoteroagent-attach-page",
   ) as HTMLButtonElement | null;
+  const sessionActions = Array.from(
+    body.querySelectorAll(
+      "#zoteroagent-session-new, #zoteroagent-session-history, #zoteroagent-session-menu-toggle",
+    ),
+  ) as HTMLButtonElement[];
   if (modelSelect) modelSelect.disabled = generating;
   if (reasoningSelect) reasoningSelect.disabled = generating;
   if (attachPage) attachPage.disabled = generating;
+  for (const action of sessionActions) action.disabled = generating;
+  for (const action of Array.from(
+    body.querySelectorAll(
+      ".zoteroagent-delete-button, .zoteroagent-edit-button",
+    ),
+  ) as HTMLButtonElement[]) {
+    action.disabled = generating;
+  }
   if (sendBtn) {
     if (generating) {
       sendBtn.classList.add("is-stop");
@@ -1463,6 +1441,7 @@ function showAgentStatus(
     "#zoteroagent-chat-messages",
   ) as HTMLElement | null;
   if (!container) return;
+  const shouldStayPinned = isNearBottom(container);
 
   const msgWrapper = container.querySelector(
     ".zoteroagent-message.assistant:last-child",
@@ -1483,9 +1462,7 @@ function showAgentStatus(
       "http://www.w3.org/1999/xhtml",
       "div",
     ) as HTMLElement;
-    const insertRef =
-      mainEl.querySelector(".zoteroagent-thinking") ||
-      mainEl.querySelector(".zoteroagent-message-content");
+    const insertRef = mainEl.querySelector(".zoteroagent-message-content");
     if (insertRef) {
       mainEl.insertBefore(statusEl, insertRef);
     } else {
@@ -1497,9 +1474,7 @@ function showAgentStatus(
   statusEl.dataset.animated = String(presentation.animated);
   statusEl.textContent = text || "Generating...";
 
-  if (isNearBottom(container)) {
-    container.scrollTop = container.scrollHeight;
-  }
+  scrollToBottomIfPinned(container, shouldStayPinned);
 }
 
 function hideAgentStatus(body: HTMLElement) {
@@ -1571,7 +1546,7 @@ async function compactSessionContext(
   if (!session || session.messages.length === 0) return;
   if (body.dataset.contextDigestBusy === "true") return;
   body.dataset.contextDigestBusy = "true";
-  renderContextDigestStatus(body, itemId, "Compacting hidden context...");
+  renderDigestStatus(body, itemId, isGenerating, "Compacting hidden context...");
   const paperMeta = getPaperMeta(itemId);
   const isActivePane = () =>
     isSafeBody(body) && Number(body.dataset.itemID) === itemId;
@@ -1584,7 +1559,7 @@ async function compactSessionContext(
       previousDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
       onStatus: (text) => {
         if (trigger === "auto" && isActivePane()) showAgentStatus(body, text);
-        if (isActivePane()) renderContextDigestStatus(body, itemId, text);
+        if (isActivePane()) renderDigestStatus(body, itemId, isGenerating, text);
       },
     });
     chatStore.updateContextDigest(itemId, digest, session.sessionId);
@@ -1592,7 +1567,7 @@ async function compactSessionContext(
     ztoolkit.log("[Agent] Context digest compaction error:", error);
   } finally {
     delete body.dataset.contextDigestBusy;
-    if (isActivePane()) renderContextDigestStatus(body, itemId);
+    if (isActivePane()) renderDigestStatus(body, itemId, isGenerating);
   }
 }
 
@@ -1746,9 +1721,10 @@ async function submitQuestion(body: HTMLElement) {
     addon.data.chat.mentionedPapers,
     paperMeta.itemKey,
   );
-  const imageRefs = addon.data.chat.pendingImages.filter((ref) =>
-    ref.relativePath.startsWith(`${paperMeta.itemKey}/`) &&
-    ref.sessionId === chatStore.getActiveSessionId(itemId),
+  const imageRefs = addon.data.chat.pendingImages.filter(
+    (ref) =>
+      ref.relativePath.startsWith(`${paperMeta.itemKey}/`) &&
+      ref.sessionId === chatStore.getActiveSessionId(itemId),
   );
   const imagePaths = await resolveLocalImagePaths(imageRefs);
   const priorVisibleMessages = chatStore
@@ -1774,6 +1750,7 @@ async function submitQuestion(body: HTMLElement) {
     imageRefs: imageRefs.map((ref) => ({ ...ref })),
   });
   input.value = "";
+  autoResizeTextarea(input);
   addon.data.chat.referenceText = "";
   addon.data.chat.responseQuote = "";
   addon.data.chat.mentionedPapers = [];
@@ -1818,48 +1795,52 @@ async function submitQuestion(body: HTMLElement) {
 
   try {
     let lastRefresh = 0;
-    const result = await runResearchTurn({
-      paper: paperMeta,
-      pdfItemId,
-      question: aiQuestion,
-      mentionedPapers,
-      session: {
-        sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
-        codexThreadId: session?.codexThreadId || "",
-        modelSlug: selectedModel,
-        reasoningEffort: session?.reasoningEffort,
-        contextDigest: session?.contextDigest,
-        contextDigestUpToMessageIndex: session?.contextDigestUpToMessageIndex,
+    const result = await runResearchTurn(
+      {
+        paper: paperMeta,
+        pdfItemId,
+        question: aiQuestion,
+        mentionedPapers,
+        session: {
+          sessionId: session?.sessionId || chatStore.getActiveSessionId(itemId),
+          codexThreadId: session?.codexThreadId || "",
+          modelSlug: selectedModel,
+          reasoningEffort: session?.reasoningEffort,
+          contextDigest: session?.contextDigest,
+          contextDigestUpToMessageIndex: session?.contextDigestUpToMessageIndex,
+        },
+        priorVisibleMessages,
+        userDisplayContent: conversationDisplayContent,
+        images: imagePaths,
       },
-      priorVisibleMessages,
-      userDisplayContent: conversationDisplayContent,
-      images: imagePaths,
-    }, {
-      onStatus: (text) => {
-        if (isActivePane()) showAgentStatus(body, text);
+      {
+        onStatus: (text) => {
+          if (isActivePane()) showAgentStatus(body, text);
+        },
+        onProcess: (proc) => {
+          activeCodexProcess = proc;
+        },
+        onActivities: (activities) => {
+          assistant.activities = activities.slice();
+        },
+        onChunk: (state) => {
+          assistant.content = state.content;
+          assistant.reasoning = state.reasoning;
+          if (state.usage) assistant.usage = state.usage;
+          const now = Date.now();
+          if (now - lastRefresh > 150) {
+            lastRefresh = now;
+            if (isActivePane()) updateStreamingMessage(body, state);
+          }
+        },
       },
-      onProcess: (proc) => {
-        activeCodexProcess = proc;
-      },
-      onActivities: (activities) => {
-        assistant.activities = activities.slice();
-      },
-      onChunk: (state) => {
-        assistant.content = state.content;
-        assistant.reasoning = state.reasoning;
-        if (state.usage) assistant.usage = state.usage;
-        const now = Date.now();
-        if (now - lastRefresh > 150) {
-          lastRefresh = now;
-          if (isActivePane()) updateStreamingMessage(body, state);
-        }
-      },
-    });
+    );
     assistant.content = result.content || assistant.content;
     assistant.reasoning = result.reasoning || assistant.reasoning;
     if (result.usage) assistant.usage = result.usage;
     assistant.model = getModelLabel(result.usage?.modelSlug || selectedModel);
-    if (result.activities.length) assistant.activities = result.activities.slice();
+    if (result.activities.length)
+      assistant.activities = result.activities.slice();
     if (result.resumedFreshThread) {
       if (isActivePane()) {
         showAgentStatus(
@@ -1905,7 +1886,7 @@ function maybeGenerateSessionTitleLocal(
   if (!title) return;
   chatStore.renameSession(itemId, title);
   if (isSafeBody(body) && Number(body.dataset.itemID) === itemId)
-    syncSessionSelector(body, itemId);
+    syncSessionHeader(body, itemId);
 }
 
 // ===================== Rendering =====================
@@ -1946,81 +1927,6 @@ async function copyTextToClipboard(
   }
 }
 
-type IconName =
-  | "copy"
-  | "delete"
-  | "new"
-  | "rename"
-  | "clear"
-  | "check"
-  | "error"
-  | "history"
-  | "attach"
-  | "attachPdf"
-  | "edit"
-  | "image"
-  | "send";
-
-function getIconSvg(icon: IconName): string {
-  switch (icon) {
-    case "attach":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.2 10.9l4.7-4.7a2.5 2.5 0 113.5 3.5l-5.8 5.8a4 4 0 11-5.7-5.7l5.8-5.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "attachPdf":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 2.8h6.5l3.5 3.6v10.8a1.8 1.8 0 01-1.8 1.8H6a1.8 1.8 0 01-1.8-1.8V4.6A1.8 1.8 0 016 2.8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12.5 2.9V6.4h3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.1 11.6h5.8M7.1 14.3h4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
-    case "history":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4.5l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "edit":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.6 3.6a2.1 2.1 0 013 3L7.3 15.8l-4 1 1-4L13.6 3.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "send":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h13M10.5 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "image":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="8" r="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 14l3.5-3.5 2.4 2.2 2.2-2.2 3 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "copy":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="4" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="4" y="7" width="9" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
-    case "delete":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 6v-1.1c0-.9.7-1.6 1.6-1.6h1.8c.9 0 1.6.7 1.6 1.6V6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 6l.7 9.2c.1.8.7 1.5 1.5 1.5h2.6c.8 0 1.5-.7 1.5-1.5l.7-9.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 8.4v5.8M11 8.4v5.8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
-    case "new":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-    case "rename":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 13.6l-.4 2.8 2.8-.4 7.8-7.8-2.4-2.4-7.8 7.8z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.9 5.5l2.4 2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.8 16.4h12.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
-    case "clear":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.2 5.2l9.6 9.6M14.8 5.2l-9.6 9.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-    case "check":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.4 3.4 7.6-7.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    case "error":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
-    default:
-      return "";
-  }
-}
-
-function setIconButton(btn: HTMLButtonElement, icon: IconName, label: string) {
-  btn.classList.add("zoteroagent-icon-button");
-  btn.setAttribute("aria-label", label);
-  btn.title = label;
-  insertSvgMarkup(btn, getIconSvg(icon));
-}
-
-function insertSvgMarkup(el: HTMLElement, svgMarkup: string) {
-  while (el.firstChild) el.removeChild(el.firstChild);
-  if (!svgMarkup) return;
-  try {
-    const win = el.ownerDocument.defaultView;
-    if (!win) throw new Error("no window");
-    const svgDoc = new win.DOMParser().parseFromString(
-      svgMarkup,
-      "image/svg+xml",
-    );
-    if (!svgDoc.querySelector("parsererror")) {
-      el.appendChild(el.ownerDocument.adoptNode(svgDoc.documentElement));
-      return;
-    }
-  } catch (_e) {
-    /* fallback */
-  }
-  el.textContent = el.getAttribute("aria-label")?.charAt(0) || "?";
-}
-
 function createAssistantCopyButton(doc: Document): HTMLButtonElement {
   const btn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -2031,6 +1937,7 @@ function createAssistantCopyButton(doc: Document): HTMLButtonElement {
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (isGenerating) return;
     const wrapper = (btn.closest(".zoteroagent-message.assistant") ||
       null) as HTMLElement | null;
     const raw = wrapper?.dataset.rawContent || "";
@@ -2060,75 +1967,32 @@ function createMessageDeleteButton(
   ) as HTMLButtonElement;
   btn.className = "zoteroagent-delete-button";
   setIconButton(btn, "delete", "Delete message");
+  btn.disabled = isGenerating;
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (isGenerating) return;
     const wrapper = btn.closest(".zoteroagent-message") as HTMLElement | null;
     if (!wrapper) return;
     const idx = Number(wrapper.dataset.msgIndex);
     if (Number.isNaN(idx) || idx < 0) return;
-    chatStore.deleteMessage(itemId, idx);
+    const receipt = chatStore.deleteMessage(itemId, idx);
+    if (!receipt) return;
     renderMessages(body, itemId);
     syncLayoutState(body, itemId);
+    const undo = showUndoToast(body, "Message deleted", () => {
+      const result = chatStore.restoreMessage(receipt);
+      if (!result.restored) return false;
+      renderMessages(body, itemId);
+      syncLayoutState(body, itemId);
+      return true;
+    });
+    undo.focus();
   });
   return btn;
 }
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
-
-function formatTimestampHeader(ts: number): string {
-  const d = new Date(ts);
-  const MM = String(d.getMonth() + 1).padStart(2, "0");
-  const DD = String(d.getDate()).padStart(2, "0");
-  const HH = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${MM}/${DD} ${HH}:${mm}`;
-}
-
-function messageTitleParts(msg: Pick<ChatMessage, "role" | "model">): string {
-  if (msg.role === "user") return "You";
-  return msg.model || "Codex";
-}
-
-function avatarInitial(msg: Pick<ChatMessage, "role" | "model">): string {
-  if (msg.role === "user") return "Y";
-  const m = (msg.model || "AI").trim();
-  const match = m.match(/[a-zA-Z0-9]/);
-  return match ? match[0].toUpperCase() : "A";
-}
-
-function createMessageAvatar(
-  doc: Document,
-  msg: Pick<ChatMessage, "role" | "model">,
-): HTMLElement {
-  const el = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  el.className = `zoteroagent-msg-avatar ${msg.role === "user" ? "user" : "assistant"}`;
-  el.setAttribute("aria-hidden", "true");
-  const inner = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-  inner.className = "zoteroagent-msg-avatar-inner";
-  inner.textContent = avatarInitial(msg);
-  el.appendChild(inner);
-  return el;
-}
-
-function createMessageHeader(
-  doc: Document,
-  msg: Pick<ChatMessage, "role" | "model"> & { timestamp?: number },
-): HTMLElement {
-  const header = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  header.className = "zoteroagent-msg-header";
-  const title = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  title.className = "zoteroagent-msg-title";
-  title.textContent = messageTitleParts(msg);
-  header.appendChild(title);
-  if (msg.timestamp) {
-    const sub = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-    sub.className = "zoteroagent-msg-subtime";
-    sub.textContent = formatTimestampHeader(msg.timestamp);
-    header.appendChild(sub);
-  }
-  return header;
-}
 
 function formatUsageLine(usage: TokenUsage): string {
   return formatCodexUsageLine(usage);
@@ -2195,10 +2059,6 @@ function createUserEditButton(
     enterEditMode(wrapper, body, itemId, idx);
   });
   return btn;
-}
-
-function extractRawUserText(content: string): string {
-  return parseUserContent(content).questionText || content;
 }
 
 function enterEditMode(
@@ -2282,6 +2142,15 @@ function enterEditMode(
   btnRow.appendChild(cancelBtn);
   btnRow.appendChild(submitBtn);
   editContainer.appendChild(textarea);
+  const discardedCount = messages.length - msgIndex - 1;
+  if (discardedCount > 0) {
+    const warning = doc.createElementNS(XHTML_NS, "p") as HTMLElement;
+    warning.className = "zoteroagent-edit-warning";
+    warning.textContent = `Resending will discard ${discardedCount} later message${
+      discardedCount === 1 ? "" : "s"
+    }.`;
+    editContainer.appendChild(warning);
+  }
   editContainer.appendChild(btnRow);
   mainEl.appendChild(editContainer);
 
@@ -2336,6 +2205,7 @@ function updateStreamingMessage(
       "#zoteroagent-chat-messages",
     ) as HTMLElement | null;
     if (!container) return;
+    const shouldStayPinned = isNearBottom(container);
 
     let msgWrapper = container.querySelector(
       ".zoteroagent-message.assistant:last-child",
@@ -2411,49 +2281,6 @@ function updateStreamingMessage(
         ".zoteroagent-message-main",
       ) as HTMLElement | null) || msgWrapper;
 
-    if (state.reasoning) {
-      let thinkBlock = msgWrapper.querySelector(
-        ".zoteroagent-thinking",
-      ) as HTMLElement | null;
-      if (!thinkBlock) {
-        const doc = body.ownerDocument;
-        thinkBlock = doc.createElementNS(
-          "http://www.w3.org/1999/xhtml",
-          "details",
-        ) as HTMLElement;
-        thinkBlock.className = "zoteroagent-thinking";
-        const summary = doc.createElementNS(
-          "http://www.w3.org/1999/xhtml",
-          "summary",
-        );
-        summary.className = "zoteroagent-thinking-summary";
-        thinkBlock.appendChild(summary);
-        const thinkContent = doc.createElementNS(
-          "http://www.w3.org/1999/xhtml",
-          "div",
-        );
-        thinkContent.className = "zoteroagent-thinking-content";
-        thinkBlock.appendChild(thinkContent);
-        const contentEl = mainEl.querySelector(".zoteroagent-message-content");
-        if (contentEl) {
-          mainEl.insertBefore(thinkBlock, contentEl);
-        } else {
-          mainEl.appendChild(thinkBlock);
-        }
-      }
-      const summaryEl = thinkBlock.querySelector(
-        ".zoteroagent-thinking-summary",
-      );
-      if (summaryEl) {
-        const isThinking = !state.content;
-        summaryEl.textContent = isThinking ? "Thinking..." : `Deeply thought`;
-      }
-      const thinkContentEl = thinkBlock.querySelector(
-        ".zoteroagent-thinking-content",
-      );
-      if (thinkContentEl) thinkContentEl.textContent = state.reasoning;
-    }
-
     const contentEl = mainEl.querySelector(
       ".zoteroagent-message-content",
     ) as HTMLElement;
@@ -2474,9 +2301,7 @@ function updateStreamingMessage(
       usageEl.title = buildCodexUsageTitle(state.usage);
     }
 
-    if (isNearBottom(container)) {
-      container.scrollTop = container.scrollHeight;
-    }
+    scrollToBottomIfPinned(container, shouldStayPinned);
   } catch (e) {
     ztoolkit.log("[Agent] updateStreamingMessage error:", e);
   }
@@ -2519,9 +2344,7 @@ function enhancePageEvidenceChips(root: HTMLElement, body: HTMLElement) {
 
 function shouldSkipPageEvidenceNode(el: Element): boolean {
   return Boolean(
-    el.closest(
-      "pre, code, a, script, style, button, .zoteroagent-page-chip",
-    ),
+    el.closest("pre, code, a, script, style, button, .zoteroagent-page-chip"),
   );
 }
 
@@ -2599,122 +2422,6 @@ function pageJumpFailureText(
   return `Could not jump to page ${pageNumber}.`;
 }
 
-function isNearBottom(el: HTMLElement, threshold = 60): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
-}
-
-function buildActivityBlock(
-  doc: Document,
-  activities: CodexActivity[],
-): HTMLElement {
-  const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
-  details.className = "zoteroagent-activity";
-  const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
-  summary.className = "zoteroagent-activity-summary";
-  summary.textContent = `Codex activity · ${activities.length} step${
-    activities.length === 1 ? "" : "s"
-  }`;
-  details.appendChild(summary);
-  const list = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  list.className = "zoteroagent-activity-list";
-  for (const activity of activities) {
-    const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-    row.className = "zoteroagent-activity-row";
-    const status = String(activity.status || "").toLowerCase();
-    const badge = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    badge.className = `zoteroagent-activity-badge ${
-      status === "failed"
-        ? "is-failed"
-        : status === "in_progress"
-          ? "is-running"
-          : "is-ok"
-    }`;
-    badge.textContent =
-      status === "failed" ? "fail" : status === "in_progress" ? "run" : "ok";
-    const cmd = doc.createElementNS(XHTML_NS, "code") as HTMLElement;
-    cmd.className = "zoteroagent-activity-cmd";
-    cmd.textContent = truncateMiddle(activity.command || "command", 220);
-    row.appendChild(badge);
-    row.appendChild(cmd);
-    list.appendChild(row);
-  }
-  details.appendChild(list);
-  return details;
-}
-
-function buildRelationshipReviewBlock(
-  doc: Document,
-  relationships: SemanticRelationship[],
-  body: HTMLElement,
-): HTMLElement {
-  const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
-  details.className = "zoteroagent-relationship-review";
-  const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
-  summary.className = "zoteroagent-relationship-review-summary";
-  summary.textContent = `Knowledge review · ${relationships.length} relationship${
-    relationships.length === 1 ? "" : "s"
-  }`;
-  details.appendChild(summary);
-
-  const list = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  list.className = "zoteroagent-relationship-review-list";
-  for (const rel of relationships) {
-    const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-    row.className = "zoteroagent-relationship-review-row";
-    const type = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    type.className = "zoteroagent-relationship-type";
-    type.textContent = rel.type;
-    const text = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    text.className = "zoteroagent-relationship-text";
-    text.textContent = `${rel.targetItemKey}: ${rel.rationale}${
-      rel.evidence ? ` Evidence: ${rel.evidence}` : ""
-    }`;
-    enhancePageEvidenceChips(text as HTMLElement, body);
-    row.appendChild(type);
-    row.appendChild(text);
-    list.appendChild(row);
-  }
-  details.appendChild(list);
-  return details;
-}
-
-function buildQualityReviewBlock(
-  doc: Document,
-  quality: NonNullable<ChatMessage["quality"]>,
-): HTMLElement {
-  const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
-  details.className = `zoteroagent-quality-review is-${quality.status}`;
-  const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
-  summary.className = "zoteroagent-quality-review-summary";
-  summary.textContent =
-    quality.status === "passed"
-      ? "Automated checks · passed"
-      : quality.status === "failed"
-        ? `Automated checks · ${quality.hardFailures.length} failure${
-            quality.hardFailures.length === 1 ? "" : "s"
-          }`
-        : `Automated checks · ${quality.warnings.length} review item${
-            quality.warnings.length === 1 ? "" : "s"
-          }`;
-  details.appendChild(summary);
-  const list = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  list.className = "zoteroagent-quality-review-list";
-  for (const message of [...quality.hardFailures, ...quality.warnings]) {
-    const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-    row.className = "zoteroagent-quality-review-row";
-    row.textContent = message;
-    list.appendChild(row);
-  }
-  if (!list.childNodes.length) {
-    const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-    row.className = "zoteroagent-quality-review-row";
-    row.textContent = "All deterministic Knowledge Surface checks passed.";
-    list.appendChild(row);
-  }
-  details.appendChild(list);
-  return details;
-}
-
 function buildKeywordSuggestionBlock(
   doc: Document,
   body: HTMLElement,
@@ -2768,186 +2475,34 @@ function buildKeywordSuggestionBlock(
   return block;
 }
 
-function buildTurnFooter(doc: Document, msg: ChatMessage): HTMLElement {
-  const footer = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  footer.className = "zoteroagent-turn-footer";
-  if (msg.contextPapers?.length) {
-    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    chip.className = "zoteroagent-turn-chip is-context";
-    chip.textContent = `Used ${msg.contextPapers.length} @ paper${
-      msg.contextPapers.length === 1 ? "" : "s"
-    }`;
-    footer.appendChild(chip);
-  }
-  if (msg.relationshipUpdates?.length) {
-    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    chip.className = "zoteroagent-turn-chip is-relationship";
-    chip.textContent = `${msg.relationshipUpdates.length} relationship${
-      msg.relationshipUpdates.length === 1 ? "" : "s"
-    }`;
-    chip.title = msg.relationshipUpdates
-      .map((rel) => `[${rel.type}] ${rel.targetItemKey}: ${rel.rationale}`)
-      .join("\n");
-    footer.appendChild(chip);
-  }
-  if (msg.memoryUpdated) {
-    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    chip.className = "zoteroagent-turn-chip is-memory";
-    chip.textContent = "Memory updated";
-    footer.appendChild(chip);
-  }
-  if (msg.quality) {
-    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    chip.className = `zoteroagent-turn-chip is-quality is-${msg.quality.status}`;
-    chip.textContent =
-      msg.quality.status === "passed"
-        ? "Checks passed"
-        : msg.quality.status === "failed"
-          ? "Checks failed"
-          : "Checks need review";
-    footer.appendChild(chip);
-  }
-  if (msg.committed) {
-    const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-    chip.className = "zoteroagent-turn-chip is-commit";
-    chip.textContent = "Saved to vault";
-    footer.appendChild(chip);
-  }
-  return footer;
-}
-
-function truncateMiddle(text: string, max: number): string {
-  const clean = String(text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.length <= max) return clean;
-  const head = Math.ceil((max - 3) / 2);
-  const tail = Math.floor((max - 3) / 2);
-  return `${clean.slice(0, head)}...${clean.slice(clean.length - tail)}`;
-}
-
 function renderMessages(body: HTMLElement, itemId: number) {
   try {
     if (!isSafeBody(body)) return;
     hideQuotePopup(body);
-    const container = body.querySelector(
-      "#zoteroagent-chat-messages",
-    ) as HTMLElement | null;
-    if (!container) return;
-    const sessions = chatStore.getMessages(itemId);
-
-    while (container.firstChild) {
-      (container.firstChild as Element).remove();
-    }
-
-    const doc = body.ownerDocument;
-    for (let i = 0; i < sessions.length; i++) {
-      const msg = sessions[i];
-      // Isolate each message: a render failure in one turn (e.g. a bad
-      // activity payload or chip enhancement) must not blank the messages
-      // after it. Previously a single throw escaped to the outer catch and
-      // dropped the rest of the transcript.
-      try {
-        const wrapper = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-        wrapper.className = `zoteroagent-message ${msg.role === "user" ? "user" : "assistant"}`;
-        wrapper.dataset.msgIndex = String(i);
-
-        const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-        row.className = "zoteroagent-message-row";
-
-        const avatar = createMessageAvatar(doc, msg);
-        const main = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-        main.className = "zoteroagent-message-main";
-
-        main.appendChild(createMessageHeader(doc, msg));
-
-        if (msg.role === "assistant") {
-          if (msg.reasoning) {
-            const thinkBlock = doc.createElementNS(
-              XHTML_NS,
-              "details",
-            ) as HTMLElement;
-            thinkBlock.className = "zoteroagent-thinking";
-            const summary = doc.createElementNS(XHTML_NS, "summary");
-            summary.className = "zoteroagent-thinking-summary";
-            summary.textContent = "Deeply thought";
-            thinkBlock.appendChild(summary);
-            const thinkContent = doc.createElementNS(XHTML_NS, "div");
-            thinkContent.className = "zoteroagent-thinking-content";
-            thinkContent.textContent = msg.reasoning;
-            thinkBlock.appendChild(thinkContent);
-            main.appendChild(thinkBlock);
-          }
-          if (msg.activities?.length) {
-            main.appendChild(buildActivityBlock(doc, msg.activities));
-          }
-          if (msg.quality) {
-            main.appendChild(buildQualityReviewBlock(doc, msg.quality));
-          }
-          if (msg.keywordSuggestions?.length) {
-            main.appendChild(
-              buildKeywordSuggestionBlock(
-                doc,
-                body,
-                itemId,
-                i,
-                msg.keywordSuggestions,
-              ),
-            );
-          }
-          if (msg.relationshipUpdates?.length) {
-            main.appendChild(
-              buildRelationshipReviewBlock(doc, msg.relationshipUpdates, body),
-            );
-          }
-          wrapper.dataset.rawContent = msg.content || "";
-        }
-
-        const inner = doc.createElementNS(XHTML_NS, "div");
-        inner.className = "zoteroagent-message-content";
-
-        if (msg.role === "assistant") {
-          try {
-            inner.innerHTML = renderMarkdown(msg.content);
-          } catch (_e) {
-            inner.textContent = msg.content;
-          }
-          main.appendChild(inner);
-          enhancePageEvidenceChips(inner as HTMLElement, body);
-        } else {
-          renderUserMessage(inner, msg, body);
-          main.appendChild(inner);
-        }
-
-        if (
-          msg.role === "assistant" &&
-          (msg.memoryUpdated ||
-            msg.committed ||
-            msg.contextPapers?.length ||
-            msg.relationshipUpdates?.length ||
-            msg.quality)
-        ) {
-          main.appendChild(buildTurnFooter(doc, msg));
-        }
-
-        if (msg.timestamp) {
-          main.appendChild(createMessageMetaRow(doc, msg, body, itemId));
-        }
-
-        row.appendChild(avatar);
-        row.appendChild(main);
-        wrapper.appendChild(row);
-
-        container.appendChild(wrapper);
-      } catch (e) {
-        ztoolkit.log("[Agent] renderMessages: skipped message", i, e);
-      }
-    }
-
-    syncSessionSelector(body, itemId);
-    if (isNearBottom(container)) {
-      container.scrollTop = container.scrollHeight;
-    }
+    renderMessageList({
+      body,
+      itemId,
+      messages: chatStore.getMessages(itemId),
+      paperTitle: getItemTitle(itemId),
+      renderUserMessage: (container, message, messageBody) =>
+        renderUserMessageView(container, message, messageBody, {
+          parseQuotedPageContext,
+          createPageEvidenceChip,
+        }),
+      enhancePageEvidence: (root) => enhancePageEvidenceChips(root, body),
+      buildKeywordSuggestions: buildKeywordSuggestionBlock,
+      createMetaRow: createMessageMetaRow,
+      onSuggestion: (suggestion) => {
+        const input = body.querySelector(
+          "#zoteroagent-chat-input",
+        ) as HTMLTextAreaElement | null;
+        if (!input) return;
+        input.value = suggestion;
+        autoResizeTextarea(input);
+        input.focus();
+      },
+      syncSessionHeader: () => syncSessionHeader(body, itemId),
+    });
   } catch (e) {
     ztoolkit.log("[Agent] renderMessages error:", e);
   }
@@ -2962,6 +2517,7 @@ function syncPrefill(body: HTMLElement) {
     ) as HTMLTextAreaElement | null;
     if (input) {
       input.value = addon.data.chat.prefillInput;
+      autoResizeTextarea(input);
       addon.data.chat.prefillInput = "";
     }
   }
@@ -3196,10 +2752,13 @@ function createContextChip(
   const doc = body.ownerDocument;
   const chip = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
   chip.className = `zoteroagent-context-chip ${kind === "text" ? "text-context" : "response-quote"}`;
+  const preview = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  preview.type = "button";
+  preview.className = "zoteroagent-context-chip-preview";
 
   const icon = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   icon.className = "zoteroagent-context-chip-icon";
-  icon.textContent = kind === "text" ? "📋" : "💬";
+  insertSvgMarkup(icon, getIconSvg(kind === "text" ? "attachPdf" : "quote"));
 
   const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   label.className = "zoteroagent-context-chip-label";
@@ -3213,25 +2772,28 @@ function createContextChip(
       const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
       meta.className = "zoteroagent-context-chip-meta";
       meta.textContent = `p.${parsed.pageLabel}`;
-      chip.appendChild(icon);
-      chip.appendChild(label);
-      chip.appendChild(meta);
+      preview.appendChild(icon);
+      preview.appendChild(label);
+      preview.appendChild(meta);
     } else {
-      chip.appendChild(icon);
-      chip.appendChild(label);
+      preview.appendChild(icon);
+      preview.appendChild(label);
     }
   } else {
     label.textContent = "Response Quote";
-    chip.appendChild(icon);
-    chip.appendChild(label);
+    preview.appendChild(icon);
+    preview.appendChild(label);
   }
+  chip.appendChild(preview);
 
   const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
   dismiss.type = "button";
   dismiss.className = "zoteroagent-context-chip-dismiss";
-  dismiss.textContent = "×";
-  dismiss.title =
-    kind === "text" ? "Remove text context" : "Remove response quote";
+  setIconButton(
+    dismiss,
+    "clear",
+    kind === "text" ? "Remove text context" : "Remove response quote",
+  );
   dismiss.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3249,6 +2811,7 @@ function createContextChip(
   content.className = "zoteroagent-context-chip-content";
   content.textContent = String(displayText || "").trim();
   chip.appendChild(content);
+  bindContextChipPreview(chip, preview);
 
   return chip;
 }
@@ -3260,10 +2823,13 @@ function createPaperContextChip(
   const doc = body.ownerDocument;
   const chip = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
   chip.className = "zoteroagent-context-chip paper-context";
+  const preview = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  preview.type = "button";
+  preview.className = "zoteroagent-context-chip-preview";
 
   const icon = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   icon.className = "zoteroagent-context-chip-icon";
-  icon.textContent = "@";
+  insertSvgMarkup(icon, getIconSvg("attachPdf"));
 
   const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   label.className = "zoteroagent-context-chip-label";
@@ -3276,19 +2842,19 @@ function createPaperContextChip(
     const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
     meta.className = "zoteroagent-context-chip-meta";
     meta.textContent = paper.itemKey;
-    chip.appendChild(icon);
-    chip.appendChild(label);
-    chip.appendChild(meta);
+    preview.appendChild(icon);
+    preview.appendChild(label);
+    preview.appendChild(meta);
   } else {
-    chip.appendChild(icon);
-    chip.appendChild(label);
+    preview.appendChild(icon);
+    preview.appendChild(label);
   }
+  chip.appendChild(preview);
 
   const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
   dismiss.type = "button";
   dismiss.className = "zoteroagent-context-chip-dismiss";
-  dismiss.textContent = "×";
-  dismiss.title = "Remove paper context";
+  setIconButton(dismiss, "clear", "Remove paper context");
   dismiss.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3304,6 +2870,7 @@ function createPaperContextChip(
   content.className = "zoteroagent-context-chip-content";
   content.textContent = metaText || paper.itemKey;
   chip.appendChild(content);
+  bindContextChipPreview(chip, preview);
 
   return chip;
 }
@@ -3329,8 +2896,7 @@ function createLocalImageChip(
   const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
   dismiss.type = "button";
   dismiss.className = "zoteroagent-context-chip-dismiss";
-  dismiss.textContent = "\u00d7";
-  dismiss.title = "Remove screenshot";
+  setIconButton(dismiss, "clear", "Remove screenshot");
   dismiss.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3344,10 +2910,30 @@ function createLocalImageChip(
   return chip;
 }
 
-async function handleClipboardImages(
-  body: HTMLElement,
-  event: ClipboardEvent,
-) {
+function bindContextChipPreview(
+  chip: HTMLElement,
+  preview: HTMLButtonElement,
+): void {
+  preview.setAttribute("aria-expanded", "false");
+  preview.setAttribute("aria-label", "Show context preview");
+  const setOpen = (open: boolean) => {
+    chip.classList.toggle("is-preview-open", open);
+    preview.setAttribute("aria-expanded", String(open));
+  };
+  preview.addEventListener("click", () => {
+    setOpen(!chip.classList.contains("is-preview-open"));
+  });
+  preview.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      preview.focus();
+    }
+  });
+  preview.addEventListener("blur", () => setOpen(false));
+}
+
+async function handleClipboardImages(body: HTMLElement, event: ClipboardEvent) {
   const files = Array.from(event.clipboardData?.items || [])
     .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
     .map((item) => item.getAsFile())
@@ -3473,9 +3059,10 @@ function syncContextChips(body: HTMLElement) {
     addon.data.chat.mentionedPapers,
     currentKey,
   );
-  const images = addon.data.chat.pendingImages.filter((ref) =>
-    ref.relativePath.startsWith(`${currentKey}/`) &&
-    ref.sessionId === chatStore.getActiveSessionId(itemId),
+  const images = addon.data.chat.pendingImages.filter(
+    (ref) =>
+      ref.relativePath.startsWith(`${currentKey}/`) &&
+      ref.sessionId === chatStore.getActiveSessionId(itemId),
   );
   addon.data.chat.mentionedPapers = mentionedPapers;
   if (!refText && !responseQuote && !mentionedPapers.length && !images.length) {
@@ -3678,279 +3265,9 @@ function getItemTitle(itemId: number): string {
   }
 }
 
-function syncSessionSelector(body: HTMLElement, itemId: number) {
-  const select = body.querySelector(
-    "#zoteroagent-session-select",
-  ) as HTMLSelectElement | null;
-  if (!select) return;
-  while (select.firstChild) {
-    select.firstChild.remove();
-  }
-
-  const sessionList = chatStore.listSessions(itemId);
-  for (const s of sessionList) {
-    const opt = select.ownerDocument.createElementNS(
-      "http://www.w3.org/1999/xhtml",
-      "option",
-    ) as HTMLOptionElement;
-    opt.value = s.sessionId;
-    opt.textContent = s.title;
-    select.appendChild(opt);
-  }
-  if (sessionList.length === 0) {
-    const fallback = select.ownerDocument.createElementNS(
-      "http://www.w3.org/1999/xhtml",
-      "option",
-    ) as HTMLOptionElement;
-    fallback.value = "";
-    fallback.textContent = `No chats for ${getItemTitle(itemId)}`;
-    select.appendChild(fallback);
-  }
-  select.value = chatStore.getActiveSessionId(itemId);
-
-  const titleEl = body.querySelector(
-    "#zoteroagent-session-title",
-  ) as HTMLElement | null;
-  if (titleEl) {
-    const activeSession = chatStore.getSession(itemId);
-    titleEl.textContent = activeSession?.title || "New chat";
-  }
-  renderContextDigestStatus(body, itemId);
-}
-
-async function syncModelSelector(
-  body: HTMLElement,
-  itemId: number,
-  refresh = false,
-) {
-  const select = body.querySelector(
-    "#zoteroagent-model-select",
-  ) as HTMLSelectElement | null;
-  const reasoningSelect = body.querySelector(
-    "#zoteroagent-reasoning-select",
-  ) as HTMLSelectElement | null;
-  const session = chatStore.getSession(itemId);
-  if (!select || !reasoningSelect) return;
-  const sessionId = session?.sessionId || "";
-
-  const requestId = String(++modelRequestSeq);
-  select.dataset.requestId = requestId;
-  select.disabled = true;
-  reasoningSelect.disabled = true;
-  let models: CodexModelCatalogEntry[] = [];
-  try {
-    models = await listCodexModels({ refresh });
-  } catch (error) {
-    ztoolkit.log("[Agent] Codex model catalog error:", error);
-  }
-  if (
-    !isSafeBody(body) ||
-    Number(body.dataset.itemID) !== itemId ||
-    select.dataset.requestId !== requestId
-  ) {
-    return;
-  }
-  const activeSession = chatStore.getSession(itemId);
-  if ((activeSession?.sessionId || "") !== sessionId) return;
-
-  renderModelOptions(select, models, activeSession?.modelSlug || "");
-  const supportedEfforts = getSupportedReasoningEfforts(
-    models,
-    activeSession?.modelSlug || "",
-  );
-  const selectedEffort = activeSession?.reasoningEffort;
-  const canValidateEffort =
-    models.length > 0 &&
-    (!activeSession?.modelSlug ||
-      models.some((model) => model.slug === activeSession.modelSlug));
-  const normalizedEffort =
-    selectedEffort &&
-    (!canValidateEffort || supportedEfforts.includes(selectedEffort))
-      ? selectedEffort
-      : undefined;
-  if (
-    selectedEffort &&
-    canValidateEffort &&
-    !normalizedEffort &&
-    activeSession
-  ) {
-    chatStore.updateSessionReasoningEffort(
-      itemId,
-      undefined,
-      activeSession.sessionId,
-    );
-  }
-  renderReasoningOptions(
-    reasoningSelect,
-    !canValidateEffort && selectedEffort
-      ? [selectedEffort]
-      : supportedEfforts,
-    normalizedEffort,
-  );
-  select.disabled = isGenerating;
-  reasoningSelect.disabled = isGenerating;
-}
-
-function getSupportedReasoningEfforts(
-  models: CodexModelCatalogEntry[],
-  modelSlug: string,
-): CodexReasoningEffort[] {
-  const selected = modelSlug
-    ? models.find((model) => model.slug === modelSlug)
-    : undefined;
-  const efforts = selected
-    ? selected.supportedReasoningEfforts || []
-    : models.flatMap((model) => model.supportedReasoningEfforts || []);
-  return Array.from(new Set(efforts.map((entry) => entry.effort)));
-}
-
-function renderReasoningOptions(
-  select: HTMLSelectElement,
-  efforts: CodexReasoningEffort[],
-  selected?: CodexReasoningEffort,
-) {
-  while (select.firstChild) select.firstChild.remove();
-  const defaultOption = select.ownerDocument.createElementNS(
-    XHTML_NS,
-    "option",
-  ) as HTMLOptionElement;
-  defaultOption.value = "";
-  defaultOption.textContent = "Thinking default";
-  select.appendChild(defaultOption);
-  const labels: Record<CodexReasoningEffort, string> = {
-    none: "None",
-    minimal: "Minimal",
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "XHigh",
-  };
-  for (const effort of efforts) {
-    const option = select.ownerDocument.createElementNS(
-      XHTML_NS,
-      "option",
-    ) as HTMLOptionElement;
-    option.value = effort;
-    option.textContent = labels[effort];
-    select.appendChild(option);
-  }
-  select.value = selected || "";
-  select.title = selected
-    ? `Thinking intensity: ${labels[selected]}`
-    : "Thinking intensity: Codex default";
-}
-
-function renderModelOptions(
-  select: HTMLSelectElement,
-  models: CodexModelCatalogEntry[],
-  selectedModel: string,
-) {
-  while (select.firstChild) select.firstChild.remove();
-  const doc = select.ownerDocument;
-  const defaultOption = doc.createElementNS(
-    XHTML_NS,
-    "option",
-  ) as HTMLOptionElement;
-  defaultOption.value = "";
-  defaultOption.textContent = "Codex default";
-  select.appendChild(defaultOption);
-
-  for (const model of models) {
-    const option = doc.createElementNS(
-      XHTML_NS,
-      "option",
-    ) as HTMLOptionElement;
-    option.value = model.slug;
-    option.textContent =
-      model.displayName && model.displayName !== model.slug
-        ? `${model.displayName} (${model.slug})`
-        : model.slug;
-    select.appendChild(option);
-  }
-
-  const normalized = String(selectedModel || "").trim();
-  if (normalized && !models.some((model) => model.slug === normalized)) {
-    const unavailable = doc.createElementNS(
-      XHTML_NS,
-      "option",
-    ) as HTMLOptionElement;
-    unavailable.value = normalized;
-    unavailable.textContent = `${normalized} (unavailable)`;
-    select.appendChild(unavailable);
-  }
-  select.value = normalized;
-  updateModelSelectorTitle(select, normalized);
-}
-
-function updateModelSelectorTitle(
-  select: HTMLSelectElement,
-  modelSlug: string,
-) {
-  select.title = modelSlug
-    ? `Model for this chat: ${modelSlug}`
-    : "Model for this chat: Codex default";
-}
-
-function renderContextDigestStatus(
-  body: HTMLElement,
-  itemId: number,
-  transientText?: string,
-) {
-  const bar = body.querySelector(
-    "#zoteroagent-context-digest-bar",
-  ) as HTMLElement | null;
-  if (!bar) return;
-  while (bar.firstChild) bar.firstChild.remove();
-  const session = chatStore.getSession(itemId);
-  if (!session || session.messages.length < 2) {
-    bar.style.display = "none";
-    return;
-  }
-
-  const doc = bar.ownerDocument;
-  const hasDigest = Boolean(session.contextDigest?.trim());
-  const busy = body.dataset.contextDigestBusy === "true";
-  bar.style.display = "flex";
-
-  const row = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  row.className = "zoteroagent-context-digest-row";
-
-  const chip = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-  chip.className = `zoteroagent-context-digest-chip ${
-    hasDigest ? "is-compacted" : ""
-  }`;
-  if (transientText) {
-    chip.textContent = transientText;
-  } else if (hasDigest) {
-    const covered = (session.contextDigestUpToMessageIndex ?? -1) + 1;
-    chip.textContent = `Context compacted · covers ${Math.max(0, covered)} turns`;
-  } else {
-    chip.textContent = "Context ready";
-  }
-  row.appendChild(chip);
-
-  const button = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
-  button.className = "zoteroagent-context-digest-action";
-  button.textContent = busy ? "Compacting..." : "Compact";
-  button.disabled = busy || isGenerating;
-  button.title = "Generate a hidden Context Digest for future Codex turns";
-  button.addEventListener("click", () => {
-    void compactSessionContext(body, itemId, "manual");
-  });
-  row.appendChild(button);
-  bar.appendChild(row);
-
-  if (hasDigest) {
-    const details = doc.createElementNS(XHTML_NS, "details") as HTMLElement;
-    details.className = "zoteroagent-context-digest-debug";
-    const summary = doc.createElementNS(XHTML_NS, "summary") as HTMLElement;
-    summary.textContent = "Hidden Context Digest";
-    details.appendChild(summary);
-    const pre = doc.createElementNS(XHTML_NS, "pre") as HTMLElement;
-    pre.textContent = session.contextDigest || "";
-    details.appendChild(pre);
-    bar.appendChild(details);
-  }
+function syncSessionHeader(body: HTMLElement, itemId: number): void {
+  syncSessionTitle(body, itemId);
+  renderDigestStatus(body, itemId, isGenerating);
 }
 
 function renderHistoryPanel(body: HTMLElement, itemId: number) {
@@ -3973,19 +3290,20 @@ function renderHistoryPanel(body: HTMLElement, itemId: number) {
   for (const s of sessionList) {
     const row = doc.createElementNS(
       "http://www.w3.org/1999/xhtml",
-      "div",
-    ) as HTMLElement;
+      "button",
+    ) as HTMLButtonElement;
+    row.type = "button";
     row.className = "zoteroagent-history-item";
     if (chatStore.getActiveSessionId(itemId) === s.sessionId) {
       row.classList.add("active");
     }
     row.dataset.sessionId = s.sessionId;
 
-    const title = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    const title = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
     title.className = "zoteroagent-history-item-title";
     title.textContent = s.title;
 
-    const meta = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    const meta = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
     meta.className = "zoteroagent-history-item-meta";
     const msgCount = s.messageCount;
     const dateStr = new Date(s.updatedAt).toLocaleDateString();
@@ -3998,7 +3316,7 @@ function renderHistoryPanel(body: HTMLElement, itemId: number) {
       chatStore.setActiveSession(itemId, s.sessionId);
       panel.style.display = "none";
       renderMessages(body, itemId);
-      syncSessionSelector(body, itemId);
+      syncSessionHeader(body, itemId);
       syncLayoutState(body, itemId);
     });
 
@@ -4021,8 +3339,8 @@ function syncLayoutState(body: HTMLElement, itemId: number) {
   messages.style.display = "flex";
   messages.style.flexDirection = "column";
   inputArea.style.display = "flex";
-  if (itemId > 0) renderContextDigestStatus(body, itemId);
-  if (itemId > 0) void syncModelSelector(body, itemId);
+  if (itemId > 0) renderDigestStatus(body, itemId, isGenerating);
+  if (itemId > 0) void syncModelControls(body, itemId, { isGenerating: () => isGenerating, isSafeBody });
 }
 
 function parseUserContent(content: string): {
