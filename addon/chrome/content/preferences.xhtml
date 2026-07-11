@@ -68,42 +68,48 @@
         class="zoteroagent-pref-advanced-summary"
         data-l10n-id="pref-codex-advanced"
       ></html:summary>
-      <hbox align="center">
-        <label data-l10n-id="pref-codex-model"></label>
-        <html:input
-          id="__addonRef__-codexModelSlug"
-          type="text"
-          placeholder="gpt-5.5"
-        ></html:input>
-        <label data-l10n-id="pref-codex-contextWindow"></label>
-        <html:input
-          id="__addonRef__-codexContextWindow"
-          type="number"
-          min="1"
-          step="1"
-          placeholder="128000"
-        ></html:input>
-      </hbox>
-      <hbox align="center">
-        <label data-l10n-id="pref-codex-cheapModel"></label>
-        <html:input
-          id="__addonRef__-codexCheapModelSlug"
-          type="text"
-          placeholder="gpt-5.5"
-        ></html:input>
-        <label data-l10n-id="pref-codex-coldStartEffort"></label>
-        <html:select id="__addonRef__-codexColdStartEffort">
-          <html:option
-            value=""
-            data-l10n-id="pref-codex-coldStartEffort-default"
-          ></html:option>
-          <html:option value="minimal">minimal</html:option>
-          <html:option value="low">low</html:option>
-          <html:option value="medium">medium</html:option>
-          <html:option value="high">high</html:option>
-          <html:option value="xhigh">xhigh</html:option>
-        </html:select>
-      </hbox>
+      <html:div class="zoteroagent-pref-advanced-fields">
+        <html:div class="zoteroagent-pref-advanced-field">
+          <label data-l10n-id="pref-codex-model"></label>
+          <html:input
+            id="__addonRef__-codexModelSlug"
+            type="text"
+            placeholder="gpt-5.5"
+          ></html:input>
+        </html:div>
+        <html:div class="zoteroagent-pref-advanced-field">
+          <label data-l10n-id="pref-codex-contextWindow"></label>
+          <html:input
+            id="__addonRef__-codexContextWindow"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="128000"
+          ></html:input>
+        </html:div>
+        <html:div class="zoteroagent-pref-advanced-field">
+          <label data-l10n-id="pref-codex-cheapModel"></label>
+          <html:input
+            id="__addonRef__-codexCheapModelSlug"
+            type="text"
+            placeholder="gpt-5.5"
+          ></html:input>
+        </html:div>
+        <html:div class="zoteroagent-pref-advanced-field">
+          <label data-l10n-id="pref-codex-coldStartEffort"></label>
+          <html:select id="__addonRef__-codexColdStartEffort">
+            <html:option
+              value=""
+              data-l10n-id="pref-codex-coldStartEffort-default"
+            ></html:option>
+            <html:option value="minimal">minimal</html:option>
+            <html:option value="low">low</html:option>
+            <html:option value="medium">medium</html:option>
+            <html:option value="high">high</html:option>
+            <html:option value="xhigh">xhigh</html:option>
+          </html:select>
+        </html:div>
+      </html:div>
     </html:details>
   </groupbox>
 

@@ -115,12 +115,37 @@
   display: none;
 }
 
-#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced[open] hbox {
-  padding: 0 10px;
+#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 0 10px 8px;
 }
 
-#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced hbox:last-child {
-  padding-bottom: 8px;
+#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 8px;
+  flex: 1 1 21rem;
+  min-width: 0;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-field > label {
+  color: var(--za-text-secondary);
+  line-height: 1.35;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-field > input,
+#zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-field > select {
+  width: 100%;
+}
+
+@media (max-width: 34rem) {
+  #zotero-prefpane-zoteroagent .zoteroagent-pref-advanced-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
 }
 
 #zotero-prefpane-zoteroagent .zoteroagent-pref-confirm {
