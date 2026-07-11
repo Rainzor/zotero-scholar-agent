@@ -5,6 +5,7 @@ import { runLineProcess } from "./subprocess";
 
 export const CODEX_MODEL_SLUG_PREF = "codex.modelSlug";
 export const CODEX_CHEAP_MODEL_SLUG_PREF = "codex.cheapModelSlug";
+export const CODEX_COLD_START_EFFORT_PREF = "codex.coldStartReasoningEffort";
 export const CODEX_CONTEXT_WINDOW_PREF = "codex.contextWindowTokens";
 
 export type CodexContextSource =
@@ -63,6 +64,19 @@ export function getConfiguredCodexCheapModelSlug(): string {
 
 export function setConfiguredCodexCheapModelSlug(slug: string) {
   setPref(CODEX_CHEAP_MODEL_SLUG_PREF, String(slug || "").trim());
+}
+
+export function getConfiguredColdStartReasoningEffort():
+  | CodexReasoningEffort
+  | undefined {
+  return normalizeCodexReasoningEffort(getPref(CODEX_COLD_START_EFFORT_PREF));
+}
+
+export function setConfiguredColdStartReasoningEffort(value: string) {
+  setPref(
+    CODEX_COLD_START_EFFORT_PREF,
+    normalizeCodexReasoningEffort(value) || "",
+  );
 }
 
 export function getConfiguredCodexContextWindow(): number | undefined {

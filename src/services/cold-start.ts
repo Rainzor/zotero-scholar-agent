@@ -7,6 +7,7 @@ import {
   runCodexTurn,
   writePaperMemory,
   updatePaperSignals,
+  type CodexReasoningEffort,
   type CodexTurnInput,
   type PaperVaultMeta,
   type RunningLineProcess,
@@ -25,6 +26,7 @@ export type PaperColdStartRequest = {
   paper: PaperVaultMeta;
   pdfItemId: number;
   model?: string;
+  reasoningEffort?: CodexReasoningEffort;
   deepenInsight?: boolean;
   insightModel?: string;
 };
@@ -86,6 +88,7 @@ export async function runPaperColdStart(
   await deps.runCodexTurn({
     prompt: buildColdStartPrompt(paper),
     model: request.model,
+    reasoningEffort: request.reasoningEffort,
     fallbackToDefaultModel: request.model ? false : undefined,
     sandbox: "workspace-write",
     onStatus: events.onStatus,
@@ -96,6 +99,7 @@ export async function runPaperColdStart(
     await deps.runCodexTurn({
       prompt: buildInsightPrompt(request.paper),
       model: request.insightModel,
+      reasoningEffort: request.reasoningEffort,
       fallbackToDefaultModel: request.insightModel ? false : undefined,
       sandbox: "workspace-write",
       onStatus: events.onStatus,

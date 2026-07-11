@@ -1,4 +1,7 @@
-import { getConfiguredCodexCheapModelSlug } from "./codex";
+import {
+  getConfiguredCodexCheapModelSlug,
+  getConfiguredColdStartReasoningEffort,
+} from "./codex";
 import { runPaperColdStart } from "./cold-start";
 import type { PaperVaultMeta, RunningLineProcess } from "./codex";
 
@@ -191,6 +194,7 @@ export const coldStartQueue = new ColdStartQueue({
         paper: job.paper,
         pdfItemId: job.pdfItemId,
         model: cheapModel || undefined,
+        reasoningEffort: getConfiguredColdStartReasoningEffort(),
         deepenInsight: Boolean(cheapModel),
       },
       {

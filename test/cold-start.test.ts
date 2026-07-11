@@ -124,6 +124,7 @@ describe("runPaperColdStart", () => {
   it("uses a second fresh turn to deepen Insight when requested", async () => {
     let memory = completedMemory;
     const prompts: string[] = [];
+    const efforts: (string | undefined)[] = [];
     const deps: PaperColdStartDeps = {
       ensurePaperVault: async () => ({}) as any,
       readPaperMemory: async () => memory,
@@ -133,6 +134,7 @@ describe("runPaperColdStart", () => {
       },
       runCodexTurn: async (input) => {
         prompts.push(input.prompt);
+        efforts.push(input.reasoningEffort);
         return { content: "Done.", reasoning: "", threadId: "cold" };
       },
       refreshPaperRecordProjection: async () => [],
@@ -144,6 +146,7 @@ describe("runPaperColdStart", () => {
         paper,
         pdfItemId: 10,
         model: "cheap-model",
+        reasoningEffort: "low",
         deepenInsight: true,
       },
       {},
@@ -151,6 +154,7 @@ describe("runPaperColdStart", () => {
     );
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("Deepen the Insight section");
+    expect(efforts).toEqual(["low", "low"]);
   });
 
   it("falls back to the paper text abstract when Zotero metadata is empty", async () => {

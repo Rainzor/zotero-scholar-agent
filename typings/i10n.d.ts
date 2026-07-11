@@ -8,6 +8,8 @@ export type FluentMessageId =
   | 'pref-about-title'
   | 'pref-about-version'
   | 'pref-codex-cheapModel'
+  | 'pref-codex-coldStartEffort'
+  | 'pref-codex-coldStartEffort-default'
   | 'pref-codex-contextWindow'
   | 'pref-codex-description'
   | 'pref-codex-fail'
