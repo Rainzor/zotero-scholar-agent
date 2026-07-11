@@ -58,6 +58,7 @@ import {
   extractRawUserText,
   renderUserMessage as renderUserMessageView,
 } from "./sidebar/user-message-view";
+import { filterEmptyMarkdownSections } from "./sidebar/memory-markdown";
 import type { ChatMessage, PaperContext, TokenUsage } from "../addon";
 import { chatStore } from "../services/chat-store";
 import { getZoteroPaperMeta } from "../services/zotero-paper-metadata";
@@ -728,7 +729,7 @@ async function appendPaperMemoryCard(
   const inner = doc.createElementNS(XHTML, "div") as HTMLElement;
   inner.className = "zoteroagent-memory-content markdown-body";
   if (surface.body.trim()) {
-    inner.innerHTML = renderMarkdown(surface.body);
+    inner.innerHTML = renderMarkdown(filterEmptyMarkdownSections(surface.body));
   } else {
     inner.appendChild(
       memoryNotice(

@@ -187,6 +187,27 @@
   word-break: break-word;
 }
 
+.zoteroagent-memory-content h2 {
+  margin: 16px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--za-border);
+  color: var(--za-text-primary);
+  font-size: var(--za-font-lg);
+  line-height: 1.35;
+}
+
+.zoteroagent-memory-content h3 {
+  margin: 12px 0 5px;
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-md);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.zoteroagent-memory-content > h2:first-child {
+  margin-top: 0;
+}
+
 .zoteroagent-memory-list {
   display: flex;
   flex-direction: column;
