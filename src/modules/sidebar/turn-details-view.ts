@@ -1,5 +1,6 @@
 import type { ChatMessage, CodexActivity } from "../../addon";
 import type { SemanticRelationship } from "../../services/codex";
+import { formatActivityLabel } from "../../services/research-turn/activity-label";
 import { buildTurnDetailsViewModel, type TurnDetailKind } from "./turn-details";
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -157,9 +158,10 @@ function buildActivityContent(
     }`;
     badge.textContent =
       status === "failed" ? "fail" : status === "in_progress" ? "run" : "ok";
-    const command = doc.createElementNS(XHTML_NS, "code") as HTMLElement;
-    command.className = "zoteroagent-activity-cmd";
-    command.textContent = truncateMiddle(activity.command || "command", 220);
+    const command = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    command.className = "zoteroagent-activity-label";
+    command.textContent = formatActivityLabel(activity.command || "command");
+    command.title = activity.command || "command";
     row.appendChild(badge);
     row.appendChild(command);
     list.appendChild(row);
@@ -228,14 +230,4 @@ function createTurnDetailChip(
   chip.setAttribute("aria-label", `Show ${label.toLowerCase()} details`);
   chip.addEventListener("click", () => onOpenDetail(detail));
   return chip;
-}
-
-function truncateMiddle(text: string, max: number): string {
-  const clean = String(text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.length <= max) return clean;
-  const head = Math.ceil((max - 3) / 2);
-  const tail = Math.floor((max - 3) / 2);
-  return `${clean.slice(0, head)}...${clean.slice(clean.length - tail)}`;
 }

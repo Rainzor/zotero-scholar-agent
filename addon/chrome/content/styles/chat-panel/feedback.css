@@ -78,15 +78,14 @@
   background: var(--za-warning);
 }
 
-.zoteroagent-activity-cmd {
+.zoteroagent-activity-label {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--za-font-xs);
   line-height: 1.4;
   color: var(--za-text-primary);
-  word-break: break-all;
-  white-space: pre-wrap;
+  cursor: help;
+  overflow-wrap: anywhere;
 }
 
 .zoteroagent-quality-review-list {
