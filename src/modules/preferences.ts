@@ -12,11 +12,13 @@ import {
   getConfiguredCodexCheapModelSlug,
   getConfiguredCodexContextWindow,
   getConfiguredCodexModelSlug,
+  getConfiguredColdStartReasoningEffort,
   getConfiguredVaultPath,
   getDefaultVaultPath,
   setConfiguredCodexCheapModelSlug,
   setConfiguredCodexContextWindow,
   setConfiguredCodexModelSlug,
+  setConfiguredColdStartReasoningEffort,
   setConfiguredVaultPath,
   setConfiguredCodexPath,
   testCodexBinary,
@@ -83,6 +85,9 @@ function bindCodexSettings(doc: Document) {
   const cheapModelInput = doc.querySelector(
     `#${prefId("codexCheapModelSlug")}`,
   ) as HTMLInputElement | null;
+  const coldStartEffortSelect = doc.querySelector(
+    `#${prefId("codexColdStartEffort")}`,
+  ) as HTMLSelectElement | null;
   const testBtn = doc.querySelector(
     `#${prefId("codexTest")}`,
   ) as XUL.Button | null;
@@ -95,6 +100,7 @@ function bindCodexSettings(doc: Document) {
     !modelInput ||
     !contextWindowInput ||
     !cheapModelInput ||
+    !coldStartEffortSelect ||
     !testBtn ||
     !statusEl
   )
@@ -102,8 +108,10 @@ function bindCodexSettings(doc: Document) {
 
   pathInput.value = getConfiguredCodexPath();
   modelInput.value = getConfiguredCodexModelSlug();
-  contextWindowInput.value = getConfiguredCodexContextWindow()?.toString() || "";
+  contextWindowInput.value =
+    getConfiguredCodexContextWindow()?.toString() || "";
   cheapModelInput.value = getConfiguredCodexCheapModelSlug();
+  coldStartEffortSelect.value = getConfiguredColdStartReasoningEffort() || "";
   setCodexStatus(
     statusEl,
     [
@@ -115,6 +123,9 @@ function bindCodexSettings(doc: Document) {
         ? `Context window override: ${contextWindowInput.value}`
         : "Context window auto-detection enabled.",
       cheapModelInput.value ? `Cheap model: ${cheapModelInput.value}` : "",
+      coldStartEffortSelect.value
+        ? `Cold start thinking: ${coldStartEffortSelect.value}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -125,6 +136,7 @@ function bindCodexSettings(doc: Document) {
     setConfiguredCodexModelSlug(modelInput.value.trim());
     setConfiguredCodexContextWindow(contextWindowInput.value.trim());
     setConfiguredCodexCheapModelSlug(cheapModelInput.value.trim());
+    setConfiguredColdStartReasoningEffort(coldStartEffortSelect.value);
     setCodexStatus(
       statusEl,
       [
@@ -138,6 +150,9 @@ function bindCodexSettings(doc: Document) {
           : "Context window auto-detection enabled.",
         cheapModelInput.value.trim()
           ? `Cheap model: ${cheapModelInput.value.trim()}`
+          : "",
+        coldStartEffortSelect.value
+          ? `Cold start thinking: ${coldStartEffortSelect.value}`
           : "",
       ]
         .filter(Boolean)
@@ -180,8 +195,7 @@ function setCodexStatus(
   type: "default" | "success" | "fail" = "default",
 ) {
   statusEl.textContent = text;
-  statusEl.style.color =
-    type === "success" ? "#267f00" : type === "fail" ? "#b00020" : "#666";
+  statusEl.dataset.state = type;
 }
 
 function bindVaultSettings(doc: Document) {
@@ -322,19 +336,18 @@ function bindServiceManager(doc: Document) {
         "http://www.w3.org/1999/xhtml",
         "div",
       ) as HTMLDivElement;
-      row.style.cssText =
-        "display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;";
+      row.className = "zoteroagent-pref-service-row";
       if (svc.id === selectedServiceId) {
-        row.style.background = "#d0e4ff";
+        row.classList.add("is-selected");
       }
 
       const isDefault = svc.id === activeId;
       const badge = isDefault ? " ★" : "";
       const label = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
-      label.style.cssText = "flex:1;font-size:12px;user-select:none;";
+      label.className = "zoteroagent-pref-service-label";
       label.textContent = `${svc.name}${badge}  —  ${svc.model}`;
       if (isDefault) {
-        label.style.fontWeight = "600";
+        label.classList.add("is-default");
       }
 
       row.appendChild(label);
@@ -354,8 +367,7 @@ function bindServiceManager(doc: Document) {
 
     if (services.length === 0) {
       const empty = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
-      empty.style.cssText =
-        "padding:8px;font-size:12px;color:#888;text-align:center;";
+      empty.className = "zoteroagent-pref-services-empty";
       empty.textContent = getString("pref-svc-empty");
       listContainer.appendChild(empty);
     }

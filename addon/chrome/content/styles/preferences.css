@@ -1,0 +1,143 @@
+@import url("./chat-panel/tokens.css");
+
+#zotero-prefpane-zoteroagent {
+  color: var(--za-text-primary);
+  background: var(--za-bg-panel);
+  font-size: var(--za-font-sm);
+}
+
+#zotero-prefpane-zoteroagent groupbox {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-md);
+  background: var(--za-bg-surface);
+}
+
+#zotero-prefpane-zoteroagent h2 {
+  margin: 0;
+  color: var(--za-text-primary);
+  font-size: var(--za-font-lg);
+}
+
+#zotero-prefpane-zoteroagent description {
+  display: block;
+  margin: 4px 0 10px;
+  color: var(--za-text-secondary);
+  line-height: 1.45;
+}
+
+#zotero-prefpane-zoteroagent hbox[align="center"] {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 6px 0;
+}
+
+#zotero-prefpane-zoteroagent hbox[align="center"] > label {
+  flex: 0 1 10rem;
+  min-width: 0 !important;
+  color: var(--za-text-secondary);
+}
+
+#zotero-prefpane-zoteroagent input,
+#zotero-prefpane-zoteroagent select {
+  flex: 1 1 12rem;
+  min-width: 0 !important;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+}
+
+#zotero-prefpane-zoteroagent input:focus,
+#zotero-prefpane-zoteroagent select:focus,
+#zotero-prefpane-zoteroagent button:focus-visible {
+  outline: 2px solid var(--za-focus-ring);
+  outline-offset: 1px;
+}
+
+#zotero-prefpane-zoteroagent button {
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-subtle);
+  color: var(--za-text-primary);
+}
+
+#zotero-prefpane-zoteroagent button:hover {
+  border-color: var(--za-accent);
+  background: var(--za-accent-soft);
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-status {
+  display: block;
+  margin-top: 6px;
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-sm);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-status[data-state="success"] {
+  color: var(--za-success);
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-status[data-state="fail"] {
+  color: var(--za-danger);
+}
+
+#zotero-prefpane-zoteroagent #zoteroagent-services-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  margin-bottom: 8px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-subtle);
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-service-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--za-radius-sm);
+  color: var(--za-text-primary);
+  cursor: pointer;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-service-row:hover {
+  background: var(--za-bg-muted);
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-service-row.is-selected {
+  background: var(--za-accent-soft);
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-service-label {
+  flex: 1;
+  color: inherit;
+  font-size: var(--za-font-sm);
+  user-select: none;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-service-label.is-default {
+  font-weight: 600;
+}
+
+#zotero-prefpane-zoteroagent .zoteroagent-pref-services-empty {
+  padding: 8px;
+  color: var(--za-text-tertiary);
+  font-size: var(--za-font-sm);
+  text-align: center;
+}
+
+#zotero-prefpane-zoteroagent #zoteroagent-svcEditor {
+  margin-top: 8px;
+}

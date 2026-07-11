@@ -1,0 +1,373 @@
+/* ===== Message Bubble ===== */
+.zoteroagent-message {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.zoteroagent-message.user + .zoteroagent-message.assistant {
+  margin-top: 4px;
+}
+
+.zoteroagent-message.assistant + .zoteroagent-message.user {
+  margin-top: 4px;
+}
+
+/* ---- Row: avatar + main column (reference: header, body, token bar) ---- */
+.zoteroagent-message-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.zoteroagent-message-main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.zoteroagent-msg-avatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: var(--za-radius-md);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.zoteroagent-msg-avatar-inner {
+  font-size: var(--za-font-sm);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--za-on-accent);
+  letter-spacing: 0;
+}
+
+.zoteroagent-msg-avatar.user {
+  background: var(--za-accent);
+  box-shadow: 0 1px 2px var(--za-accent-soft);
+}
+
+.zoteroagent-msg-avatar.assistant {
+  border: 1px solid var(--za-accent-soft);
+  background: var(--za-accent-soft);
+  box-shadow: none;
+}
+
+.zoteroagent-msg-avatar.assistant .zoteroagent-msg-avatar-inner {
+  color: var(--za-accent);
+}
+
+.zoteroagent-msg-header {
+  margin-bottom: 4px;
+}
+
+.zoteroagent-msg-title {
+  font-size: var(--za-font-md);
+  font-weight: 700;
+  color: var(--za-text-primary);
+  line-height: 1.35;
+}
+
+.zoteroagent-msg-subtime {
+  margin-top: 2px;
+  font-size: var(--za-font-xs);
+  font-weight: 400;
+  color: var(--za-text-tertiary);
+  line-height: 1.3;
+}
+
+.zoteroagent-msg-meta-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  width: 100%;
+  max-width: 100%;
+  padding-top: 2px;
+}
+
+.zoteroagent-copy-button {
+  margin-left: 0;
+}
+
+.zoteroagent-delete-button {
+  color: var(--za-text-tertiary);
+}
+
+.zoteroagent-delete-button:hover {
+  color: var(--za-danger);
+  border-color: var(--za-danger-soft);
+  background: var(--za-danger-soft);
+}
+
+.zoteroagent-message-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.zoteroagent-message:hover .zoteroagent-message-actions,
+.zoteroagent-message:focus-within .zoteroagent-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .zoteroagent-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.zoteroagent-msg-usage {
+  font-size: var(--za-font-xs);
+  color: var(--za-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  flex: 1 1 auto;
+  min-width: 0;
+  user-select: none;
+}
+
+.zoteroagent-icon-button {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: var(--za-radius-sm);
+  border: 1px solid var(--za-border);
+  background: var(--za-bg-surface);
+  color: var(--za-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease,
+    transform 120ms ease;
+}
+
+.zoteroagent-icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.zoteroagent-icon-button:hover {
+  color: var(--za-text-primary);
+  border-color: var(--za-border-strong);
+  background: var(--za-bg-subtle);
+  transform: translateY(-1px);
+}
+
+.zoteroagent-icon-button:focus-visible {
+  outline: 2px solid var(--za-focus-ring);
+  outline-offset: 1px;
+}
+
+.zoteroagent-icon-button.is-success {
+  color: var(--za-success);
+  border-color: var(--za-success-soft);
+  background: var(--za-success-soft);
+}
+
+.zoteroagent-icon-button.is-error {
+  color: var(--za-danger);
+  border-color: var(--za-danger-soft);
+  background: var(--za-danger-soft);
+}
+
+/* ---- Edit Mode ---- */
+.zoteroagent-edit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.zoteroagent-edit-textarea {
+  width: 100%;
+  min-height: 54px;
+  max-height: 200px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--za-accent);
+  border-radius: var(--za-radius-md);
+  background: var(--za-accent-soft);
+  font-family: inherit;
+  font-size: var(--za-font-md);
+  line-height: 1.55;
+  color: var(--za-text-primary);
+  resize: vertical;
+  box-sizing: border-box;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.zoteroagent-edit-textarea:focus {
+  border-color: var(--za-accent);
+  box-shadow: 0 0 0 3px var(--za-accent-soft);
+}
+
+.zoteroagent-edit-btn-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoteroagent-edit-warning {
+  margin: 0;
+  color: var(--za-warning);
+  font-size: var(--za-font-xs);
+  line-height: 1.4;
+}
+
+.zoteroagent-edit-cancel,
+.zoteroagent-edit-submit {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: var(--za-radius-md);
+  font-family: inherit;
+  font-size: var(--za-font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.zoteroagent-edit-cancel {
+  border: 1px solid var(--za-border);
+  background: var(--za-bg-surface);
+  color: var(--za-text-tertiary);
+}
+
+.zoteroagent-edit-cancel:hover {
+  background: var(--za-bg-subtle);
+  color: var(--za-text-primary);
+  border-color: var(--za-border-strong);
+}
+
+.zoteroagent-edit-submit {
+  border: none;
+  background: var(--za-accent);
+  color: var(--za-on-accent);
+}
+
+.zoteroagent-edit-submit:hover {
+  background: var(--za-accent);
+}
+
+.zoteroagent-message.is-editing .zoteroagent-msg-avatar {
+  opacity: 0.5;
+}
+
+.zoteroagent-edit-button {
+  color: var(--za-text-tertiary);
+}
+
+.zoteroagent-edit-button:hover {
+  color: var(--za-accent);
+  border-color: var(--za-accent);
+  background: var(--za-accent-soft);
+}
+
+.zoteroagent-thinking-content {
+  color: var(--za-text-secondary);
+  line-height: 1.6;
+  font-size: var(--za-font-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  -moz-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+.zoteroagent-thinking-content::-webkit-scrollbar {
+  width: 4px;
+}
+.zoteroagent-thinking-content::-webkit-scrollbar-thumb {
+  background: var(--za-scrollbar);
+  border-radius: var(--za-radius-pill);
+}
+
+/* ---- Content Bubble ---- */
+.zoteroagent-message-content {
+  max-width: 100%;
+  min-width: 0;
+  border-radius: var(--za-radius-md);
+  padding: 8px 10px;
+  line-height: 1.7;
+  font-size: var(--za-font-md);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
+  -moz-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+.zoteroagent-message.user .zoteroagent-message-content {
+  background: var(--za-bg-subtle);
+  color: var(--za-text-primary);
+  border-radius: var(--za-radius-md) var(--za-radius-md) var(--za-radius-md)
+    var(--za-radius-sm);
+  padding: 8px 12px;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content {
+  background: transparent;
+  border: none;
+  color: var(--za-text-primary);
+  border-radius: 0;
+  padding: 4px 2px 8px;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content:empty {
+  display: none;
+}
+
+/* ---- User Quote Block ---- */
+.zoteroagent-user-quote {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--za-success);
+  background: var(--za-success-soft);
+  color: var(--za-text-secondary);
+  border-radius: 0 var(--za-radius-sm) var(--za-radius-sm) 0;
+  font-size: var(--za-font-sm);
+  font-style: italic;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+

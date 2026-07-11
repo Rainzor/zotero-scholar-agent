@@ -1,0 +1,179 @@
+/* ===== Markdown Rendered Content ===== */
+.zoteroagent-message.assistant .zoteroagent-message-content p {
+  margin: 0 0 8px;
+}
+.zoteroagent-message.assistant .zoteroagent-message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content h1,
+.zoteroagent-message.assistant .zoteroagent-message-content h2,
+.zoteroagent-message.assistant .zoteroagent-message-content h3,
+.zoteroagent-message.assistant .zoteroagent-message-content h4 {
+  margin: 14px 0 6px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--za-text-primary);
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h1 {
+  font-size: var(--za-font-lg);
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h2 {
+  font-size: var(--za-font-lg);
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h3 {
+  font-size: var(--za-font-md);
+}
+.zoteroagent-message.assistant .zoteroagent-message-content h4 {
+  font-size: var(--za-font-md);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content strong {
+  font-weight: 700;
+  color: var(--za-text-primary);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content em {
+  font-style: italic;
+  color: var(--za-text-secondary);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content ul,
+.zoteroagent-message.assistant .zoteroagent-message-content ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content li {
+  margin-bottom: 4px;
+  line-height: 1.6;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--za-border-strong);
+  background: var(--za-bg-subtle);
+  color: var(--za-text-secondary);
+  border-radius: 0 var(--za-radius-sm) var(--za-radius-sm) 0;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content code {
+  padding: 1px 5px;
+  border-radius: var(--za-radius-sm);
+  background: var(--za-code-inline-bg);
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: var(--za-font-xs);
+  color: var(--za-code-inline-text);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: var(--za-radius-md);
+  background: var(--za-code-bg);
+  color: var(--za-code-text);
+  overflow-x: auto;
+  max-width: 100%;
+  font-size: var(--za-font-sm);
+  line-height: 1.5;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content table {
+  width: 100%;
+  max-width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: var(--za-font-sm);
+  table-layout: fixed;
+  overflow-wrap: break-word;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content th,
+.zoteroagent-message.assistant .zoteroagent-message-content td {
+  padding: 6px 10px;
+  border: 1px solid var(--za-border);
+  text-align: left;
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content th {
+  background: var(--za-bg-subtle);
+  font-weight: 600;
+  color: var(--za-text-primary);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content td {
+  background: var(--za-bg-surface);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content hr {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--za-border);
+}
+
+.zoteroagent-message.assistant .zoteroagent-message-content a {
+  color: var(--za-accent);
+  text-decoration: none;
+}
+.zoteroagent-message.assistant .zoteroagent-message-content a:hover {
+  text-decoration: underline;
+}
+
+.zoteroagent-page-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--za-accent-soft);
+  border-radius: var(--za-radius-pill);
+  background: var(--za-accent-soft);
+  color: var(--za-accent);
+  font: inherit;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.zoteroagent-page-chip:hover:not(.is-disabled) {
+  background: var(--za-accent-soft);
+  border-color: var(--za-accent-soft);
+}
+
+.zoteroagent-page-chip.is-disabled {
+  border-color: var(--za-border);
+  background: var(--za-bg-subtle);
+  color: var(--za-text-tertiary);
+  cursor: not-allowed;
+}
+
+/* ===== Math (KaTeX) ===== */
+.zoteroagent-message-content .katex {
+  font-size: 1em;
+}
+
+.zoteroagent-message-content .katex-display {
+  margin: 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+}
+
+.zoteroagent-message-content .katex-display::-webkit-scrollbar,
+.zoteroagent-message-content .katex-display::-moz-scrollbar {
+  height: 3px;
+}
+
+.zoteroagent-message-content .katex-display > .katex {
+  font-size: 1.1em;
+}

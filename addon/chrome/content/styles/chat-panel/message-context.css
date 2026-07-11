@@ -1,0 +1,159 @@
+/* ===== Reference in message history ===== */
+.zoteroagent-msg-reference {
+  margin-bottom: 8px;
+  padding: 0;
+  background: var(--za-bg-subtle);
+  border: 1px solid var(--za-border);
+  border-left: 3px solid var(--za-text-tertiary);
+  border-radius: 0 var(--za-radius-sm) var(--za-radius-sm) 0;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+}
+
+.zoteroagent-msg-ref-label {
+  display: block;
+  padding: 5px 10px 2px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  color: var(--za-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.zoteroagent-msg-ref-page {
+  margin-left: 6px;
+  font-size: var(--za-font-xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--za-text-tertiary);
+}
+
+.zoteroagent-msg-ref-text {
+  padding: 0 10px 8px;
+  font-size: var(--za-font-sm);
+  line-height: 1.5;
+  color: var(--za-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 54px;
+  overflow: hidden;
+}
+
+.zoteroagent-msg-reference.is-expanded .zoteroagent-msg-ref-text {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.zoteroagent-msg-ref-fade {
+  position: absolute;
+  bottom: 0;
+  left: 3px;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(transparent, var(--za-bg-subtle));
+  pointer-events: none;
+}
+
+.zoteroagent-msg-reference.is-expanded .zoteroagent-msg-ref-fade {
+  display: none;
+}
+
+.zoteroagent-msg-response-quote {
+  margin-bottom: 8px;
+  padding: 0;
+  background: var(--za-accent-soft);
+  border: 1px solid var(--za-accent-soft);
+  border-left: 3px solid var(--za-accent);
+  border-radius: 0 var(--za-radius-sm) var(--za-radius-sm) 0;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+}
+
+.zoteroagent-msg-response-label {
+  display: block;
+  padding: 5px 10px 2px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  color: var(--za-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.zoteroagent-msg-response-text {
+  padding: 0 10px 8px;
+  font-size: var(--za-font-sm);
+  line-height: 1.5;
+  color: var(--za-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 54px;
+  overflow: hidden;
+}
+
+.zoteroagent-msg-response-quote.is-expanded .zoteroagent-msg-response-text {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.zoteroagent-msg-response-fade {
+  position: absolute;
+  bottom: 0;
+  left: 3px;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(transparent, var(--za-accent-soft));
+  pointer-events: none;
+}
+
+.zoteroagent-msg-response-quote.is-expanded .zoteroagent-msg-response-fade {
+  display: none;
+}
+
+.zoteroagent-msg-question {
+  margin-top: 2px;
+  font-size: var(--za-font-md);
+  line-height: 1.5;
+  color: var(--za-text-primary);
+  font-weight: 500;
+}
+
+.zoteroagent-msg-paper-context {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  background: var(--za-accent-soft);
+  border: 1px solid var(--za-accent);
+  border-left: 3px solid var(--za-accent);
+  border-radius: 0 var(--za-radius-sm) var(--za-radius-sm) 0;
+}
+
+.zoteroagent-msg-paper-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  color: var(--za-accent);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.zoteroagent-msg-paper-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.zoteroagent-msg-paper-pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 6px;
+  border-radius: var(--za-radius-pill);
+  background: var(--za-bg-surface);
+  border: 1px solid var(--za-accent);
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-xs);
+}

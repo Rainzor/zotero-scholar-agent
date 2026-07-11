@@ -1,0 +1,60 @@
+:root {
+  --za-bg-panel: var(--material-sidepane, #ffffff);
+  --za-bg-surface: var(--material-background, #ffffff);
+  --za-bg-subtle: var(--fill-quinary, rgb(0 0 0 / 0.04));
+  --za-bg-muted: var(--fill-quinary, rgb(0 0 0 / 0.07));
+  --za-bg-elevated: var(
+    --color-menu-opaque,
+    var(--material-background, #ffffff)
+  );
+  --za-text-primary: var(--fill-primary, #1a1a1a);
+  --za-text-secondary: var(--fill-secondary, #5f6368);
+  --za-text-tertiary: var(--fill-tertiary, #7a7f87);
+  --za-border: var(--stroke-secondary, var(--fill-quarternary, #d9dde3));
+  --za-border-strong: var(--fill-quarternary, #c6ccd5);
+  --za-accent: var(--color-accent, var(--accent-blue, #2563eb));
+  --za-accent-strong: var(--color-accent, var(--accent-blue, #2563eb));
+  --za-danger: var(--accent-red, #b42318);
+  --za-success: var(--accent-green, #1f7a3d);
+  --za-warning: var(--accent-orange, #9a6700);
+  --za-on-accent: #ffffff;
+  --za-accent-soft: rgb(37 99 235 / 0.1);
+  --za-success-soft: rgb(31 122 61 / 0.1);
+  --za-warning-soft: rgb(154 103 0 / 0.11);
+  --za-danger-soft: rgb(180 35 24 / 0.1);
+  --za-code-bg: var(--fill-quinary, #282c34);
+  --za-code-text: var(--fill-primary, #e7edf5);
+  --za-code-inline-bg: var(--fill-quinary, rgb(0 0 0 / 0.05));
+  --za-code-inline-text: var(--color-accent, var(--accent-blue, #2563eb));
+  --za-shadow-color: rgb(0 0 0 / 0.14);
+  --za-scrollbar: var(--fill-quarternary, rgb(0 0 0 / 0.16));
+  --za-focus-ring: rgb(37 99 235 / 0.2);
+  --za-radius-sm: 6px;
+  --za-radius-md: 10px;
+  --za-radius-pill: 999px;
+  --za-font-xs: 11px;
+  --za-font-sm: 12px;
+  --za-font-md: 13px;
+  --za-font-lg: 15px;
+}
+
+@supports (color: color-mix(in srgb, red, transparent)) {
+  :root {
+    --za-accent-soft: color-mix(in srgb, var(--za-accent) 12%, transparent);
+    --za-success-soft: color-mix(in srgb, var(--za-success) 12%, transparent);
+    --za-warning-soft: color-mix(in srgb, var(--za-warning) 14%, transparent);
+    --za-danger-soft: color-mix(in srgb, var(--za-danger) 12%, transparent);
+    --za-focus-ring: color-mix(in srgb, var(--za-accent) 22%, transparent);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --za-success: var(--accent-green, #5ac878);
+    --za-warning: var(--accent-orange, #e3a341);
+    --za-danger: var(--accent-red, #ff7b72);
+    --za-code-bg: var(--fill-quinary, #1e232b);
+    --za-code-text: var(--fill-primary, #e6edf3);
+    --za-shadow-color: rgb(0 0 0 / 0.35);
+  }
+}

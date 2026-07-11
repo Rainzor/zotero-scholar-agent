@@ -1,0 +1,222 @@
+/* ===== Codex Activity (per turn) ===== */
+.zoteroagent-turn-details {
+  margin: 6px 0 2px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-md);
+  background: var(--za-bg-subtle);
+  overflow: hidden;
+}
+
+.zoteroagent-turn-details-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 10px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  color: var(--za-text-secondary);
+}
+
+.zoteroagent-turn-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.zoteroagent-turn-detail-section {
+  padding: 8px 10px;
+  border-top: 1px solid var(--za-border);
+}
+
+.zoteroagent-turn-detail-section.is-failed {
+  background: var(--za-danger-soft);
+}
+
+.zoteroagent-turn-detail-section.is-needs-review {
+  background: var(--za-warning-soft);
+}
+
+.zoteroagent-turn-detail-heading {
+  margin: 0 0 6px;
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-xs);
+  font-weight: 700;
+}
+
+.zoteroagent-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 8px 8px;
+}
+
+.zoteroagent-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.zoteroagent-activity-badge {
+  flex: 0 0 auto;
+  font-size: var(--za-font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  border-radius: var(--za-radius-sm);
+  padding: 1px 5px;
+  margin-top: 1px;
+  color: var(--za-on-accent);
+}
+
+.zoteroagent-activity-badge.is-ok {
+  background: var(--za-success);
+}
+
+.zoteroagent-activity-badge.is-failed {
+  background: var(--za-danger);
+}
+
+.zoteroagent-activity-badge.is-running {
+  background: var(--za-warning);
+}
+
+.zoteroagent-activity-cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--za-font-xs);
+  line-height: 1.4;
+  color: var(--za-text-primary);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.zoteroagent-quality-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 9px 8px;
+}
+
+.zoteroagent-quality-review-row {
+  color: var(--za-text-tertiary);
+  font-size: var(--za-font-xs);
+  line-height: 1.4;
+}
+
+.zoteroagent-keyword-review {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--za-accent);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-accent-soft);
+}
+
+.zoteroagent-keyword-review-label {
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+}
+
+.zoteroagent-keyword-review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--za-text-primary);
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-keyword-review-row button {
+  height: 24px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-secondary);
+  padding: 0 7px;
+  font-size: var(--za-font-xs);
+  cursor: pointer;
+}
+
+.zoteroagent-relationship-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 10px 8px;
+}
+
+.zoteroagent-relationship-review-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+  font-size: var(--za-font-xs);
+  line-height: 1.45;
+}
+
+.zoteroagent-relationship-type {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: var(--za-radius-pill);
+  background: var(--za-accent-soft);
+  color: var(--za-accent);
+  font-weight: 600;
+}
+
+.zoteroagent-relationship-text {
+  min-width: 0;
+  color: var(--za-text-secondary);
+  word-break: break-word;
+}
+
+/* ===== Turn Footer (trust signals) ===== */
+.zoteroagent-turn-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.zoteroagent-turn-chip {
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  border-radius: var(--za-radius-pill);
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  line-height: 1.3;
+}
+
+button.zoteroagent-turn-chip {
+  cursor: pointer;
+}
+
+button.zoteroagent-turn-chip:focus-visible {
+  outline: 2px solid var(--za-focus-ring);
+  outline-offset: 1px;
+}
+
+.zoteroagent-turn-chip.is-memory {
+  color: var(--za-accent);
+  background: var(--za-accent-soft);
+  border-color: var(--za-accent-soft);
+}
+
+.zoteroagent-turn-chip.is-context {
+  color: var(--za-accent);
+  background: var(--za-accent-soft);
+  border-color: var(--za-accent-soft);
+}
+
+.zoteroagent-turn-chip.is-relationship {
+  color: var(--za-accent);
+  background: var(--za-accent-soft);
+  border-color: var(--za-accent-soft);
+}
+
+.zoteroagent-turn-chip.is-commit {
+  color: var(--za-success);
+  background: var(--za-success-soft);
+  border-color: var(--za-success-soft);
+}

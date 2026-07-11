@@ -1,0 +1,49 @@
+.zoteroagent-empty-chat {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 180px;
+  padding: 28px 18px;
+  color: var(--za-text-primary);
+}
+
+.zoteroagent-empty-chat-title {
+  margin: 0;
+  font-size: var(--za-font-lg);
+  line-height: 1.35;
+}
+
+.zoteroagent-empty-chat-detail {
+  margin: 8px 0 14px;
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-sm);
+  line-height: 1.5;
+}
+
+.zoteroagent-empty-chat-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.zoteroagent-empty-chat-suggestion {
+  max-width: 100%;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  font: inherit;
+  font-size: var(--za-font-sm);
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zoteroagent-empty-chat-suggestion:hover,
+.zoteroagent-empty-chat-suggestion:focus-visible {
+  border-color: var(--za-accent);
+  background: var(--za-accent-soft);
+  outline: none;
+}
