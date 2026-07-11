@@ -12,7 +12,7 @@
 | ------------------------------------------------------- | ----------- |
 | 1. Theme and Layout Foundation                          | Confirmed   |
 | 2. Sidebar Reading Flow and Safe Session Actions        | Confirmed   |
-| 3. Preferences Information Architecture and Reliability | Not started |
+| 3. Preferences Information Architecture and Reliability | Confirmed   |
 | 4. Main Item-Tree Knowledge Status and Batch Loop       | Not started |
 
 ## Decisions Locked for This Plan
