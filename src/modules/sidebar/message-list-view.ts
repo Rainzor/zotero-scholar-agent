@@ -32,6 +32,13 @@ export type MessageListRenderOptions = {
     messageIndex: number,
     suggestions: string[],
   ) => HTMLElement;
+  buildTierSuggestion: (
+    doc: Document,
+    body: HTMLElement,
+    itemId: number,
+    messageIndex: number,
+    suggestion: NonNullable<ChatMessage["tierSuggestion"]>,
+  ) => HTMLElement;
   createMetaRow: (
     doc: Document,
     message: ChatMessage,
@@ -117,6 +124,17 @@ function buildMessage(
       ),
     );
   }
+  if (message.role === "assistant" && message.tierSuggestion) {
+    main.appendChild(
+      options.buildTierSuggestion(
+        doc,
+        body,
+        itemId,
+        index,
+        message.tierSuggestion,
+      ),
+    );
+  }
   if (message.role === "assistant") {
     const footer = buildTurnFooter(doc, message, (kind) => {
       openTurnDetail(main, kind);
@@ -173,9 +191,7 @@ export function createMessageHeader(
   return header;
 }
 
-function avatarInitial(
-  message: Pick<ChatMessage, "role" | "model">,
-): string {
+function avatarInitial(message: Pick<ChatMessage, "role" | "model">): string {
   if (message.role === "user") return "Y";
   const match = (message.model || "AI").trim().match(/[a-zA-Z0-9]/);
   return match ? match[0].toUpperCase() : "A";

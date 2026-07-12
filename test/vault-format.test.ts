@@ -19,6 +19,7 @@ import {
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
+  scorePaperForQuery,
   shouldAttemptTextParserMigration,
   shouldReplaceTextWithPageMarkedVersion,
   TEXT_PARSER_VERSION,
@@ -50,7 +51,10 @@ describe("path helpers", () => {
     expect(paths.textPath).toBe("/vault/PXW99EKT/text.txt");
     expect(paths.textMetaPath).toBe("/vault/PXW99EKT/text.meta.json");
     expect(paths.memoryPath).toBe("/vault/PXW99EKT/memory.md");
+    expect(paths.notesPath).toBe("/vault/PXW99EKT/notes.md");
     expect(paths.recordPath).toBe("/vault/PXW99EKT/record.json");
+    expect(paths.codeDir).toBe("/vault/PXW99EKT/code");
+    expect(paths.codeNotesPath).toBe("/vault/PXW99EKT/code-notes.md");
     expect(paths.conversationsDir).toBe("/vault/PXW99EKT/conversations");
     expect(paths.conversationPath("chat-1")).toBe(
       "/vault/PXW99EKT/conversations/chat-1.md",
@@ -74,13 +78,15 @@ describe("markdown / README helpers", () => {
     });
     expect(md).toContain("# Attention Is All You Need (Vaswani et al., 2017)");
     expect(md).toContain("> itemKey: AAAA1111");
+    expect(md).toContain("tier: L1");
+    expect(md).toContain("<!-- zotero-agent:paper:start -->");
     expect(md).toContain("## Abstract");
+    expect(md).toContain("## TL;DR");
     expect(md).toContain("## Contribution");
     expect(md).toContain("## Method");
-    expect(md).toContain("## Insight");
     expect(md).toContain("## Library Connections");
     expect(md).toContain("### Semantic Relationships");
-    expect(md).toContain("## Evidence Pointers");
+    expect(md).not.toContain("## Evidence Pointers");
   });
 
   it("parses semantic relationship lines for the structured projection", () => {
@@ -123,8 +129,7 @@ describe("markdown / README helpers", () => {
         creators: "Alice",
         year: "2024",
       },
-      memoryMarkdown:
-        `---
+      memoryMarkdown: `---
 rating: 4
 zoteroCollections:
   - key: C1
@@ -151,8 +156,10 @@ codexKeywords:
         growth: { reviewRequired: false },
       },
     });
-    expect(projection.schemaVersion).toBe(2);
+    expect(projection.schemaVersion).toBe(3);
     expect(projection.itemKey).toBe("AAAA1111");
+    expect(projection.tier).toBe("L1");
+    expect(projection.valueTypes).toEqual([]);
     expect(projection.signals).toEqual({
       rating: 4,
       zoteroCollections: [
@@ -169,6 +176,57 @@ codexKeywords:
     });
     expect(projection.relationships).toHaveLength(1);
     expect(projection.relationships[0].type).toBe("can_combine_with");
+  });
+
+  it("uses tier and value types to route retrieval", () => {
+    expect(
+      scorePaperForQuery(
+        { tier: "L3", valueTypes: ["method-advance"], rating: 4 },
+        "implementation details and reproduction",
+      ),
+    ).toBeGreaterThan(
+      scorePaperForQuery(
+        { tier: "L1", valueTypes: ["canon"], rating: 5 },
+        "implementation details and reproduction",
+      ),
+    );
+  });
+
+  it("projects inline page anchors by section", () => {
+    const projection = buildPaperRecordProjection({
+      meta: {
+        itemId: 1,
+        itemKey: "AAAA1111",
+        title: "Paper A",
+      },
+      memoryMarkdown: `---
+tier: L2
+---
+
+## Method
+The method has two stages. [page 4]
+
+## Results
+It improves accuracy. [page 7] [page 4]
+`,
+      generatedAt: "2026-07-12T00:00:00.000Z",
+      quality: {
+        status: "failed",
+        tier: "L2",
+        checkedAt: "2026-07-12T00:00:00.000Z",
+        hardFailures: [],
+        warnings: [],
+        coreSections: { missing: [], placeholder: [] },
+        abstract: { status: "missing" },
+        relationships: { candidates: 0, parsed: 0 },
+        growth: { reviewRequired: false },
+      },
+    });
+
+    expect(projection.evidenceAnchors).toEqual([
+      { page: 4, sections: ["Method", "Results"] },
+      { page: 7, sections: ["Results"] },
+    ]);
   });
 
   it("formats conversation turns and appends blocks", () => {
@@ -228,9 +286,9 @@ codexKeywords:
   });
 
   it("formats PDFWorker form-feed text with page markers", () => {
-    expect(formatWorkerTextForVault(" page one \f page two \f\f page three ")).toBe(
-      "[page 1]\npage one\n\n[page 2]\npage two\n\n[page 4]\npage three",
-    );
+    expect(
+      formatWorkerTextForVault(" page one \f page two \f\f page three "),
+    ).toBe("[page 1]\npage one\n\n[page 2]\npage two\n\n[page 4]\npage three");
   });
 
   it("preserves page numbers when PDFWorker text starts with a form-feed", () => {

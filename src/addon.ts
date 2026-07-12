@@ -5,6 +5,7 @@ import type { SemanticRelationship } from "./services/codex/vault-format";
 import type { KnowledgeQualityReport } from "./services/knowledge-quality";
 import type { LocalImageRef } from "./services/local-images";
 import type { CodexReasoningEffort } from "./services/codex/context-window";
+import type { PaperTier } from "./services/knowledge-surface";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -47,6 +48,7 @@ export type ChatMessage = {
   quality?: KnowledgeQualityReport;
   imageRefs?: LocalImageRef[];
   keywordSuggestions?: string[];
+  tierSuggestion?: PaperTier;
 };
 export type ChatSession = {
   sessionId: string;

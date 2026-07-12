@@ -112,13 +112,12 @@ describe("runPaperColdStart", () => {
       updatePaperSignals: async () => false,
       commitVaultChanges: async () => false,
     };
-    const result = await runPaperColdStart(
-      { paper, pdfItemId: 10 },
-      {},
-      deps,
-    );
+    const result = await runPaperColdStart({ paper, pdfItemId: 10 }, {}, deps);
     expect(result.quality.status).toBe("failed");
-    expect(result.quality.coreSections.missing).toContain("Method");
+    expect([
+      ...result.quality.coreSections.missing,
+      ...result.quality.coreSections.placeholder,
+    ]).toContain("Method");
   });
 
   it("uses a second fresh turn to deepen Insight when requested", async () => {

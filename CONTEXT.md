@@ -130,6 +130,7 @@ _Avoid_: the agent, the model, the LLM
 - **Layered PDF parsing (RATIFIED, ADR 0005):** PDFWorker deterministic extraction is the only writer of `text.txt` on the default path. Codex pdf-skill-based parsing (a poppler+python prompt workflow, not a built-in parser) is opt-in enrichment only: scanned-PDF fallback and on-demand figure/page rendering, gated by mechanical validation (page count, `[page N]` markers), recorded via `parserSource` in `text.meta.json`, with dependency probing and graceful degradation. Original PDFs still never enter the Vault.
 - **Write-discipline file split (RATIFIED, ADR 0011):** each per-paper file has one write discipline and one maintainer. `memory.md` = plugin-marked bibliography/abstract block (model read-only) + model rewrite-and-dedupe interpretation area; `notes.md` carries Reader Thinking (append-only, dated, attributed, agent entries user-confirmed); Evidence Pointers is no longer a maintained section — the plugin derives a page-anchor index from inline `[page N]` anchors into `record.json`. Ships as `knowledgeSurfaceVersion` 2 / `recordProjectionVersion` 3 with a one-time git-committed migration.
 - **Tiered engagement depth (RATIFIED, ADR 0012):** plugin-owned `tier` frontmatter (`L0`–`L3`, cold-start default `L1`) with tier-specific interpretation templates (the seven-section shape is the L2 template; `code-notes.md`/`experiments/` exist only at L3), optional `valueTypes` retrieval-routing vocabulary, rewrite-not-append transitions (agent-proposed upgrades need UI confirmation; L3 is user-initiated), tier-aware quality gates with a repair path, and minimal cognitive labels (`[claimed by paper]`/`[verified]` in Results/Insight; `[superseded by [[KEY]]]` instead of deletion). Per-paper structure freezes once 0011+0012 land.
+- **Explicit code and Topic workflows (RATIFIED, ADR 0014):** L3 code analysis starts from a user-confirmed GitHub URL, keeps the checkout in gitignored `{itemKey}/code/`, records branch/commit provenance in tracked `code-notes.md`, and checks for source modifications. Topic Notes are explicit-selection artifacts at `topics/{slug}.md`; the plugin owns their Item Key frontmatter and Codex rewrites only the synthesis body.
 - Vault layout:
 
 ```
@@ -146,7 +147,11 @@ _Avoid_: the agent, the model, the LLM
     ├── conversations/     # ② episodic logs, one file per session (human-facing)
     │   └── {sessionId}.md
     ├── notes.md           # ② Reader Thinking carrier (ADR 0011): append-only, dated, attributed
+    ├── code/              # L3 source checkout (gitignored)
+    ├── code-notes.md      # L3 paper-vs-code analysis
     └── memory.md          # ③ Knowledge Surface for the Paper Knowledge Record
+├── topics/
+│   └── {slug}.md          # explicit multi-paper Topic Note
 ```
 
 ## Open decisions
@@ -172,7 +177,7 @@ _Avoid_: the agent, the model, the LLM
 
 ## Future capabilities (deferred)
 
-- **Source-code fetch & analysis**: detect a paper's associated code repo (GitHub URL in the PDF / Papers-with-Code), clone it, and let Codex analyze it. This is Codex's strongest differentiator over the old RAG pipeline. Tentative placement: clone into `{itemKey}/code/` but git-ignore it so the Vault's memory history stays small; Codex reads it via the working dir. _Scheduled: roadmap execution order #12._
+- **Automatic source-code discovery**: explicit GitHub URL clone/analysis is implemented under ADR 0014. Detecting repositories from PDFs, landing pages, or Papers with Code remains deferred and must still require user confirmation before cloning.
 - **Codex capability-surface leverage** (roadmap §7): treat Codex's native extensibility — skills, MCP servers (`codex mcp add`), browser_use/computer_use, image input, model routing — as product input/output channels rather than rebuilding them. Every integration must pass four gates: Vault-value, single-source-of-truth boundary (external systems are projections or suggestion sources, never a second truth), no silent `~/.codex` config changes (opt-in + capability probing), and graceful degradation of the default path.
 - **Paper Discovery** (roadmap §7.3): plugin-scheduled read-only `codex exec` sweeps (browser_use / arXiv-class MCP) that surface new relevant papers into a suggestion inbox with Vault-grounded rationale. Suggestions only — no silent library writes or downloads; adoption flows through Zotero import + cold start.
 - **Notion projection** (roadmap §7.4): one-way publish of Knowledge Surfaces / Topic Notes / Living Surveys via a Notion MCP server on explicit user trigger. Two-way sync would need its own ADR; default is no.

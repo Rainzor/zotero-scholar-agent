@@ -23,7 +23,9 @@ export function buildQuotedQuestion(options: {
     );
   }
   const question = String(options.question || "").trim();
-  return quotedBlocks.length ? `${quotedBlocks.join("\n\n")}\n\n${question}` : question;
+  return quotedBlocks.length
+    ? `${quotedBlocks.join("\n\n")}\n\n${question}`
+    : question;
 }
 
 export function getRecentMessagesForPrompt(
@@ -80,7 +82,10 @@ export function buildCodexResearchPrompt(options: {
     : "Explicitly mentioned Vault papers (@): none";
   const contextBlock =
     options.mode === "fresh-thread"
-      ? buildFreshThreadContextBlock(options.contextDigest, options.recentMessages)
+      ? buildFreshThreadContextBlock(
+          options.contextDigest,
+          options.recentMessages,
+        )
       : [
           "Thread context mode: resume existing Codex thread.",
           "Hidden Context Digest: omitted because Codex is resuming this thread.",
@@ -103,7 +108,14 @@ export function buildCodexResearchPrompt(options: {
     "  `<!-- keyword-suggestions: keyword one; keyword two -->`",
     "- Suggestions require user review; omit the marker when there is nothing useful to suggest.",
   ].join("\n");
-  return `${meta}\n\n${mentionedBlock}\n\n${contextBlock}\n\n${relationshipRules}\n\n${keywordRules}\n\nUser question:\n${options.question.trim()}`;
+  const tierRules = [
+    "Engagement depth suggestion:",
+    "- Read the in-focus memory.md tier before deciding.",
+    "- If a lower-tier record now clearly merits L2 close reading, append `<!-- tier-suggestion: L2 -->` to the final answer.",
+    "- Never suggest L3; reproduction depth is user-initiated only.",
+    "- Do not edit the tier field yourself.",
+  ].join("\n");
+  return `${meta}\n\n${mentionedBlock}\n\n${contextBlock}\n\n${relationshipRules}\n\n${keywordRules}\n\n${tierRules}\n\nUser question:\n${options.question.trim()}`;
 }
 
 function buildFreshThreadContextBlock(

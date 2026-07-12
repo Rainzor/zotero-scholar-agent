@@ -1,20 +1,31 @@
-import { parseKnowledgeSurface } from "./knowledge-surface";
+import {
+  KNOWLEDGE_SURFACE_PLUGIN_END,
+  KNOWLEDGE_SURFACE_PLUGIN_START,
+  TIER_SECTION_SHAPES,
+  parseKnowledgeSurface,
+  type PaperTier,
+} from "./knowledge-surface";
 import { parseSemanticRelationships } from "./codex/vault-format";
 
 export const CORE_KNOWLEDGE_SECTIONS = [
-  "Abstract",
+  "TL;DR",
   "Contribution",
   "Problem",
   "Method",
   "Insight",
   "Results",
   "Takeaways",
+  "Verdict",
+  "Why Stop Here",
+  "Better Pointers",
+  "Library Connections",
 ] as const;
 
 export type CoreKnowledgeSection = (typeof CORE_KNOWLEDGE_SECTIONS)[number];
 
 export type KnowledgeQualityReport = {
   status: "passed" | "needs-review" | "failed";
+  tier: PaperTier;
   checkedAt: string;
   hardFailures: string[];
   warnings: string[];
@@ -41,8 +52,16 @@ export function evaluateKnowledgeSurface(options: {
   sourceAbstract?: string;
   itemKey?: string;
   checkedAt?: string;
+  codeNotes?: string;
+  allowTierChange?: boolean;
 }): KnowledgeQualityReport {
-  const afterBody = parseKnowledgeSurface(options.after).body;
+  const parsedAfter = parseKnowledgeSurface(options.after);
+  const afterBody = parsedAfter.body;
+  const tier = inferQualityTier(
+    options.after,
+    afterBody,
+    parsedAfter.signals.tier,
+  );
   const beforeBody = parseKnowledgeSurface(options.before || "").body;
   const sections = parseH2Sections(afterBody);
   const missing: CoreKnowledgeSection[] = [];
@@ -50,12 +69,15 @@ export function evaluateKnowledgeSurface(options: {
   const hardFailures: string[] = [];
   const warnings: string[] = [];
 
-  for (const section of CORE_KNOWLEDGE_SECTIONS) {
+  for (const section of TIER_SECTION_SHAPES[tier]) {
     if (!sections.has(section)) {
       missing.push(section);
       continue;
     }
-    if (isPlaceholderContent(sections.get(section) || "")) {
+    if (
+      section !== "Library Connections" &&
+      isPlaceholderContent(sections.get(section) || "")
+    ) {
       placeholder.push(section);
     }
   }
@@ -65,8 +87,43 @@ export function evaluateKnowledgeSurface(options: {
   if (placeholder.length) {
     hardFailures.push(`Placeholder core sections: ${placeholder.join(", ")}`);
   }
+  const requiresPluginBlock =
+    hasExplicitTier(options.after) ||
+    Boolean(extractPluginBlock(options.before || ""));
+  const pluginBlock = extractPluginBlock(options.after);
+  if (requiresPluginBlock && !pluginBlock) {
+    hardFailures.push(
+      "Plugin-owned bibliography/abstract block is missing or malformed.",
+    );
+  }
+  const beforePluginBlock = extractPluginBlock(options.before || "");
+  if (
+    beforePluginBlock &&
+    pluginBlock &&
+    normalizeBlock(beforePluginBlock) !== normalizeBlock(pluginBlock)
+  ) {
+    hardFailures.push(
+      "Plugin-owned bibliography/abstract block changed during the turn.",
+    );
+  }
+  const beforeSignals = parseKnowledgeSurface(options.before || "").signals;
+  const comparableBeforeSignals = options.allowTierChange
+    ? { ...beforeSignals, tier: parsedAfter.signals.tier }
+    : beforeSignals;
+  if (
+    options.before &&
+    JSON.stringify(comparableBeforeSignals) !==
+      JSON.stringify(parsedAfter.signals)
+  ) {
+    hardFailures.push("Plugin-owned YAML frontmatter changed during the turn.");
+  }
+  if (tier === "L3" && !hasSubstantiveCodeNotes(options.codeNotes || "")) {
+    hardFailures.push("L3 requires a populated code-notes.md.");
+  }
 
-  const abstractText = String(sections.get("Abstract") || "").trim();
+  const abstractText = String(sections.get("Abstract") || "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .trim();
   const abstract = evaluateAbstract(abstractText, options.sourceAbstract);
   if (abstract.status === "missing") {
     hardFailures.push("Abstract is missing.");
@@ -88,8 +145,8 @@ export function evaluateKnowledgeSurface(options: {
     hardFailures.push("One or more Semantic Relationship lines are malformed.");
   }
 
-  const beforeLength = beforeBody.trim().length;
-  const afterLength = afterBody.trim().length;
+  const beforeLength = stripPluginOwnedContent(beforeBody).trim().length;
+  const afterLength = stripPluginOwnedContent(afterBody).trim().length;
   const ratio =
     beforeLength > 0
       ? Number((afterLength / beforeLength).toFixed(3))
@@ -107,6 +164,7 @@ export function evaluateKnowledgeSurface(options: {
         ? "needs-review"
         : "passed",
     checkedAt: options.checkedAt || new Date().toISOString(),
+    tier,
     hardFailures,
     warnings,
     coreSections: { missing, placeholder },
@@ -120,6 +178,59 @@ export function evaluateKnowledgeSurface(options: {
       reviewRequired: growthReviewRequired,
     },
   };
+}
+
+function stripPluginOwnedContent(markdown: string): string {
+  return String(markdown || "").replace(
+    /<!--\s*zotero-agent:paper:start\s*-->[\s\S]*?<!--\s*zotero-agent:paper:end\s*-->/gi,
+    "",
+  );
+}
+
+function inferQualityTier(
+  markdown: string,
+  body: string,
+  parsedTier: PaperTier,
+): PaperTier {
+  if (hasExplicitTier(markdown)) {
+    return parsedTier;
+  }
+  const sections = parseH2Sections(body);
+  return ["Problem", "Insight", "Results"].some((section) =>
+    sections.has(section),
+  )
+    ? "L2"
+    : parsedTier;
+}
+
+function hasExplicitTier(markdown: string): boolean {
+  return /^---[\s\S]*?^tier:\s*L[0-3]\s*$/m.test(String(markdown || ""));
+}
+
+function extractPluginBlock(markdown: string): string {
+  const text = String(markdown || "");
+  const start = text.indexOf(KNOWLEDGE_SURFACE_PLUGIN_START);
+  const end = text.indexOf(KNOWLEDGE_SURFACE_PLUGIN_END);
+  if (start < 0 || end <= start) return "";
+  return text.slice(start, end + KNOWLEDGE_SURFACE_PLUGIN_END.length);
+}
+
+function normalizeBlock(value: string): string {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+}
+
+function hasSubstantiveCodeNotes(markdown: string): boolean {
+  const body = String(markdown || "")
+    .replace(
+      /<!--\s*zotero-agent:code:start\s*-->[\s\S]*?<!--\s*zotero-agent:code:end\s*-->/gi,
+      "",
+    )
+    .replace(/^#.+$/gm, "")
+    .replace(/^##.+$/gm, "")
+    .trim();
+  return body.length >= 40;
 }
 
 function extractSemanticRelationshipBlock(markdown: string): string {

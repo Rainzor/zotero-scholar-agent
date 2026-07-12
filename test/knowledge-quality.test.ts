@@ -46,10 +46,10 @@ describe("evaluateKnowledgeSurface", () => {
 
   it("fails missing or placeholder core sections", () => {
     const report = evaluateKnowledgeSurface({
-      after: COMPLETE.replace("Specific method.", "_Not yet distilled._").replace(
-        "## Insight\nGrounded insight.\n\n",
-        "",
-      ),
+      after: COMPLETE.replace(
+        "Specific method.",
+        "_Not yet distilled._",
+      ).replace("## Insight\nGrounded insight.\n\n", ""),
       sourceAbstract: "Source abstract.",
     });
     expect(report.status).toBe("failed");
@@ -113,5 +113,138 @@ describe("evaluateKnowledgeSurface", () => {
     });
     expect(report.status).toBe("needs-review");
     expect(report.growth.reviewRequired).toBe(true);
+  });
+
+  it("uses tier-aware required sections for an L1 record", () => {
+    const report = evaluateKnowledgeSurface({
+      after: `---
+tier: L1
+---
+
+# Paper
+
+<!-- zotero-agent:paper:start -->
+## Abstract
+Source abstract.
+<!-- zotero-agent:paper:end -->
+
+## TL;DR
+Short finding.
+
+## Contribution
+Contribution.
+
+## Method
+Method skeleton.
+
+## Takeaways
+Takeaway.
+
+## Library Connections
+
+### Semantic Relationships
+`,
+      sourceAbstract: "Source abstract.",
+    });
+
+    expect(report.status).toBe("passed");
+    expect(report.tier).toBe("L1");
+    expect(report.coreSections.missing).toEqual([]);
+  });
+
+  it("fails when a v2 record loses the plugin-owned block", () => {
+    const report = evaluateKnowledgeSurface({
+      after: `---
+tier: L1
+---
+
+## TL;DR
+Finding.
+
+## Contribution
+Contribution.
+
+## Method
+Method.
+
+## Takeaways
+Takeaway.
+
+## Library Connections
+`,
+    });
+
+    expect(report.status).toBe("failed");
+    expect(report.hardFailures).toContain(
+      "Plugin-owned bibliography/abstract block is missing or malformed.",
+    );
+  });
+
+  it("fails when Codex changes the plugin-owned block during a turn", () => {
+    const before = `---
+tier: L1
+---
+
+<!-- zotero-agent:paper:start -->
+## Abstract
+Original abstract.
+<!-- zotero-agent:paper:end -->
+
+## TL;DR
+Finding.
+
+## Contribution
+Contribution.
+
+## Method
+Method.
+
+## Takeaways
+Takeaway.
+
+## Library Connections
+`;
+    const report = evaluateKnowledgeSurface({
+      before,
+      after: before.replace("Original abstract.", "Changed abstract."),
+      sourceAbstract: "Original abstract.",
+    });
+
+    expect(report.status).toBe("failed");
+    expect(report.hardFailures).toContain(
+      "Plugin-owned bibliography/abstract block changed during the turn.",
+    );
+  });
+
+  it("requires the close-reading sections for an L2 record", () => {
+    const report = evaluateKnowledgeSurface({
+      after: `---
+tier: L2
+---
+
+# Paper
+
+## Abstract
+Source abstract.
+
+## Contribution
+Contribution.
+
+## Method
+Method.
+
+## Takeaways
+Takeaway.
+`,
+      sourceAbstract: "Source abstract.",
+    });
+
+    expect(report.status).toBe("failed");
+    expect(report.coreSections.missing).toEqual([
+      "Problem",
+      "Insight",
+      "Results",
+      "Library Connections",
+    ]);
   });
 });

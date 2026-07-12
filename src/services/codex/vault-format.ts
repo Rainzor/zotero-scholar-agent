@@ -1,6 +1,11 @@
 import {
+  buildKnowledgeSurfacePluginBlock,
+  buildTierInterpretationTemplate,
   parseKnowledgeSurface,
+  updateKnowledgeSurfaceSignals,
   type PaperSignalMetadata,
+  type PaperTier,
+  type PaperValueType,
   type ZoteroCollectionSignal,
 } from "../knowledge-surface";
 import type { KnowledgeQualityReport } from "../knowledge-quality";
@@ -16,6 +21,8 @@ export type PaperVaultMeta = {
   zoteroTags?: string[];
   paperKeywords?: string[];
   rating?: number | null;
+  tier?: PaperTier;
+  valueTypes?: PaperValueType[];
 };
 
 export const SEMANTIC_RELATIONSHIP_TYPES = [
@@ -44,8 +51,14 @@ export type SemanticRelationship = {
 };
 
 export type PaperRecordProjection = PaperVaultMeta & {
-  schemaVersion: 2;
+  schemaVersion: 3;
   generatedAt: string;
+  tier: PaperTier;
+  valueTypes: PaperValueType[];
+  evidenceAnchors: Array<{
+    page: number;
+    sections: string[];
+  }>;
   signals: {
     rating: number | null;
     zoteroCollections: ZoteroCollectionSignal[];
@@ -91,10 +104,7 @@ export function safePathSegment(input: string): string {
 
 /** Join path parts with `/`, collapsing duplicate separators. */
 export function joinPathParts(...parts: string[]): string {
-  return parts
-    .filter(Boolean)
-    .join("/")
-    .replace(/\/+/g, "/");
+  return parts.filter(Boolean).join("/").replace(/\/+/g, "/");
 }
 
 /**
@@ -112,11 +122,15 @@ export function normalizeVaultPath(path: string, homeDir = ""): string {
 }
 
 export function escapeTable(value: string): string {
-  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return String(value || "")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, " ");
 }
 
 export function unescapeTable(value: string): string {
-  return String(value || "").replace(/\\\|/g, "|").trim();
+  return String(value || "")
+    .replace(/\\\|/g, "|")
+    .trim();
 }
 
 export function replaceMarkedBlock(
@@ -135,42 +149,16 @@ export function replaceMarkedBlock(
 
 export function initialMemoryMarkdown(meta: PaperVaultMeta): string {
   const headingMeta = [meta.creators, meta.year].filter(Boolean).join(", ");
-  return [
+  const body = [
     `# ${meta.title || meta.itemKey}${headingMeta ? ` (${headingMeta})` : ""}`,
     "",
     `> itemKey: ${meta.itemKey}`,
     "",
-    "## Abstract",
+    buildKnowledgeSurfacePluginBlock(meta),
     "",
-    "## Contribution",
-    "",
-    "## Problem",
-    "",
-    "## Method",
-    "",
-    "## Insight",
-    "",
-    "## Results",
-    "",
-    "## Takeaways",
-    "",
-    "## Reader Thinking",
-    "",
-    "### Questions",
-    "",
-    "### Critiques",
-    "",
-    "### Ideas / Inspirations",
-    "",
-    "## Library Connections",
-    "",
-    "### Explicit Citations",
-    "",
-    "### Semantic Relationships",
-    "",
-    "## Evidence Pointers",
-    "",
+    buildTierInterpretationTemplate("L1"),
   ].join("\n");
+  return updateKnowledgeSurfaceSignals(body, { tier: "L1" });
 }
 
 export function hasPageEvidenceMarkers(text: string): boolean {
@@ -226,7 +214,8 @@ export function buildTextMeta(options: {
     meta.attemptedTextParserVersion = options.attemptedTextParserVersion;
   }
   if (options.lastAttemptedAt) meta.lastAttemptedAt = options.lastAttemptedAt;
-  if (options.lastAttemptStatus) meta.lastAttemptStatus = options.lastAttemptStatus;
+  if (options.lastAttemptStatus)
+    meta.lastAttemptStatus = options.lastAttemptStatus;
   return meta;
 }
 
@@ -276,7 +265,8 @@ export function normalizeTextMeta(
 
 export function shouldAttemptTextParserMigration(meta: TextMeta): boolean {
   if (meta.textParserVersion >= TEXT_PARSER_VERSION) return false;
-  if ((meta.attemptedTextParserVersion || 0) >= TEXT_PARSER_VERSION) return false;
+  if ((meta.attemptedTextParserVersion || 0) >= TEXT_PARSER_VERSION)
+    return false;
   return true;
 }
 
@@ -355,9 +345,7 @@ export function mergeReadmeEntries(
   return Array.from(entries.values()).sort(
     (a, b) =>
       Number(b.rating || 0) - Number(a.rating || 0) ||
-      String(a.title || a.itemKey).localeCompare(
-        String(b.title || b.itemKey),
-      ),
+      String(a.title || a.itemKey).localeCompare(String(b.title || b.itemKey)),
   );
 }
 
@@ -381,10 +369,7 @@ export function buildConversationTurnMarkdown(options: {
   ].join("\n");
 }
 
-export function appendMarkdownBlock(
-  existing: string,
-  block: string,
-): string {
+export function appendMarkdownBlock(existing: string, block: string): string {
   const current = String(existing || "").trimEnd();
   return current ? `${current}\n\n${block}` : block;
 }
@@ -399,13 +384,13 @@ export function buildPaperVaultPaths(vaultDir: string, itemKey: string) {
     textPath: joinPathParts(paperDir, "text.txt"),
     textMetaPath: joinPathParts(paperDir, "text.meta.json"),
     memoryPath: joinPathParts(paperDir, "memory.md"),
+    notesPath: joinPathParts(paperDir, "notes.md"),
     recordPath: joinPathParts(paperDir, "record.json"),
+    codeDir: joinPathParts(paperDir, "code"),
+    codeNotesPath: joinPathParts(paperDir, "code-notes.md"),
     conversationsDir,
     conversationPath: (sessionId: string) =>
-      joinPathParts(
-        conversationsDir,
-        `${safePathSegment(sessionId)}.md`,
-      ),
+      joinPathParts(conversationsDir, `${safePathSegment(sessionId)}.md`),
   };
 }
 
@@ -469,13 +454,16 @@ export function buildPaperRecordProjection(options: {
 }): PaperRecordProjection {
   const surface = parseKnowledgeSurface(options.memoryMarkdown);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAt: options.generatedAt,
     itemId: options.meta.itemId,
     itemKey: options.meta.itemKey,
     title: options.meta.title,
     creators: options.meta.creators,
     year: options.meta.year,
+    tier: surface.signals.tier,
+    valueTypes: surface.signals.valueTypes,
+    evidenceAnchors: parseEvidenceAnchors(surface.body),
     signals: buildPaperSignalProjection(surface.signals),
     quality: options.quality,
     relationships: parseSemanticRelationships(
@@ -484,6 +472,36 @@ export function buildPaperRecordProjection(options: {
       options.generatedAt,
     ),
   };
+}
+
+export function parseEvidenceAnchors(
+  memoryMarkdown: string,
+): Array<{ page: number; sections: string[] }> {
+  const byPage = new Map<number, Set<string>>();
+  const matches = Array.from(
+    String(memoryMarkdown || "").matchAll(/^##\s+(.+?)\s*$/gm),
+  );
+  for (let index = 0; index < matches.length; index += 1) {
+    const section = String(matches[index][1] || "").trim();
+    const start = Number(matches[index].index || 0) + matches[index][0].length;
+    const end =
+      index + 1 < matches.length
+        ? Number(matches[index + 1].index || memoryMarkdown.length)
+        : memoryMarkdown.length;
+    const content = memoryMarkdown.slice(start, end);
+    for (const pageMatch of content.matchAll(/\[page\s+([1-9][0-9]*)\]/gi)) {
+      const page = Number(pageMatch[1]);
+      const sections = byPage.get(page) || new Set<string>();
+      sections.add(section);
+      byPage.set(page, sections);
+    }
+  }
+  return Array.from(byPage.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([page, sections]) => ({
+      page,
+      sections: Array.from(sections),
+    }));
 }
 
 export function buildPaperSignalProjection(
@@ -510,4 +528,33 @@ export function buildPaperSignalProjection(
       })),
     ],
   };
+}
+
+export function scorePaperForQuery(
+  paper: Pick<PaperVaultMeta, "tier" | "valueTypes" | "rating">,
+  query: string,
+): number {
+  const text = String(query || "").toLowerCase();
+  const tierScore =
+    paper.tier === "L3"
+      ? 4
+      : paper.tier === "L2"
+        ? 3
+        : paper.tier === "L1"
+          ? 1
+          : 0;
+  const values = new Set(paper.valueTypes || []);
+  let score = tierScore + Number(paper.rating || 0) * 0.1;
+  if (/(method|implementation|code|reproduc|算法|实现|复现)/i.test(text)) {
+    if (values.has("method-advance")) score += 4;
+    if (values.has("methodology")) score += 3;
+  }
+  if (/(field|landscape|survey|lineage|领域|脉络|综述)/i.test(text)) {
+    if (values.has("canon")) score += 4;
+    if (values.has("methodology")) score += 3;
+  }
+  if (/(insight|idea|inspiration|启发|洞见)/i.test(text)) {
+    if (values.has("transferable-insight")) score += 4;
+  }
+  return score;
 }

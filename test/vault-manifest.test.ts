@@ -7,6 +7,11 @@ import {
 
 describe("Vault manifest", () => {
   it("normalizes missing and legacy manifests to the current schema", () => {
+    expect(CURRENT_VAULT_MANIFEST).toEqual({
+      schemaVersion: 1,
+      knowledgeSurfaceVersion: 2,
+      recordProjectionVersion: 3,
+    });
     expect(normalizeVaultManifest(null)).toEqual(CURRENT_VAULT_MANIFEST);
     expect(
       normalizeVaultManifest({

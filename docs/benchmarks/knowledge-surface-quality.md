@@ -15,7 +15,7 @@ A Knowledge Surface passes when all of the following are true:
 
 1. No critical failure is present.
 2. Total score is at least **80/100**.
-3. Core-section completeness is at least **30/35**.
+3. Tier-template completeness is at least **30/35**.
 4. Abstract fidelity is at least **20/25**.
 5. Semantic Relationship parse coverage is **100%**.
 
@@ -30,13 +30,19 @@ Critical failures:
 
 | Dimension                                | Weight | Full-credit rule                                                                                                                            | Partial / failure rule                                                                                                                         |
 | ---------------------------------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Seven core sections                      |     35 | `Abstract`, `Contribution`, `Problem`, `Method`, `Insight`, `Results`, and `Takeaways` each contain concise, paper-specific knowledge       | 5 points per meaningful section; 2 for present but vague/incomplete; 0 for missing, placeholder-only, or factually wrong                       |
+| Tier-template completeness               |     35 | Every section required by the record's declared tier contains concise, paper-specific knowledge                                             | Scale the required tier sections to 35 points; do not penalize L0/L1 for sections reserved for L2/L3                                           |
 | Abstract fidelity                        |     25 | Original or near-original abstract is preserved; omissions are marked and no claim is invented                                              | 20 for faithful compression with no changed claim; 10 for approximate but clearly labelled; 0 for an invented or materially distorted abstract |
 | Evolution without append bloat           |     20 | New learning is merged into the right section, duplicates are rewritten, and stale wording is corrected                                     | 10 when useful but mostly appended; 0 when repeated append-only turns create duplicates or contradictory statements                            |
 | Semantic Relationship format and meaning |     10 | Every candidate relationship parses, uses an allowed type, targets an existing Item Key, explains why, and includes evidence when available | Deduct 2 per malformed/unsupported line; 0 if parse coverage is below 100%                                                                     |
 | Grounding and knowledge boundary         |     10 | Paper claims have evidence pointers where needed; Reader Thinking is explicitly labelled; uncertainty is preserved                          | 5 when boundaries are mostly clear but evidence is sparse; 0 when interpretations are presented as paper facts                                 |
 
-### Seven-section completeness checklist
+### Tier-template completeness checklist
+
+- **L0:** Verdict, Why Stop Here, Better Pointers, Library Connections.
+- **L1:** TL;DR, Contribution, Method, Takeaways, Library Connections.
+- **L2/L3:** Contribution, Problem, Method, Insight, Results, Takeaways,
+  Library Connections. L3 additionally requires a useful `code-notes.md`.
+- Abstract is plugin-owned and scored only under Abstract fidelity.
 
 A section is meaningful only when it answers its section question without generic filler:
 

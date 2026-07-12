@@ -11,9 +11,30 @@ import {
   type PageEvidenceRef,
 } from "../services/page-evidence";
 import { generateContextDigest } from "../services/context-digest";
-import { parseKnowledgeSurface } from "../services/knowledge-surface";
+import {
+  PAPER_VALUE_TYPES,
+  parseKnowledgeSurface,
+  type PaperTier,
+  type PaperValueType,
+} from "../services/knowledge-surface";
 import { evaluateKnowledgeSurface } from "../services/knowledge-quality";
 import { runPaperColdStart } from "../services/cold-start";
+import {
+  repairPaperKnowledge,
+  transitionPaperTier,
+} from "../services/knowledge-workflows";
+import { analyzePaperCode } from "../services/code-analysis";
+import {
+  createOrUpdateTopicNote,
+  listTopicNotes,
+  parseTopicNote,
+  readTopicNote,
+} from "../services/topic-notes";
+import {
+  acceptRelationshipProposal,
+  type RelationshipProposal,
+} from "../services/relationship-proposals";
+import { listPaperBacklinks } from "../services/paper-network";
 import {
   parseScannedPdfWithCodex,
   renderPdfPage,
@@ -68,11 +89,15 @@ import {
 } from "../services/zotero-paper-metadata";
 import {
   listVaultPapers,
+  readPaperCodeNotes,
   readPaperMemory,
+  readPaperNotes,
   searchVaultMemory,
   PaperTextUnavailableError,
   acceptPaperKeyword,
+  appendPaperNote,
   updatePaperRating,
+  updatePaperValueTypes,
   type CodexReasoningEffort,
   type PaperVaultMeta,
   type RunningLineProcess,
@@ -524,6 +549,9 @@ export function showAgentPanel() {
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 let memorySearchTimer: ReturnType<typeof setTimeout> | null = null;
+const topicPaperSelection = new Set<string>();
+const pendingRelationshipProposals = new Map<string, RelationshipProposal[]>();
+const codeAnalysisNotices = new Map<string, string>();
 
 function buildMemoryPanel(doc: Document): HTMLElement {
   const panel = doc.createElementNS(XHTML, "div") as HTMLElement;
@@ -562,11 +590,32 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   toolbar.appendChild(sort);
   toolbar.appendChild(refresh);
 
+  const topicForm = doc.createElementNS(XHTML, "div") as HTMLElement;
+  topicForm.id = "zoteroagent-topic-form";
+  topicForm.className = "zoteroagent-topic-form";
+  const topicTitle = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+  topicTitle.id = "zoteroagent-topic-title";
+  topicTitle.type = "text";
+  topicTitle.placeholder = "Topic title";
+  topicTitle.className = "zoteroagent-topic-title";
+  const topicCreate = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  topicCreate.id = "zoteroagent-topic-create";
+  topicCreate.type = "button";
+  topicCreate.textContent = "Create Topic";
+  topicCreate.className = "zoteroagent-topic-create";
+  const topicStatus = doc.createElementNS(XHTML, "span") as HTMLElement;
+  topicStatus.id = "zoteroagent-topic-status";
+  topicStatus.className = "zoteroagent-topic-status";
+  topicForm.appendChild(topicTitle);
+  topicForm.appendChild(topicCreate);
+  topicForm.appendChild(topicStatus);
+
   const bodyDiv = doc.createElementNS(XHTML, "div") as HTMLElement;
   bodyDiv.id = "zoteroagent-memory-body";
   bodyDiv.className = "zoteroagent-memory-body";
 
   panel.appendChild(toolbar);
+  panel.appendChild(topicForm);
   panel.appendChild(bodyDiv);
   return panel;
 }
@@ -660,6 +709,40 @@ async function renderMemoryBrowse(body: HTMLElement) {
     );
   }
 
+  try {
+    const topics = await listTopicNotes();
+    if (topics.length) {
+      const topicTitle = doc.createElementNS(XHTML, "div") as HTMLElement;
+      topicTitle.className = "zoteroagent-memory-section-title";
+      topicTitle.textContent = `Topics (${topics.length})`;
+      host.appendChild(topicTitle);
+      const topicList = doc.createElementNS(XHTML, "div") as HTMLElement;
+      topicList.className = "zoteroagent-memory-list";
+      for (const topic of topics) {
+        const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+        row.type = "button";
+        row.className = "zoteroagent-memory-list-item";
+        const title = doc.createElementNS(XHTML, "span") as HTMLElement;
+        title.className = "zoteroagent-memory-list-title";
+        title.textContent = topic.title;
+        const sub = doc.createElementNS(XHTML, "span") as HTMLElement;
+        sub.className = "zoteroagent-memory-list-sub";
+        sub.textContent = `${topic.paperItemKeys.length} papers`;
+        row.appendChild(title);
+        row.appendChild(sub);
+        row.addEventListener("click", () => {
+          void renderTopicDetail(body, topic.slug);
+        });
+        topicList.appendChild(row);
+      }
+      host.appendChild(topicList);
+    }
+  } catch (error) {
+    host.appendChild(
+      memoryNotice(doc, `Failed to read Topic Notes: ${String(error)}`),
+    );
+  }
+
   const listTitle = doc.createElementNS(XHTML, "div") as HTMLElement;
   listTitle.className = "zoteroagent-memory-section-title";
   listTitle.textContent = `All papers (${papers.length})`;
@@ -678,7 +761,21 @@ async function renderMemoryBrowse(body: HTMLElement) {
   const list = doc.createElementNS(XHTML, "div") as HTMLElement;
   list.className = "zoteroagent-memory-list";
   for (const paper of papers) {
+    const wrapper = doc.createElementNS(XHTML, "div") as HTMLElement;
+    wrapper.className = "zoteroagent-memory-list-row";
+    const select = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+    select.type = "checkbox";
+    select.className = "zoteroagent-topic-paper-select";
+    select.checked = topicPaperSelection.has(paper.itemKey);
+    select.title = `Include ${paper.title || paper.itemKey} in Topic Note`;
+    select.setAttribute("aria-label", select.title);
+    select.addEventListener("change", () => {
+      if (select.checked) topicPaperSelection.add(paper.itemKey);
+      else topicPaperSelection.delete(paper.itemKey);
+      updateTopicSelectionStatus(body);
+    });
     const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    row.type = "button";
     row.className = "zoteroagent-memory-list-item";
     if (paper.itemKey === currentKey) row.classList.add("is-current");
     const title = doc.createElementNS(XHTML, "span") as HTMLElement;
@@ -702,9 +799,12 @@ async function renderMemoryBrowse(body: HTMLElement) {
         paper.title || paper.itemKey,
       );
     });
-    list.appendChild(row);
+    wrapper.appendChild(select);
+    wrapper.appendChild(row);
+    list.appendChild(wrapper);
   }
   host.appendChild(list);
+  updateTopicSelectionStatus(body);
 }
 
 async function appendPaperMemoryCard(
@@ -718,20 +818,26 @@ async function appendPaperMemoryCard(
   const card = doc.createElementNS(XHTML, "div") as HTMLElement;
   card.className = "zoteroagent-memory-card";
   const content = await readPaperMemory(itemKey);
+  const codeNotes = await readPaperCodeNotes(itemKey);
   const surface = parseKnowledgeSurface(content);
+  let quality: ReturnType<typeof evaluateKnowledgeSurface> | null = null;
   if (paper) {
     card.appendChild(buildPaperSignalBar(body, host, paper, surface.signals));
-    const quality = evaluateKnowledgeSurface({
+    quality = evaluateKnowledgeSurface({
       after: content,
       sourceAbstract: paper.abstract,
       itemKey: paper.itemKey,
+      codeNotes,
     });
-    if (
-      quality.coreSections.missing.length ||
-      quality.coreSections.placeholder.length
-    ) {
-      card.appendChild(buildColdStartAction(body, paper));
+    if (quality.status !== "passed") {
+      card.appendChild(buildColdStartAction(body, paper, quality));
     }
+    card.appendChild(buildCodeAnalysisAction(body, paper));
+    const proposals = pendingRelationshipProposals.get(paper.itemKey) || [];
+    if (proposals.length) {
+      card.appendChild(buildRelationshipProposalReview(body, paper, proposals));
+    }
+    card.appendChild(buildReaderThinkingAction(body, paper));
   }
   const inner = doc.createElementNS(XHTML, "div") as HTMLElement;
   inner.className = "zoteroagent-memory-content markdown-body";
@@ -746,33 +852,143 @@ async function appendPaperMemoryCard(
     );
   }
   card.appendChild(inner);
+  const notes = await readPaperNotes(itemKey);
+  if (notes.trim()) {
+    const notesHeading = doc.createElementNS(XHTML, "div") as HTMLElement;
+    notesHeading.className = "zoteroagent-memory-section-title";
+    notesHeading.textContent = "Reader Thinking";
+    const notesContent = doc.createElementNS(XHTML, "div") as HTMLElement;
+    notesContent.className = "zoteroagent-memory-content markdown-body";
+    notesContent.innerHTML = renderMarkdown(filterEmptyMarkdownSections(notes));
+    card.appendChild(notesHeading);
+    card.appendChild(notesContent);
+  }
+  if (codeNotes.trim()) {
+    const codeHeading = doc.createElementNS(XHTML, "div") as HTMLElement;
+    codeHeading.className = "zoteroagent-memory-section-title";
+    codeHeading.textContent = "Code Analysis";
+    const codeContent = doc.createElementNS(XHTML, "div") as HTMLElement;
+    codeContent.className = "zoteroagent-memory-content markdown-body";
+    codeContent.innerHTML = renderMarkdown(
+      filterEmptyMarkdownSections(codeNotes),
+    );
+    card.appendChild(codeHeading);
+    card.appendChild(codeContent);
+  }
+  const backlinks = await listPaperBacklinks(itemKey);
+  if (backlinks.length) {
+    const backlinkHeading = doc.createElementNS(XHTML, "div") as HTMLElement;
+    backlinkHeading.className = "zoteroagent-memory-section-title";
+    backlinkHeading.textContent = `Linked from (${backlinks.length})`;
+    const backlinkList = doc.createElementNS(XHTML, "div") as HTMLElement;
+    backlinkList.className = "zoteroagent-backlink-list";
+    for (const backlink of backlinks) {
+      const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+      row.type = "button";
+      row.className = "zoteroagent-memory-list-item";
+      row.textContent = `[${backlink.relationship.type}] ${
+        backlink.source.title || backlink.source.itemKey
+      }: ${backlink.relationship.rationale}`;
+      row.addEventListener("click", () => {
+        void renderMemoryDetail(
+          body,
+          backlink.source.itemKey,
+          backlink.source.title || backlink.source.itemKey,
+        );
+      });
+      backlinkList.appendChild(row);
+    }
+    card.appendChild(backlinkHeading);
+    card.appendChild(backlinkList);
+  }
   host.appendChild(card);
+}
+
+function buildReaderThinkingAction(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+): HTMLElement {
+  const doc = body.ownerDocument;
+  const wrap = doc.createElementNS(XHTML, "div") as HTMLElement;
+  wrap.className = "zoteroagent-reader-thinking-action";
+  const input = doc.createElementNS(XHTML, "textarea") as HTMLTextAreaElement;
+  input.rows = 2;
+  input.placeholder = "Add your thought, critique, or next action...";
+  input.setAttribute("aria-label", "Reader Thinking");
+  const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  button.type = "button";
+  button.textContent = "Add thought";
+  const status = doc.createElementNS(XHTML, "span") as HTMLElement;
+  status.className = "zoteroagent-cold-start-status";
+  button.addEventListener("click", () => {
+    const content = input.value.trim();
+    if (!content) {
+      status.textContent = "Enter a thought first.";
+      return;
+    }
+    input.disabled = true;
+    button.disabled = true;
+    void appendPaperNote({ itemKey: paper.itemKey, content })
+      .then(() => {
+        input.value = "";
+        status.textContent = "Saved to notes.md.";
+      })
+      .catch((error) => {
+        status.textContent =
+          error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        input.disabled = false;
+        button.disabled = false;
+        if (isSafeBody(body)) void renderMemoryBrowse(body);
+      });
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(button);
+  wrap.appendChild(status);
+  return wrap;
 }
 
 function buildColdStartAction(
   body: HTMLElement,
   paper: PaperVaultMeta,
+  quality: ReturnType<typeof evaluateKnowledgeSurface>,
 ): HTMLElement {
   const doc = body.ownerDocument;
   const row = doc.createElementNS(XHTML, "div") as HTMLElement;
   row.className = "zoteroagent-cold-start";
   const status = doc.createElementNS(XHTML, "span") as HTMLElement;
   status.className = "zoteroagent-cold-start-status";
-  status.textContent = "Knowledge Record is incomplete.";
+  status.textContent =
+    quality.status === "failed"
+      ? "Knowledge Record needs repair."
+      : "Knowledge Record has review items.";
   const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   button.className = "zoteroagent-cold-start-action";
   button.type = "button";
-  button.textContent = "Build Knowledge Record";
+  const hasExistingKnowledge =
+    quality.coreSections.missing.length +
+      quality.coreSections.placeholder.length <
+    4;
+  button.dataset.action = hasExistingKnowledge ? "repair" : "build";
+  button.textContent = hasExistingKnowledge
+    ? "Repair Knowledge Record"
+    : "Build Knowledge Record";
   button.addEventListener("click", () => {
     if (body.dataset.coldStartBusy === "true") {
       abortGeneration(body);
       delete body.dataset.coldStartBusy;
-      button.textContent = "Build Knowledge Record";
+      button.textContent =
+        button.dataset.action === "repair"
+          ? "Repair Knowledge Record"
+          : "Build Knowledge Record";
       status.textContent = "Initialization cancelled.";
       return;
     }
     if (button.dataset.action === "enrich-pdf") {
       void startPdfEnrichment(body, paper, button, status);
+    } else if (button.dataset.action === "repair") {
+      void startPaperRepair(body, paper, quality, button, status);
     } else {
       void startPaperColdStart(body, paper, button, status);
     }
@@ -802,7 +1018,13 @@ async function startPaperColdStart(
   const model = session?.modelSlug || "";
   try {
     const result = await runPaperColdStart(
-      { paper, pdfItemId, model, reasoningEffort: session?.reasoningEffort },
+      {
+        paper,
+        pdfItemId,
+        model,
+        reasoningEffort: session?.reasoningEffort,
+        linkRelationships: true,
+      },
       {
         onStatus: (text) => {
           if (isSafeBody(body)) status.textContent = text;
@@ -816,6 +1038,13 @@ async function startPaperColdStart(
       result.quality.status === "passed"
         ? "Knowledge Record built."
         : "Knowledge Record built with review items.";
+    if (result.relationshipProposals.length) {
+      pendingRelationshipProposals.set(
+        paper.itemKey,
+        result.relationshipProposals,
+      );
+      status.textContent += ` ${result.relationshipProposals.length} relationship suggestion(s) need review.`;
+    }
   } catch (error) {
     if (error instanceof PaperTextUnavailableError) {
       button.dataset.action = "enrich-pdf";
@@ -825,6 +1054,53 @@ async function startPaperColdStart(
       return;
     }
     status.textContent = `Initialization failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  } finally {
+    delete body.dataset.coldStartBusy;
+    setGenerating(body, false);
+  }
+  if (isSafeBody(body)) void renderMemoryBrowse(body);
+}
+
+async function startPaperRepair(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+  quality: ReturnType<typeof evaluateKnowledgeSurface>,
+  button: HTMLButtonElement,
+  status: HTMLElement,
+) {
+  if (isGenerating || body.dataset.coldStartBusy === "true") return;
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  if (pdfItemId <= 0) {
+    status.textContent = "No accessible PDF attachment.";
+    return;
+  }
+  body.dataset.coldStartBusy = "true";
+  button.textContent = "Cancel";
+  setGenerating(body, true);
+  const session = chatStore.getSession(paper.itemId);
+  try {
+    const result = await repairPaperKnowledge({
+      paper,
+      pdfItemId,
+      quality,
+      model: session?.modelSlug,
+      reasoningEffort: session?.reasoningEffort,
+      onStatus: (text) => {
+        if (isSafeBody(body)) status.textContent = text;
+      },
+      onProcess: (process) => {
+        activeCodexProcess = process;
+      },
+    });
+    status.textContent =
+      result.quality.status === "passed"
+        ? "Knowledge Record repaired."
+        : "Repair completed with remaining review items.";
+  } catch (error) {
+    status.textContent = `Repair failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
   } finally {
@@ -909,6 +1185,56 @@ function buildPaperSignalBar(
     });
     bar.appendChild(button);
   }
+  const tierLabel = doc.createElementNS(XHTML, "span") as HTMLElement;
+  tierLabel.className = "zoteroagent-paper-signals-label";
+  tierLabel.textContent = "Depth";
+  const tierSelect = doc.createElementNS(XHTML, "select") as HTMLSelectElement;
+  tierSelect.className = "zoteroagent-paper-tier-select";
+  for (const tier of ["L0", "L1", "L2", "L3"] as PaperTier[]) {
+    const option = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
+    option.value = tier;
+    option.textContent = tier;
+    option.selected = tier === signals.tier;
+    if (tier === "L3" && signals.tier !== "L3") option.disabled = true;
+    if (
+      (signals.tier === "L2" && tier === "L1") ||
+      (signals.tier === "L3" && (tier === "L1" || tier === "L2"))
+    ) {
+      option.disabled = true;
+    }
+    tierSelect.appendChild(option);
+  }
+  tierSelect.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
+  const tierStatus = doc.createElementNS(XHTML, "span") as HTMLElement;
+  tierStatus.className = "zoteroagent-paper-tier-status";
+  tierSelect.addEventListener("change", () => {
+    const target = tierSelect.value as PaperTier;
+    if (target === "L3") return;
+    void startTierTransition(body, paper, target, tierSelect, tierStatus);
+  });
+  bar.appendChild(tierLabel);
+  bar.appendChild(tierSelect);
+  bar.appendChild(tierStatus);
+  for (const valueType of PAPER_VALUE_TYPES) {
+    const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    button.type = "button";
+    button.className = "zoteroagent-value-type";
+    button.classList.toggle(
+      "is-active",
+      signals.valueTypes.includes(valueType),
+    );
+    button.textContent = valueTypeLabel(valueType);
+    button.title = `Toggle value type: ${valueType}`;
+    button.addEventListener("click", () => {
+      const next = signals.valueTypes.includes(valueType)
+        ? signals.valueTypes.filter((entry) => entry !== valueType)
+        : [...signals.valueTypes, valueType];
+      void updatePaperValueTypes(paper, next).then(() => {
+        if (isSafeBody(body)) void renderMemoryBrowse(body);
+      });
+    });
+    bar.appendChild(button);
+  }
   for (const collection of signals.zoteroCollections.slice(0, 2)) {
     const chip = doc.createElementNS(XHTML, "span") as HTMLElement;
     chip.className = "zoteroagent-paper-signal-chip";
@@ -923,6 +1249,203 @@ function buildPaperSignalBar(
     bar.appendChild(chip);
   }
   return bar;
+}
+
+function valueTypeLabel(valueType: PaperValueType): string {
+  if (valueType === "method-advance") return "Method";
+  if (valueType === "transferable-insight") return "Insight";
+  if (valueType === "methodology") return "Methodology";
+  return "Canon";
+}
+
+async function startTierTransition(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+  targetTier: Exclude<PaperTier, "L3">,
+  select: HTMLSelectElement,
+  status: HTMLElement,
+) {
+  if (isGenerating) return;
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  if (pdfItemId <= 0) {
+    status.textContent = "No PDF";
+    return;
+  }
+  setGenerating(body, true);
+  select.disabled = true;
+  const session = chatStore.getSession(paper.itemId);
+  try {
+    const result = await transitionPaperTier({
+      paper,
+      pdfItemId,
+      targetTier,
+      model: session?.modelSlug,
+      reasoningEffort: session?.reasoningEffort,
+      onStatus: (text) => {
+        status.textContent = text;
+      },
+      onProcess: (process) => {
+        activeCodexProcess = process;
+      },
+    });
+    status.textContent =
+      result.quality.status === "passed" ? "Updated" : "Review needed";
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    select.disabled = false;
+    setGenerating(body, false);
+  }
+  if (isSafeBody(body)) void renderMemoryBrowse(body);
+}
+
+function buildCodeAnalysisAction(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+): HTMLElement {
+  const doc = body.ownerDocument;
+  const wrap = doc.createElementNS(XHTML, "div") as HTMLElement;
+  wrap.className = "zoteroagent-code-analysis";
+  const input = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+  input.type = "url";
+  input.placeholder = "https://github.com/owner/repository";
+  input.className = "zoteroagent-code-repository";
+  input.setAttribute("aria-label", "GitHub repository URL");
+  const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  button.type = "button";
+  button.className = "zoteroagent-cold-start-action";
+  button.textContent = "Analyze code";
+  const status = doc.createElementNS(XHTML, "span") as HTMLElement;
+  status.className = "zoteroagent-cold-start-status";
+  status.textContent = codeAnalysisNotices.get(paper.itemKey) || "";
+  button.addEventListener("click", () => {
+    void startCodeAnalysis(body, paper, input, button, status);
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(button);
+  wrap.appendChild(status);
+  return wrap;
+}
+
+async function startCodeAnalysis(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+  input: HTMLInputElement,
+  button: HTMLButtonElement,
+  status: HTMLElement,
+) {
+  if (isGenerating) return;
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  if (pdfItemId <= 0) {
+    status.textContent = "No accessible PDF attachment.";
+    return;
+  }
+  const repositoryUrl = input.value.trim();
+  if (!repositoryUrl) {
+    status.textContent = "Enter a GitHub repository URL.";
+    return;
+  }
+  setGenerating(body, true);
+  input.disabled = true;
+  button.disabled = true;
+  const session = chatStore.getSession(paper.itemId);
+  try {
+    const result = await analyzePaperCode(
+      {
+        paper,
+        pdfItemId,
+        repositoryUrl,
+        model: session?.modelSlug,
+        reasoningEffort: session?.reasoningEffort,
+      },
+      {
+        onStatus: (text) => {
+          status.textContent = text;
+        },
+        onProcess: (process) => {
+          activeCodexProcess = process;
+        },
+      },
+    );
+    const notice = result.repositoryModified
+      ? "Analysis saved. The local checkout was modified; review it before updating."
+      : `Analyzed ${result.repository.owner}/${result.repository.repository} at ${result.commit.slice(
+          0,
+          8,
+        )}.`;
+    codeAnalysisNotices.set(paper.itemKey, notice);
+    status.textContent = notice;
+  } catch (error) {
+    const notice = `Code analysis failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    codeAnalysisNotices.set(paper.itemKey, notice);
+    status.textContent = notice;
+  } finally {
+    input.disabled = false;
+    button.disabled = false;
+    setGenerating(body, false);
+  }
+  if (isSafeBody(body)) void renderMemoryBrowse(body);
+}
+
+function buildRelationshipProposalReview(
+  body: HTMLElement,
+  paper: PaperVaultMeta,
+  proposals: RelationshipProposal[],
+): HTMLElement {
+  const doc = body.ownerDocument;
+  const block = doc.createElementNS(XHTML, "div") as HTMLElement;
+  block.className = "zoteroagent-relationship-proposals";
+  const label = doc.createElementNS(XHTML, "div") as HTMLElement;
+  label.className = "zoteroagent-paper-signals-label";
+  label.textContent = "Suggested relationships";
+  block.appendChild(label);
+  for (const proposal of proposals) {
+    const row = doc.createElementNS(XHTML, "div") as HTMLElement;
+    row.className = "zoteroagent-relationship-proposal";
+    const text = doc.createElementNS(XHTML, "span") as HTMLElement;
+    text.textContent = `[${proposal.type}] ${proposal.title}: ${proposal.rationale}`;
+    const accept = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    accept.type = "button";
+    accept.textContent = "Accept";
+    accept.addEventListener("click", () => {
+      void acceptRelationshipProposal({ paper, proposal }).then(() => {
+        removePendingRelationshipProposal(paper.itemKey, proposal);
+        if (isSafeBody(body)) void renderMemoryBrowse(body);
+      });
+    });
+    const dismiss = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    dismiss.type = "button";
+    dismiss.textContent = "Dismiss";
+    dismiss.addEventListener("click", () => {
+      removePendingRelationshipProposal(paper.itemKey, proposal);
+      if (isSafeBody(body)) void renderMemoryBrowse(body);
+    });
+    row.appendChild(text);
+    row.appendChild(accept);
+    row.appendChild(dismiss);
+    block.appendChild(row);
+  }
+  return block;
+}
+
+function removePendingRelationshipProposal(
+  itemKey: string,
+  proposal: RelationshipProposal,
+) {
+  const remaining = (pendingRelationshipProposals.get(itemKey) || []).filter(
+    (entry) =>
+      !(
+        entry.type === proposal.type &&
+        entry.targetItemKey === proposal.targetItemKey &&
+        entry.rationale === proposal.rationale
+      ),
+  );
+  if (remaining.length) pendingRelationshipProposals.set(itemKey, remaining);
+  else pendingRelationshipProposals.delete(itemKey);
 }
 
 async function renderMemoryDetail(
@@ -952,6 +1475,99 @@ async function renderMemoryDetail(
       ? getPaperMeta(currentItemId)
       : undefined;
   await appendPaperMemoryCard(body, host, itemKey, title, currentMeta);
+}
+
+function updateTopicSelectionStatus(body: HTMLElement) {
+  const status = body.querySelector(
+    "#zoteroagent-topic-status",
+  ) as HTMLElement | null;
+  const button = body.querySelector(
+    "#zoteroagent-topic-create",
+  ) as HTMLButtonElement | null;
+  if (status) {
+    status.textContent = topicPaperSelection.size
+      ? `${topicPaperSelection.size} selected`
+      : "Select papers below";
+  }
+  if (button) button.disabled = topicPaperSelection.size < 2 || isGenerating;
+}
+
+async function startTopicNoteCreation(body: HTMLElement) {
+  if (isGenerating || topicPaperSelection.size < 2) return;
+  const input = body.querySelector(
+    "#zoteroagent-topic-title",
+  ) as HTMLInputElement | null;
+  const status = body.querySelector(
+    "#zoteroagent-topic-status",
+  ) as HTMLElement | null;
+  const button = body.querySelector(
+    "#zoteroagent-topic-create",
+  ) as HTMLButtonElement | null;
+  const title = String(input?.value || "").trim();
+  if (!title) {
+    if (status) status.textContent = "Enter a topic title.";
+    input?.focus();
+    return;
+  }
+  const currentItemId = Number(body.dataset.itemID) || 0;
+  const session =
+    currentItemId > 0 ? chatStore.getSession(currentItemId) : null;
+  setGenerating(body, true);
+  if (input) input.disabled = true;
+  if (button) button.disabled = true;
+  let finalStatus = "";
+  try {
+    const result = await createOrUpdateTopicNote({
+      title,
+      paperItemKeys: Array.from(topicPaperSelection),
+      model: session?.modelSlug,
+      reasoningEffort: session?.reasoningEffort,
+      onStatus: (text) => {
+        if (status) status.textContent = text;
+      },
+      onProcess: (process) => {
+        activeCodexProcess = process;
+      },
+    });
+    finalStatus = `Saved ${result.topic.title} from ${result.topic.paperItemKeys.length} papers.`;
+    topicPaperSelection.clear();
+    if (input) input.value = "";
+  } catch (error) {
+    finalStatus = `Topic creation failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  } finally {
+    if (input) input.disabled = false;
+    if (button) button.disabled = false;
+    setGenerating(body, false);
+    if (status) status.textContent = finalStatus;
+  }
+  if (isSafeBody(body)) void renderMemoryBrowse(body);
+}
+
+async function renderTopicDetail(body: HTMLElement, slug: string) {
+  const host = getMemoryBodyEl(body);
+  if (!host) return;
+  host.textContent = "";
+  const doc = host.ownerDocument;
+  const back = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  back.className = "zoteroagent-memory-back";
+  back.textContent = "\u2190 All papers and topics";
+  back.addEventListener("click", () => void renderMemoryBrowse(body));
+  host.appendChild(back);
+  const markdown = await readTopicNote(slug);
+  const topic = parseTopicNote(markdown);
+  const heading = doc.createElementNS(XHTML, "div") as HTMLElement;
+  heading.className = "zoteroagent-memory-section-title";
+  heading.textContent = `${topic.meta.title} (${topic.meta.paperItemKeys.length} papers)`;
+  host.appendChild(heading);
+  const card = doc.createElementNS(XHTML, "div") as HTMLElement;
+  card.className = "zoteroagent-memory-card";
+  const content = doc.createElementNS(XHTML, "div") as HTMLElement;
+  content.className = "zoteroagent-memory-content markdown-body";
+  content.innerHTML = renderMarkdown(filterEmptyMarkdownSections(topic.body));
+  card.appendChild(content);
+  host.appendChild(card);
 }
 
 function scheduleMemorySearch(body: HTMLElement, query: string) {
@@ -1272,6 +1888,11 @@ function bindChatEvents(body: HTMLElement) {
       void renderMemoryBrowse(body);
     });
   body
+    .querySelector("#zoteroagent-topic-create")
+    ?.addEventListener("click", () => {
+      void startTopicNoteCreation(body);
+    });
+  body
     .querySelector("#zoteroagent-chat-send")
     ?.addEventListener("click", () => {
       void submitQuestion(body);
@@ -1418,9 +2039,9 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   for (const action of sessionActions) action.disabled = generating;
   for (const action of Array.from(
     body.querySelectorAll(
-      ".zoteroagent-delete-button, .zoteroagent-edit-button",
+      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select",
     ),
-  ) as HTMLButtonElement[]) {
+  ) as Array<HTMLButtonElement | HTMLSelectElement>) {
     action.disabled = generating;
   }
   if (sendBtn) {
@@ -1438,6 +2059,7 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   if (!generating) {
     hideAgentStatus(body);
   }
+  updateTopicSelectionStatus(body);
 }
 
 function showAgentStatus(
@@ -1754,7 +2376,12 @@ async function submitQuestion(body: HTMLElement) {
     : question;
   const conversationDisplayContent = imageRefs.length
     ? `${displayContent}\n\n[Local screenshots: ${imageRefs
-        .map((ref) => ref.relativePath)
+        .map(
+          (ref) =>
+            `${ref.relativePath}${
+              ref.pageNumber ? ` (PDF page ${ref.pageNumber})` : ""
+            }`,
+        )
         .join(", ")}]`
     : displayContent;
 
@@ -1827,6 +2454,10 @@ async function submitQuestion(body: HTMLElement) {
         priorVisibleMessages,
         userDisplayContent: conversationDisplayContent,
         images: imagePaths,
+        imageEvidence: imageRefs.map((ref, index) => ({
+          path: imagePaths[index] || ref.relativePath,
+          pageNumber: ref.pageNumber,
+        })),
       },
       {
         onStatus: (text) => {
@@ -1875,6 +2506,7 @@ async function submitQuestion(body: HTMLElement) {
     assistant.relationshipUpdates = result.relationshipUpdates;
     assistant.quality = result.quality;
     assistant.keywordSuggestions = result.keywordSuggestions;
+    assistant.tierSuggestion = result.tierSuggestion;
     assistant.committed = result.committed;
   } catch (e: any) {
     if (!assistant.content && !assistant.reasoning) {
@@ -2490,6 +3122,73 @@ function buildKeywordSuggestionBlock(
   return block;
 }
 
+function buildTierSuggestionBlock(
+  doc: Document,
+  body: HTMLElement,
+  itemId: number,
+  messageIndex: number,
+  suggestion: NonNullable<ChatMessage["tierSuggestion"]>,
+): HTMLElement {
+  const block = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
+  block.className = "zoteroagent-keyword-review";
+  const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+  label.className = "zoteroagent-keyword-review-label";
+  label.textContent = `Close reading suggested (${suggestion})`;
+  const accept = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  accept.type = "button";
+  accept.textContent = "Upgrade";
+  accept.addEventListener("click", () => {
+    const paper = getPaperMeta(itemId);
+    const reader = getActiveReader() || addon.data.popup.currentReader;
+    const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+    const session = chatStore.getSession(itemId);
+    if (pdfItemId <= 0) return;
+    setGenerating(body, true);
+    void transitionPaperTier({
+      paper,
+      pdfItemId,
+      targetTier: "L2",
+      model: session?.modelSlug,
+      reasoningEffort: session?.reasoningEffort,
+      onProcess: (process) => {
+        activeCodexProcess = process;
+      },
+    })
+      .then(() => {
+        const message = chatStore.getMessages(itemId)[messageIndex];
+        if (message) message.tierSuggestion = undefined;
+        chatStore.touchSession(itemId);
+      })
+      .catch((error) => {
+        showAgentStatus(
+          body,
+          `Tier upgrade failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "notice",
+        );
+      })
+      .finally(() => {
+        setGenerating(body, false);
+        if (isSafeBody(body)) renderMessages(body, itemId);
+      });
+  });
+  const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss";
+  dismiss.addEventListener("click", () => {
+    const message = chatStore.getMessages(itemId)[messageIndex];
+    if (!message) return;
+    message.tierSuggestion = undefined;
+    chatStore.touchSession(itemId);
+    renderMessages(body, itemId);
+  });
+  block.appendChild(label);
+  block.appendChild(accept);
+  block.appendChild(dismiss);
+  return block;
+}
+
 function renderMessages(body: HTMLElement, itemId: number) {
   try {
     if (!isSafeBody(body)) return;
@@ -2506,6 +3205,7 @@ function renderMessages(body: HTMLElement, itemId: number) {
         }),
       enhancePageEvidence: (root) => enhancePageEvidenceChips(root, body),
       buildKeywordSuggestions: buildKeywordSuggestionBlock,
+      buildTierSuggestion: buildTierSuggestionBlock,
       createMetaRow: createMessageMetaRow,
       onSuggestion: (suggestion) => {
         const input = body.querySelector(
@@ -3012,6 +3712,7 @@ async function attachCurrentPdfPage(
       relativePath: `${paper.itemKey}/figures/generated/page-${pageNumber}.png`,
       name: `page-${pageNumber}.png`,
       mimeType: "image/png",
+      pageNumber,
       previewUrl: toLocalFileUri(absolutePath),
     };
     addon.data.chat.pendingImages = addon.data.chat.pendingImages.filter(

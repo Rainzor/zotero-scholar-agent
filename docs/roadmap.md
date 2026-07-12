@@ -138,8 +138,8 @@ Acceptance:
 
 - Render `[page N]` references in Codex answers as chips.
 - Clicking a chip jumps to the corresponding page in the PDF.
-- Evidence Pointers and the `Evidence:` field of Semantic Relationships use the same page
-  format.
+- Inline Knowledge Surface anchors and the `Evidence:` field of Semantic Relationships use
+  the same `[page N]` format; the plugin derives the anchor index in `record.json`.
 
 **Prerequisite gap (found during the 2026-07-10 review)**: No `text.txt` files in the real
 Vault contain `[page N]` markers. PDF.js structured extraction has never succeeded at runtime
@@ -184,8 +184,9 @@ extraction) is an on-demand enhancement only.
   complements user screenshots; it does not replace them.
 - Probe for poppler/Python availability before using the enhancement path and prompt the user
   to install missing dependencies. The default reading path must never depend on them.
-- Codex can read images in the relevant turn and write important conclusions to Evidence
-  Pointers or Reader Thinking.
+- Codex can read images in the relevant turn. Paper-grounded conclusions use inline page
+  anchors in `memory.md`; local-only interpretation is preserved only through user-confirmed
+  `notes.md` entries.
 - Whether image assets belong in git requires a separate decision. The current default
   preference is that rendered pages are reproducible and gitignored, while user screenshots
   are retained. Finalize this during the design of this section.
@@ -355,14 +356,15 @@ quality of preserved knowledge. Reordered at the product owner's discretion on 2
 | M1-1 Cold start (Section 2.3) | Opt-in single-paper record creation; additionally support Zotero multi-select -> queued batch creation (queue/failure recovery/cancellation; cheap model builds the skeleton by default, stronger model writes Insight) | The direct lever for preservation; batch creation accelerates the north star | ✅ Complete - single-paper creation is cancellable; context-menu batch creation, retry after failure, and recovery after closing are implemented |
 | M1-2 Post-turn quality checker | Codify hard rubric gates: abstract rewrite detection (compare with first extraction), missing sections, relationship-line format (which determines whether `record.json` is parseable), and size inflation (prevent blind append); flag violations in the review UI | Manual scoring is impractical at 30 papers; creates a trustworthy corpus and is fully unit-testable | ✅ Complete - four check categories, displayed in turn review |
 | M1-3 Codex PDF enhancement parsing (Section 2.7, ADR 0005) | Opt-in Codex parsing for scans (mechanical validation + `parserSource` provenance) plus on-demand page rendering; dependency detection and fallback | **The first pattern for integrating Codex capabilities** - the same "detect -> opt in -> validate -> trace" pattern prepares the way for Notion, web search, paper retrieval, and code analysis | ✅ Complete - opt-in scan parsing with mechanical validation; current PDF pages can be attached as images |
-| M1-4 Screenshot analysis (Section 2.6) | User selection/screenshot -> `{itemKey}/figures/` -> attach with `codex exec -i`; write conclusions to Evidence Pointers or Reader Thinking | Figures and formulas are blind spots in plain-text extraction; shares poppler/dependency detection infrastructure with M1-3 | ✅ Complete - screenshots pasted with Cmd/Ctrl+V in the chat composer and sent with the turn through `codex -i` |
+| M1-4 Screenshot analysis (Section 2.6) | User selection/screenshot -> `{itemKey}/figures/` -> attach with `codex exec -i`; preserve paper-grounded conclusions with inline anchors and local interpretation through confirmed `notes.md` entries | Figures and formulas are blind spots in plain-text extraction; shares poppler/dependency detection infrastructure with M1-3 | ✅ Complete - screenshots pasted with Cmd/Ctrl+V in the chat composer and sent with the turn through `codex -i` |
 | M1-5 Close the loop on selection-based questions | ✅ Core implemented (popup Ask -> `[PDF Text]` quote block in the prompt); remaining polish: show the quoted selection in the chat bubble and optionally anchor it to a page | Completes a high-frequency interaction with small effort | ✅ Complete - page numbers in user messages are clickable |
 | M1-6 Durability + schema versioning (Section 2.8 + `vault.json`) | Harden gitignore + untrack `.logs` + private remote push flow; root-level `vault.json` version marker | A 30-paper archive is worth backing up; also a prerequisite for the M1-8 frontmatter migration | ✅ Code complete (ADR 0007, `docs/vault-remote.md`) - ⚠️ existing Vault migration takes effect on the next plugin run; runtime verification is required (`git ls-files` has no `.logs`, `vault.json` exists) + user must configure the private remote for the first push |
 | M1-7 Preservation-experience backlog | Zotero annotation import (highlights -> Evidence, comments -> Reader Thinking), memory diff rendering + one-click rollback, health badge, and a manual session-summary preservation button | Differentiation and trust mechanisms; start when actual usage pain justifies it | ★ Backlog (the only unfinished M1 item; start as needed) |
-| M1-8 Paper Signal Metadata (Section 2.9) | Mirror Zotero collections/tags into `record.json`; one-click rating (preserve taste); label the provenance of the three keyword sources and accept Codex suggestions through review; carry the data in `memory.md` frontmatter | Foundation for node attributes in M2 graph/filtering and M3 Topic; absorbs existing classifications at zero interaction cost | ✅ Complete - 1-5 star rating, collections/tags mirror, three keyword sources, `record.json` v2 (ADR 0007) |
+| M1-8 Paper Signal Metadata (Section 2.9) | Mirror Zotero collections/tags into `record.json`; one-click rating (preserve taste); label the provenance of the three keyword sources and accept Codex suggestions through review; carry the data in `memory.md` frontmatter | Foundation for node attributes in M2 graph/filtering and M3 Topic; absorbs existing classifications at zero interaction cost | ✅ Complete - 1-5 star rating, collections/tags mirror, three keyword sources; now carried forward in `record.json` v3 |
 
-Explicitly outside M1: relationship browser/graph, library-level questions, and source-code
-retrieval/analysis. These wait for M2.
+Explicitly outside M1: relationship graph visualization and library-level questions. Explicit
+GitHub URL analysis has since landed under ADR 0014; automatic repository discovery remains
+future work.
 
 ### M1.5 - Memory System Alignment (Current Milestone, from `docs/memory-philosophy.md`)
 
@@ -381,12 +383,12 @@ close-reading template.
 
 | Item | Content | Source | Notes |
 | ---- | ---- | ---- | ---- |
-| M1.5-1 Write-discipline file split | Plugin-marked block (bibliography/abstract) in `memory.md`; move Reader Thinking to `notes.md` (append-only, dated, attributed); migrate existing data | Philosophy §4.1, P3/P4/P5 | **ADR 0011 written** (revises the ADR-0002/0003 file layout); `knowledgeSurfaceVersion` 1→2, `recordProjectionVersion` 2→3 |
-| M1.5-2 Engagement tiers | `tier` field in frontmatter + L0/L1/L2 tiered templates; upgrades proposed by the agent via hidden marker + UI confirmation; downgrades compress to an L0 card | Philosophy §4.2, P1 | **ADR 0012 written** (extends the ADR-0007 frontmatter schema; adds `valueTypes`). L1 is the cold-start default; migrates in the same version step as 0011 |
-| M1.5-3 Close the quality loop (**reopens M1-2**) | Make gates tier-aware (an L1 record must not fail for "missing sections"); every detection result gets an action path - injection into a repair turn or a UI action; backfill missing `record.json` | Philosophy §4.3, P3 | `docs/benchmarks/knowledge-surface-quality.md` rubric must also become tier-aware |
-| M1.5-4 Cold-start linking pass | After a Knowledge Surface is generated, run a pass that proposes candidate Semantic Relationships against existing `*/memory.md` | Philosophy §4.4, P6 | **Proposals only, user-reviewed** - this reconciles P6 with the Connection Trigger discipline (no silent graph growth). Acceptance: the LingBot-World 1.0/2.0/CausVid chain in the library |
-| M1.5-5 Language policy | Vault `AGENTS.md`: body text follows the user's language; terminology and canonical wording stay in English | Philosophy §4.5 | Small; cross-language retrieval failures are a real defect |
-| M1.5-6 Minimal cognitive labels | `[claimed by paper]` / `[verified]` in Results/Insight only; `[superseded by [[KEY]]]` instead of deletion | Philosophy §4.6, P5 | Small; lands inside the M1.5-2 templates |
+| M1.5-1 Write-discipline file split | Plugin-marked block (bibliography/abstract) in `memory.md`; move Reader Thinking to `notes.md` (append-only, dated, attributed); migrate existing data | Philosophy §4.1, P3/P4/P5 | ✅ Code complete; migration is idempotent and enters git on the next Vault commit. Awaiting Zotero runtime confirmation |
+| M1.5-2 Engagement tiers | `tier` field in frontmatter + L0/L1/L2 tiered templates; upgrades proposed by the agent via hidden marker + UI confirmation; downgrades compress to an L0 card | Philosophy §4.2, P1 | ✅ Code complete; L3 is entered by explicit code analysis. Awaiting runtime confirmation |
+| M1.5-3 Close the quality loop (**reopens M1-2**) | Make gates tier-aware (an L1 record must not fail for "missing sections"); every detection result gets an action path - injection into a repair turn or a UI action; backfill missing `record.json` | Philosophy §4.3, P3 | ✅ Code complete; tier-aware gates, repair action, and v3 anchor projection implemented. Awaiting runtime confirmation |
+| M1.5-4 Cold-start linking pass | After a Knowledge Surface is generated, run a pass that proposes candidate Semantic Relationships against existing `*/memory.md` | Philosophy §4.4, P6 | ✅ Code complete; read-only proposals require Accept/Dismiss. Awaiting real-library relationship-chain validation |
+| M1.5-5 Language policy | Vault `AGENTS.md`: body text follows the user's language; terminology and canonical wording stay in English | Philosophy §4.5 | ✅ Code complete; awaiting multilingual Vault validation |
+| M1.5-6 Minimal cognitive labels | `[claimed by paper]` / `[verified]` in Results/Insight only; `[superseded by [[KEY]]]` instead of deletion | Philosophy §4.6, P5 | ✅ Code complete in Vault operating rules; awaiting real-record validation |
 
 Sequencing inside M1.5: 1 → 2 → 3 (structure before gates), 4 after 2 (linking prompts need
 the tier context), 5/6 anytime. During the M1.5-1/2 ADRs, update `CONTEXT.md` terms:
@@ -408,6 +410,11 @@ retrieval/analysis (Codex's strongest differentiation, using the capability inte
 pattern from M1-3; L3 outputs land in `code-notes.md` per the philosophy's target shape).
 Success criterion: an answer to a cross-paper question cites multiple `memory.md` files and
 provides verifiable page evidence.
+
+Current implementation note (2026-07-12): explicit GitHub URL analysis, `code-notes.md`,
+backlinks, and explicit-selection Topic Notes are code complete under ADR 0014. Automatic
+repository discovery, graph visualization, library-level chat, Living Surveys, and scheduled
+updates remain deferred.
 
 ### M3 - Field-Level Knowledge Framework
 

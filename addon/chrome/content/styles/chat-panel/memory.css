@@ -43,6 +43,50 @@
   align-items: center;
 }
 
+.zoteroagent-topic-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 0 8px 6px;
+}
+
+.zoteroagent-topic-title,
+.zoteroagent-code-repository {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  padding: 0 8px;
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-topic-create {
+  height: 28px;
+  border: 1px solid var(--za-accent);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-accent-soft);
+  color: var(--za-accent);
+  padding: 0 9px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoteroagent-topic-create:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.zoteroagent-topic-status {
+  grid-column: 1 / -1;
+  min-height: 16px;
+  color: var(--za-text-tertiary);
+  font-size: var(--za-font-xs);
+}
+
 .zoteroagent-memory-search {
   flex: 1 1 auto;
   min-width: 0;
@@ -139,6 +183,40 @@
   font-weight: 600;
 }
 
+.zoteroagent-paper-tier-select {
+  width: 48px;
+  height: 24px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-paper-tier-status {
+  max-width: 160px;
+  overflow-wrap: anywhere;
+  color: var(--za-text-tertiary);
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-value-type {
+  height: 22px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-secondary);
+  padding: 0 6px;
+  font-size: var(--za-font-xs);
+  cursor: pointer;
+}
+
+.zoteroagent-value-type.is-active {
+  border-color: var(--za-accent);
+  background: var(--za-accent-soft);
+  color: var(--za-accent);
+}
+
 .zoteroagent-rating-star {
   width: 22px;
   height: 22px;
@@ -181,6 +259,92 @@
   cursor: pointer;
 }
 
+.zoteroagent-code-analysis {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--za-border);
+  background: var(--za-bg-subtle);
+}
+
+.zoteroagent-reader-thinking-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--za-border);
+  background: var(--za-bg-subtle);
+}
+
+.zoteroagent-reader-thinking-action textarea {
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-reader-thinking-action button {
+  height: 28px;
+  border: 1px solid var(--za-accent);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-accent-soft);
+  color: var(--za-accent);
+  padding: 0 9px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoteroagent-reader-thinking-action .zoteroagent-cold-start-status {
+  grid-column: 1 / -1;
+}
+
+.zoteroagent-code-analysis .zoteroagent-cold-start-status {
+  grid-column: 1 / -1;
+}
+
+.zoteroagent-relationship-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--za-border);
+  background: var(--za-bg-subtle);
+}
+
+.zoteroagent-relationship-proposal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-relationship-proposal button {
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  padding: 3px 7px;
+  font-size: var(--za-font-xs);
+  cursor: pointer;
+}
+
+.zoteroagent-backlink-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .zoteroagent-memory-content {
   font-size: var(--za-font-md);
   line-height: 1.5;
@@ -214,6 +378,19 @@
   gap: 6px;
 }
 
+.zoteroagent-memory-list-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+
+.zoteroagent-topic-paper-select {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
 .zoteroagent-memory-list-item {
   display: flex;
   flex-direction: column;
@@ -225,6 +402,7 @@
   background: var(--za-bg-surface);
   padding: 8px 10px;
   cursor: pointer;
+  min-width: 0;
 }
 
 .zoteroagent-memory-list-item:hover {

@@ -16,7 +16,16 @@ import {
   evaluateKnowledgeSurface,
   type KnowledgeQualityReport,
 } from "./knowledge-quality";
-import { replaceKnowledgeSurfaceSection } from "./knowledge-surface";
+import {
+  KNOWLEDGE_SURFACE_PLUGIN_START,
+  TIER_SECTION_SHAPES,
+  migrateKnowledgeSurfaceV2,
+  restoreKnowledgeSurfaceOwnership,
+} from "./knowledge-surface";
+import {
+  runRelationshipLinkingPass,
+  type RelationshipProposal,
+} from "./relationship-proposals";
 import {
   extractPaperAbstract,
   extractPaperKeywords,
@@ -29,6 +38,7 @@ export type PaperColdStartRequest = {
   reasoningEffort?: CodexReasoningEffort;
   deepenInsight?: boolean;
   insightModel?: string;
+  linkRelationships?: boolean;
 };
 
 export type PaperColdStartEvents = {
@@ -38,6 +48,7 @@ export type PaperColdStartEvents = {
 
 export type PaperColdStartResult = {
   quality: KnowledgeQualityReport;
+  relationshipProposals: RelationshipProposal[];
   committed: boolean;
 };
 
@@ -108,28 +119,51 @@ export async function runPaperColdStart(
   }
 
   let after = await deps.readPaperMemory(paper.itemKey);
-  if (sourceAbstract) {
-    const corrected = replaceKnowledgeSurfaceSection(
-      after,
-      "Abstract",
-      sourceAbstract,
-    );
-    if (corrected !== after) {
-      after = corrected;
-      await deps.writePaperMemory(paper.itemKey, after);
-    }
+  const migrated = migrateKnowledgeSurfaceV2({
+    markdown: after,
+    meta: paper,
+    migratedAt: new Date().toISOString().slice(0, 10),
+  });
+  const ownershipBaseline = before.includes(KNOWLEDGE_SURFACE_PLUGIN_START)
+    ? before
+    : migrated.memoryMarkdown;
+  const corrected = restoreKnowledgeSurfaceOwnership(
+    migrated.memoryMarkdown,
+    ownershipBaseline,
+    paper,
+  );
+  if (corrected !== after) {
+    after = corrected;
+    await deps.writePaperMemory(paper.itemKey, after);
   }
   const quality = evaluateKnowledgeSurface({
     before,
     after,
     sourceAbstract,
     itemKey: paper.itemKey,
+    allowTierChange: !before.includes(KNOWLEDGE_SURFACE_PLUGIN_START),
   });
   await deps.refreshPaperRecordProjection(paper, quality);
+  let relationshipProposals: RelationshipProposal[] = [];
+  if (request.linkRelationships) {
+    try {
+      relationshipProposals = await runRelationshipLinkingPass({
+        paper,
+        model: request.model,
+        reasoningEffort: request.reasoningEffort,
+        onStatus: events.onStatus,
+        onProcess: events.onProcess,
+      });
+    } catch {
+      events.onStatus?.(
+        "Knowledge Record built; relationship suggestions are unavailable.",
+      );
+    }
+  }
   const committed = await deps.commitVaultChanges(
     `initialize: ${paper.itemKey}`,
   );
-  return { quality, committed };
+  return { quality, relationshipProposals, committed };
 }
 
 function buildInsightPrompt(paper: PaperVaultMeta): string {
@@ -137,9 +171,9 @@ function buildInsightPrompt(paper: PaperVaultMeta): string {
 
 Read ${paper.itemKey}/memory.md and ${paper.itemKey}/text.txt.
 Rewrite only the ## Insight section so it explains the paper-grounded reason the method works or matters.
-Preserve YAML frontmatter, Abstract, all other sections, and Reader Thinking.
+Preserve YAML frontmatter, the plugin-owned bibliography/abstract block, all other sections, and notes.md.
 Use [page N] evidence where useful.
-Do not edit record.json or conversation logs.
+Do not edit notes.md, record.json, or conversation logs.
 
 Return a short confirmation after the file is updated.`;
 }
@@ -148,12 +182,13 @@ function buildColdStartPrompt(paper: PaperVaultMeta): string {
   return `Initialize the Paper Knowledge Record for ${paper.itemKey}.
 
 Read ${paper.itemKey}/text.txt and update ${paper.itemKey}/memory.md.
-Fill the Contribution, Problem, Method, Insight, Results, and Takeaways sections with concise, paper-specific knowledge.
-Preserve the existing YAML frontmatter and the Abstract section exactly.
-Keep paper claims separate from Reader Thinking.
-Add [page N] evidence pointers where useful.
+This is an L1 standard skim. Fill ${TIER_SECTION_SHAPES.L1.join(", ")}
+with concise, paper-specific knowledge.
+Preserve YAML frontmatter and the plugin-owned bibliography/abstract block exactly.
+Keep paper claims separate from Reader Thinking in notes.md.
+Add inline [page N] evidence anchors where useful.
 Rewrite placeholders; do not append a second copy of any section.
-Do not edit record.json or conversation logs.
+Do not edit notes.md, record.json, or conversation logs.
 
 Return a short confirmation after the file is updated.`;
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CodexTurnError, type SemanticRelationship } from "../src/services/codex";
+import {
+  CodexTurnError,
+  type SemanticRelationship,
+} from "../src/services/codex";
 import {
   runResearchTurn,
   type ResearchTurnDeps,
@@ -14,7 +17,9 @@ const paper = {
   year: "2024",
 };
 
-function request(overrides: Partial<ResearchTurnRequest> = {}): ResearchTurnRequest {
+function request(
+  overrides: Partial<ResearchTurnRequest> = {},
+): ResearchTurnRequest {
   return {
     paper,
     pdfItemId: 10,
@@ -48,6 +53,7 @@ function deps(overrides: Partial<ResearchTurnDeps> = {}): ResearchTurnDeps {
       conversationsDir: "/vault/ITEM1/conversations",
     }),
     readPaperMemory: async () => "memory",
+    writePaperMemory: async () => undefined,
     refreshPaperRecordProjection: async () => [],
     readPaperCompactContext: async (mentioned) =>
       `# ${mentioned.title}\n\n## Contribution\n- Related.`,
@@ -87,7 +93,9 @@ describe("runResearchTurn", () => {
         },
         refreshPaperRecordProjection: async () => {
           calls.push("projection");
-          return projectionRead++ === 0 ? relationshipsBefore : relationshipsAfter;
+          return projectionRead++ === 0
+            ? relationshipsBefore
+            : relationshipsAfter;
         },
         runCodexTurn: async (input) => {
           calls.push("run");
@@ -136,7 +144,13 @@ describe("runResearchTurn", () => {
           reasoningEffort: "high",
           contextDigest: "# Context Digest",
         },
-        images: ["/vault/AAAA1111/figures/local/image.png"],
+        images: ["/vault/ITEM1/figures/generated/page-3.png"],
+        imageEvidence: [
+          {
+            path: "/vault/ITEM1/figures/generated/page-3.png",
+            pageNumber: 3,
+          },
+        ],
         priorVisibleMessages: [{ role: "user", content: "prior" }],
       }),
       {},
@@ -147,13 +161,20 @@ describe("runResearchTurn", () => {
           expect(input.fallbackToDefaultModel).toBe(false);
           expect(input.reasoningEffort).toBe("high");
           expect(input.images).toEqual([
-            "/vault/AAAA1111/figures/local/image.png",
+            "/vault/ITEM1/figures/generated/page-3.png",
           ]);
           expect(input.prompt).toContain("Attached local screenshots: 1");
+          expect(input.prompt).toContain(
+            "Local image: ITEM1/figures/generated/page-3.png; PDF page: 3",
+          );
           expect(input.prompt).toContain("Thread context mode: resume");
           expect(input.prompt).not.toContain("# Context Digest");
           expect(input.prompt).not.toContain("prior");
-          return { content: "answer", reasoning: "", threadId: "thread-existing" };
+          return {
+            content: "answer",
+            reasoning: "",
+            threadId: "thread-existing",
+          };
         },
       }),
     );
@@ -224,7 +245,11 @@ describe("runResearchTurn", () => {
           if (threadIds.length === 1) {
             return { content: "", reasoning: "", threadId: "thread-empty" };
           }
-          return { content: "fresh answer", reasoning: "", threadId: "thread-fresh" };
+          return {
+            content: "fresh answer",
+            reasoning: "",
+            threadId: "thread-fresh",
+          };
         },
         appendConversationTurn: async (turn) => {
           appended.push(turn.assistantMessage);

@@ -6,6 +6,7 @@ export type LocalImageRef = {
   relativePath: string;
   name: string;
   mimeType: string;
+  pageNumber?: number;
   previewUrl?: string;
 };
 

@@ -1,13 +1,13 @@
 export type VaultManifest = {
   schemaVersion: 1;
-  knowledgeSurfaceVersion: 1;
-  recordProjectionVersion: 2;
+  knowledgeSurfaceVersion: 2;
+  recordProjectionVersion: 3;
 };
 
 export const CURRENT_VAULT_MANIFEST: VaultManifest = {
   schemaVersion: 1,
-  knowledgeSurfaceVersion: 1,
-  recordProjectionVersion: 2,
+  knowledgeSurfaceVersion: 2,
+  recordProjectionVersion: 3,
 };
 
 const REQUIRED_GITIGNORE_RULES = [

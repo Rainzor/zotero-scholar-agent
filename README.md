@@ -11,6 +11,9 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 - 通过 Memory 视图查看当前论文的 Knowledge Surface、浏览 Vault 中的论文、跨论文搜索 `memory.md`。
 - 在对话中用 `@` 提及 Vault 中的其他论文，让 Codex 基于多篇 Paper Knowledge Records 进行比较和关联。
 - 在输入框粘贴本地截图并随问题发送给 Codex；截图保存在 Vault 的 gitignored 本地目录。
+- 按 L0–L3 选择论文投入深度；L1 为默认速读，L2 为精读，L3 可绑定显式 GitHub 仓库并生成代码分析。
+- 将用户思考追加到独立的 `notes.md`，与论文事实和会话日志保持结构隔离。
+- 多选 Vault 论文后显式创建可持续更新的 Topic Note，沉淀问题定义、方法脉络、论文立场与开放问题。
 - 从 Memory 视图建立单篇 Knowledge Record，或在 Zotero 多选后通过右键菜单批量建档。
 - 为论文记录 1–5 星评分，并镜像 Zotero collections/tags 作为 Paper Signal Metadata。
 - Codex 可在当前论文的 `memory.md` 中写入 Semantic Relationships，插件会生成 `record.json` 供脚本、索引和图谱使用。
@@ -33,22 +36,27 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
     text.txt
     text.meta.json
     memory.md
+    notes.md
     record.json
+    code-notes.md
+    code/
     figures/
       local/
       generated/
     conversations/
       {sessionId}.md
+  topics/
+    {topic-slug}.md
 ```
 
 三层记忆职责：
 
 - **Codex Session**：由 Codex `thread_id` 管理，用于同一个侧栏会话内的短期推理连续性。
 - **Conversation Log**：`conversations/{sessionId}.md`，按会话隔离的人类可读对话记录，不作为长期检索记忆。
-- **Paper Knowledge Record**：一篇论文的可演化研究档案；当前以 `memory.md` 作为人读优先的 Knowledge Surface。
+- **Paper Knowledge Record**：一篇论文的可演化研究档案；`memory.md` 保存论文知识，`notes.md` 追加保存 Reader Thinking。
 - **Structured Projection**：`record.json`，由插件从 `memory.md` 生成，服务脚本、搜索、反向链接和图谱。
 
-默认 `memory.md` 结构包括 `Abstract`、`Contribution`、`Problem`、`Method`、`Insight`、`Results`、`Takeaways`、`Reader Thinking`、`Library Connections` 和 `Evidence Pointers`。跨论文关系使用 typed Semantic Relationship，例如：
+`memory.md` 使用 L0–L3 分层模板。L1 默认包含 `TL;DR`、`Contribution`、`Method`、`Takeaways`；L2/L3 扩展为精读结构。页证据由正文内 `[page N]` 自动投影到 `record.json`。跨论文关系使用 typed Semantic Relationship，例如：
 
 ```markdown
 - [extends] [Paper title](../OTHERKEY/memory.md): rationale. Evidence: [page 4]

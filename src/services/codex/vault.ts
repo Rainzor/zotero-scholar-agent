@@ -1,8 +1,12 @@
 import { getFullText } from "../../modules/pdf-context";
 import {
+  buildInitialNotesMarkdown,
+  migrateKnowledgeSurfaceV2,
   parseKnowledgeSurface,
+  refreshKnowledgeSurfacePluginBlock,
   updateKnowledgeSurfaceSignals,
   type PaperSignalUpdate,
+  type PaperValueType,
 } from "../knowledge-surface";
 import {
   evaluateKnowledgeSurface,
@@ -27,6 +31,7 @@ import {
   parseReadmePaperRows,
   replaceMarkedBlock,
   safePathSegment,
+  scorePaperForQuery,
   shouldAttemptTextParserMigration,
   shouldReplaceTextWithPageMarkedVersion,
   TEXT_PARSER_VERSION,
@@ -37,6 +42,7 @@ import {
   type PaperVaultMeta,
 } from "./vault-format";
 import {
+  CURRENT_VAULT_MANIFEST,
   mergeVaultGitignore,
   normalizeVaultManifest,
 } from "./vault-manifest";
@@ -56,7 +62,10 @@ export type PaperVaultPaths = {
   textPath: string;
   textMetaPath: string;
   memoryPath: string;
+  notesPath: string;
   recordPath: string;
+  codeDir: string;
+  codeNotesPath: string;
   conversationsDir: string;
 };
 
@@ -81,9 +90,14 @@ Zotero item key (for example \`PXW99EKT/\`) holds one paper.
 
 ## Files per paper
 - \`text.txt\` — extracted PDF full text. READ-ONLY, never edit.
-- \`memory.md\` — durable, human-readable Paper Knowledge Record. READ before answering; UPDATE after.
+- \`memory.md\` — paper-grounded Knowledge Surface. The marked bibliography/abstract
+  block and YAML frontmatter are plugin-owned; only rewrite the interpretation area.
+- \`notes.md\` — append-only Reader Thinking. READ when the user asks about their own
+  judgment, but DO NOT edit; the plugin appends confirmed entries.
 - \`record.json\` — generated Structured Projection for scripts/search. DO NOT edit.
 - \`conversations/*.md\` — human transcript logs. DO NOT read or edit; the plugin manages them.
+- \`code/\` — optional gitignored source checkout for L3 analysis. Treat it as read-only.
+- \`code-notes.md\` — L3 source-code analysis. Preserve its plugin-owned provenance block.
 
 ## The paper currently in focus is given to you in each prompt.
 
@@ -91,17 +105,23 @@ Zotero item key (for example \`PXW99EKT/\`) holds one paper.
 1. Read the in-focus paper's \`memory.md\` first; create it from \`text.txt\` if missing.
 2. Use \`text.txt\` for detail the memory does not cover.
 3. For cross-paper questions, search across all \`*/memory.md\` files first, then \`*/text.txt\` if needed.
+4. Write explanatory prose in the user's language. Preserve canonical technical
+   terms, quoted terminology, and established English names when translation would
+   reduce retrieval quality.
 
 ## How to update memory (\`memory.md\`) — the Knowledge Surface
 - Preserve YAML frontmatter exactly. The plugin owns rating, Zotero mirrors,
-  paper keywords, and accepted Codex keywords; never edit these fields.
+  tier, value types, paper keywords, and accepted Codex keywords; never edit these fields.
+- Never edit content between \`<!-- zotero-agent:paper:start -->\` and
+  \`<!-- zotero-agent:paper:end -->\`.
 - Update ONLY when you learned something materially new this turn.
 - REWRITE and DEDUPE. Never blindly append. Keep it tight and factual.
-- Preserve this default structure: \`## Abstract\`, \`## Contribution\`, \`## Problem\`,
-  \`## Method\`, \`## Insight\`, \`## Results\`, \`## Takeaways\`,
-  \`## Reader Thinking\`, \`## Library Connections\`, \`## Evidence Pointers\`.
-- \`Abstract\` should be the paper's original or near-original abstract. Do not invent one.
-- Keep \`Insight\` paper-grounded. User ideas belong in \`Reader Thinking\`.
+- Follow the tier in frontmatter: L0 is a short negative-knowledge card, L1 is
+  TL;DR/Contribution/Method/Takeaways, L2 is close reading, and L3 adds code analysis.
+- Keep \`Insight\` paper-grounded. User ideas belong in \`notes.md\`.
+- Use inline \`[page N]\` anchors. The plugin derives the evidence index.
+- In Results/Insight, use only \`[claimed by paper]\` and \`[verified]\` trust labels.
+- Preserve outdated conclusions as \`[superseded by [[KEY]]]\` instead of deleting them.
 - Under \`## Library Connections / ### Semantic Relationships\`, use this exact line format:
   \`- [extends] [Paper title](../OTHERKEY/memory.md): rationale. Evidence: [page 4]\`
 - Allowed relationship types: \`cites\`, \`extends\`, \`contradicts\`, \`supports\`,
@@ -126,10 +146,7 @@ export function getConfiguredVaultPath(): string {
 }
 
 export function setConfiguredVaultPath(path: string) {
-  setPref(
-    CODEX_VAULT_PATH_PREF,
-    normalizeVaultPath(path, getHomeDir()),
-  );
+  setPref(CODEX_VAULT_PATH_PREF, normalizeVaultPath(path, getHomeDir()));
 }
 
 export async function getPaperVaultPaths(
@@ -143,7 +160,10 @@ export async function getPaperVaultPaths(
     textPath: paths.textPath,
     textMetaPath: paths.textMetaPath,
     memoryPath: paths.memoryPath,
+    notesPath: paths.notesPath,
     recordPath: paths.recordPath,
+    codeDir: paths.codeDir,
+    codeNotesPath: paths.codeNotesPath,
     conversationsDir: paths.conversationsDir,
   };
 }
@@ -175,6 +195,40 @@ export async function writePaperMemory(
       ? String(markdown || "")
       : `${String(markdown || "")}\n`,
   );
+}
+
+export async function readPaperNotes(itemKey: string): Promise<string> {
+  const paths = await getPaperVaultPaths(itemKey);
+  return readTextIfExists(paths.notesPath);
+}
+
+export async function readPaperCodeNotes(itemKey: string): Promise<string> {
+  const paths = await getPaperVaultPaths(itemKey);
+  return readTextIfExists(paths.codeNotesPath);
+}
+
+export async function appendPaperNote(options: {
+  itemKey: string;
+  content: string;
+  author?: "user" | "agent, user-confirmed";
+  date?: string;
+}): Promise<boolean> {
+  const paths = await getPaperVaultPaths(options.itemKey);
+  const existing =
+    (await readTextIfExists(paths.notesPath)).trimEnd() ||
+    buildInitialNotesMarkdown({
+      itemKey: options.itemKey,
+      title: options.itemKey,
+    }).trimEnd();
+  const block = [
+    `### ${options.date || new Date().toISOString().slice(0, 10)} [${
+      options.author || "user"
+    }]`,
+    "",
+    String(options.content || "").trim(),
+  ].join("\n");
+  await getIOUtils().writeUTF8(paths.notesPath, `${existing}\n\n${block}\n`);
+  return commitVaultChanges(`note: ${options.itemKey}`);
 }
 
 export async function writeEnrichedPaperText(
@@ -217,6 +271,15 @@ export async function updatePaperRating(
   await commitVaultChanges(`rating: ${paper.itemKey}`);
 }
 
+export async function updatePaperValueTypes(
+  paper: PaperVaultMeta,
+  valueTypes: PaperValueType[],
+): Promise<void> {
+  const changed = await updatePaperSignals(paper, { valueTypes });
+  if (!changed) return;
+  await commitVaultChanges(`value-types: ${paper.itemKey}`);
+}
+
 export async function acceptPaperKeyword(
   paper: PaperVaultMeta,
   keyword: string,
@@ -247,16 +310,17 @@ export async function refreshPaperRecordProjection(
 ): Promise<SemanticRelationship[]> {
   const paths = await getPaperVaultPaths(meta.itemKey);
   const memoryMarkdown = await readTextIfExists(paths.memoryPath);
+  const codeNotes = await readTextIfExists(paths.codeNotesPath);
   const existing = await readExistingProjection(paths.recordPath);
   const generatedAt = new Date().toISOString();
-  const qualityReport =
-    quality ||
-    evaluateKnowledgeSurface({
-      after: memoryMarkdown,
-      sourceAbstract: meta.abstract,
-      itemKey: meta.itemKey,
-      checkedAt: generatedAt,
-    });
+  const evaluated = evaluateKnowledgeSurface({
+    after: memoryMarkdown,
+    sourceAbstract: meta.abstract,
+    itemKey: meta.itemKey,
+    checkedAt: generatedAt,
+    codeNotes,
+  });
+  const qualityReport = mergeProjectionQuality(quality, evaluated);
   const projection = buildPaperRecordProjection({
     meta,
     memoryMarkdown,
@@ -271,6 +335,25 @@ export async function refreshPaperRecordProjection(
     `${JSON.stringify(projection, null, 2)}\n`,
   );
   return projection.relationships;
+}
+
+function mergeProjectionQuality(
+  supplied: KnowledgeQualityReport | undefined,
+  evaluated: KnowledgeQualityReport,
+): KnowledgeQualityReport {
+  if (!supplied) return evaluated;
+  const l3Failures = evaluated.hardFailures.filter((failure) =>
+    failure.startsWith("L3 requires"),
+  );
+  if (!l3Failures.length) return supplied;
+  const hardFailures = Array.from(
+    new Set([...supplied.hardFailures, ...l3Failures]),
+  );
+  return {
+    ...supplied,
+    status: "failed",
+    hardFailures,
+  };
 }
 
 export async function paperMemoryExists(itemKey: string): Promise<boolean> {
@@ -299,7 +382,10 @@ export async function listVaultPapers(): Promise<PaperVaultMeta[]> {
 
   for (const paper of entries.values()) {
     const memory = await readPaperMemory(paper.itemKey);
-    paper.rating = parseKnowledgeSurface(memory).signals.rating;
+    const signals = parseKnowledgeSurface(memory).signals;
+    paper.rating = signals.rating;
+    paper.tier = signals.tier;
+    paper.valueTypes = signals.valueTypes;
   }
 
   return Array.from(entries.values()).sort((a, b) =>
@@ -315,10 +401,13 @@ export async function searchVaultMemory(
   query: string,
   maxPerPaper = 5,
 ): Promise<VaultSearchHit[]> {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = String(query || "")
+    .trim()
+    .toLowerCase();
   if (!needle) return [];
   const papers = await listVaultPapers();
   const hits: VaultSearchHit[] = [];
+  const scores = new Map<string, number>();
   for (const paper of papers) {
     const content = await readPaperMemory(paper.itemKey);
     if (!content) continue;
@@ -330,9 +419,16 @@ export async function searchVaultMemory(
         if (matches.length >= maxPerPaper) break;
       }
     }
-    if (matches.length) hits.push({ itemKey: paper.itemKey, title: paper.title, matches });
+    if (matches.length) {
+      hits.push({ itemKey: paper.itemKey, title: paper.title, matches });
+      scores.set(paper.itemKey, scorePaperForQuery(paper, query));
+    }
   }
-  return hits;
+  return hits.sort(
+    (a, b) =>
+      Number(scores.get(b.itemKey) || 0) - Number(scores.get(a.itemKey) || 0) ||
+      a.title.localeCompare(b.title),
+  );
 }
 
 async function listPaperDirs(vaultDir: string): Promise<string[]> {
@@ -352,7 +448,9 @@ async function listPaperDirs(vaultDir: string): Promise<string[]> {
 }
 
 function basename(path: string): string {
-  const parts = String(path || "").split(/[\\/]/).filter(Boolean);
+  const parts = String(path || "")
+    .split(/[\\/]/)
+    .filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "";
 }
 
@@ -370,6 +468,9 @@ async function readExistingProjection(path: string): Promise<{
   title?: string;
   creators?: string;
   year?: string;
+  tier?: PaperRecordProjection["tier"];
+  valueTypes?: PaperRecordProjection["valueTypes"];
+  evidenceAnchors?: PaperRecordProjection["evidenceAnchors"];
   signals?: PaperRecordProjection["signals"];
   quality?: KnowledgeQualityReport;
   relationships?: SemanticRelationship[];
@@ -393,6 +494,9 @@ function projectionsEquivalent(
     title?: string;
     creators?: string;
     year?: string;
+    tier?: PaperRecordProjection["tier"];
+    valueTypes?: PaperRecordProjection["valueTypes"];
+    evidenceAnchors?: PaperRecordProjection["evidenceAnchors"];
     signals?: PaperRecordProjection["signals"];
     quality?: KnowledgeQualityReport;
     relationships?: SemanticRelationship[];
@@ -404,6 +508,9 @@ function projectionsEquivalent(
     title?: string;
     creators?: string;
     year?: string;
+    tier: PaperRecordProjection["tier"];
+    valueTypes: PaperRecordProjection["valueTypes"];
+    evidenceAnchors: PaperRecordProjection["evidenceAnchors"];
     signals: PaperRecordProjection["signals"];
     quality: KnowledgeQualityReport;
     relationships: SemanticRelationship[];
@@ -416,6 +523,11 @@ function projectionsEquivalent(
     String(existing.title || "") === String(next.title || "") &&
     String(existing.creators || "") === String(next.creators || "") &&
     String(existing.year || "") === String(next.year || "") &&
+    String(existing.tier || "") === String(next.tier || "") &&
+    JSON.stringify(existing.valueTypes || []) ===
+      JSON.stringify(next.valueTypes || []) &&
+    JSON.stringify(existing.evidenceAnchors || []) ===
+      JSON.stringify(next.evidenceAnchors || []) &&
     JSON.stringify(existing.signals || null) === JSON.stringify(next.signals) &&
     stableQuality(existing.quality) === stableQuality(next.quality) &&
     stableRelationships(existing.relationships || []) ===
@@ -460,13 +572,26 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.conversationsDir);
   await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
   await ensureGitRepo(paths.vaultDir);
-  await ensureVaultManifest(paths.vaultDir);
+  await validateVaultManifest(paths.vaultDir);
   await ensureGitignore(paths.vaultDir);
   await untrackIgnoredVaultArtifacts(paths.vaultDir);
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
     initialMemoryMarkdown(options),
   );
+  const migrationChanged = await migrateVaultKnowledgeFiles(options);
+  const manifestChanged = await ensureVaultManifest(paths.vaultDir);
+  const migrationCommitted = await isCurrentVaultManifestCommitted(
+    paths.vaultDir,
+  );
+  if (migrationChanged || manifestChanged || !migrationCommitted) {
+    const committed = await commitVaultChanges("migrate: knowledge surface v2");
+    if (!committed) {
+      throw new Error(
+        "Vault migration completed on disk but could not be committed to git.",
+      );
+    }
+  }
   await syncPaperSignalMetadata(paths.memoryPath, {
     zoteroCollections: options.zoteroCollections,
     zoteroTags: options.zoteroTags,
@@ -491,6 +616,103 @@ export async function ensurePaperVault(
   await updateReadme(options);
   await refreshPaperRecordProjection(options);
   return paths;
+}
+
+async function isCurrentVaultManifestCommitted(
+  vaultDir: string,
+): Promise<boolean> {
+  const result = await runGit(
+    vaultDir,
+    ["show", "HEAD:vault.json"],
+    30000,
+    true,
+  );
+  if (result.exitCode !== 0 || !result.stdout.trim()) return false;
+  try {
+    const parsed = JSON.parse(result.stdout);
+    return (
+      Number(parsed?.schemaVersion) === CURRENT_VAULT_MANIFEST.schemaVersion &&
+      Number(parsed?.knowledgeSurfaceVersion) ===
+        CURRENT_VAULT_MANIFEST.knowledgeSurfaceVersion &&
+      Number(parsed?.recordProjectionVersion) ===
+        CURRENT_VAULT_MANIFEST.recordProjectionVersion
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function migrateVaultKnowledgeFiles(
+  currentPaper: PaperVaultMeta,
+): Promise<boolean> {
+  const vaultDir = await getVaultDir();
+  const readme = await readTextIfExists(joinPath(vaultDir, "README.md"));
+  const metadata = new Map(
+    parseReadmePaperRows(readme).map((paper) => [paper.itemKey, paper]),
+  );
+  metadata.set(currentPaper.itemKey, currentPaper);
+  const keys = new Set(await listPaperDirs(vaultDir));
+  keys.add(currentPaper.itemKey);
+  let changed = false;
+  for (const itemKey of keys) {
+    const paths = await getPaperVaultPaths(itemKey);
+    const memoryBefore = await readTextIfExists(paths.memoryPath);
+    if (!memoryBefore.trim()) continue;
+    const paper =
+      metadata.get(itemKey) || inferPaperMeta(itemKey, memoryBefore);
+    if (await migratePaperKnowledgeFiles(paper, paths)) changed = true;
+    const recordBefore = await readTextIfExists(paths.recordPath);
+    await refreshPaperRecordProjection(paper);
+    const recordAfter = await readTextIfExists(paths.recordPath);
+    if (recordAfter !== recordBefore) changed = true;
+  }
+  return changed;
+}
+
+async function migratePaperKnowledgeFiles(
+  meta: PaperVaultMeta,
+  paths: PaperVaultPaths,
+): Promise<boolean> {
+  const memory = await readTextIfExists(paths.memoryPath);
+  const notes = await readTextIfExists(paths.notesPath);
+  const migrated = migrateKnowledgeSurfaceV2({
+    markdown: memory || initialMemoryMarkdown(meta),
+    meta,
+    migratedAt: new Date().toISOString().slice(0, 10),
+    existingNotes: notes,
+  });
+  const refreshedMemory = refreshKnowledgeSurfacePluginBlock(
+    migrated.memoryMarkdown,
+    meta,
+  );
+  let changed = false;
+  if (refreshedMemory !== memory) {
+    await getIOUtils().writeUTF8(
+      paths.memoryPath,
+      refreshedMemory.endsWith("\n") ? refreshedMemory : `${refreshedMemory}\n`,
+    );
+    changed = true;
+  }
+  if (migrated.notesMarkdown !== notes) {
+    await getIOUtils().writeUTF8(
+      paths.notesPath,
+      migrated.notesMarkdown.endsWith("\n")
+        ? migrated.notesMarkdown
+        : `${migrated.notesMarkdown}\n`,
+    );
+    changed = true;
+  }
+  return changed;
+}
+
+function inferPaperMeta(itemKey: string, memory: string): PaperVaultMeta {
+  const parsed = parseKnowledgeSurface(memory);
+  const heading = /^#\s+(.+?)\s*$/m.exec(parsed.body);
+  return {
+    itemId: 0,
+    itemKey,
+    title: String(heading?.[1] || itemKey).trim(),
+  };
 }
 
 async function migrateTextIfParserOutdated(
@@ -578,13 +800,20 @@ async function writeTextAndMeta(
   );
 }
 
-async function readTextMeta(metaPath: string, fallbackText: string): Promise<TextMeta> {
+async function readTextMeta(
+  metaPath: string,
+  fallbackText: string,
+): Promise<TextMeta> {
   const raw = await readTextIfExists(metaPath);
   if (!raw.trim()) {
     return normalizeTextMeta(null, fallbackText, new Date().toISOString());
   }
   try {
-    return normalizeTextMeta(JSON.parse(raw), fallbackText, new Date().toISOString());
+    return normalizeTextMeta(
+      JSON.parse(raw),
+      fallbackText,
+      new Date().toISOString(),
+    );
   } catch {
     return normalizeTextMeta(null, fallbackText, new Date().toISOString());
   }
@@ -626,16 +855,24 @@ export async function appendVaultLog(
     const vaultDir = await getVaultDir();
     const logsDir = joinPath(vaultDir, ".logs");
     await ensureDirectory(logsDir);
-    const filePath = joinPath(logsDir, `${new Date().toISOString().slice(0, 10)}.log`);
+    const filePath = joinPath(
+      logsDir,
+      `${new Date().toISOString().slice(0, 10)}.log`,
+    );
     const block = [
       `## ${new Date().toISOString()} · ${kind}`,
       "",
       message,
-      details ? `\n\`\`\`json\n${JSON.stringify(details, null, 2)}\n\`\`\`` : "",
+      details
+        ? `\n\`\`\`json\n${JSON.stringify(details, null, 2)}\n\`\`\``
+        : "",
       "",
     ].join("\n");
     const existing = (await readTextIfExists(filePath)).trimEnd();
-    await getIOUtils().writeUTF8(filePath, existing ? `${existing}\n\n${block}` : block);
+    await getIOUtils().writeUTF8(
+      filePath,
+      existing ? `${existing}\n\n${block}` : block,
+    );
   } catch (error) {
     ztoolkit.log("[Codex Vault] Failed to write vault log:", error);
   }
@@ -645,7 +882,12 @@ export async function commitVaultChanges(message: string): Promise<boolean> {
   const vaultDir = await getVaultDir();
   await ensureGitRepo(vaultDir);
   await runGit(vaultDir, ["add", "-A"]);
-  const diff = await runGit(vaultDir, ["diff", "--cached", "--quiet"], 30000, true);
+  const diff = await runGit(
+    vaultDir,
+    ["diff", "--cached", "--quiet"],
+    30000,
+    true,
+  );
   if (diff.exitCode === 0) return false;
   const commit = await runGit(
     vaultDir,
@@ -708,7 +950,10 @@ async function updateReadme(meta: PaperVaultMeta) {
   const base = existing.trim()
     ? replaceMarkedBlock(existing, markerStart, markerEnd, table)
     : `# My Papers\n\n${table}`;
-  await getIOUtils().writeUTF8(readmePath, base.endsWith("\n") ? base : `${base}\n`);
+  await getIOUtils().writeUTF8(
+    readmePath,
+    base.endsWith("\n") ? base : `${base}\n`,
+  );
 }
 
 async function ensureGitRepo(vaultDir: string) {
@@ -741,6 +986,17 @@ async function ensureVaultManifest(vaultDir: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+async function validateVaultManifest(vaultDir: string): Promise<void> {
+  const raw = await readTextIfExists(joinPath(vaultDir, "vault.json"));
+  let parsed: unknown = null;
+  try {
+    parsed = raw.trim() ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  normalizeVaultManifest(parsed);
 }
 
 async function untrackIgnoredVaultArtifacts(vaultDir: string) {
@@ -796,13 +1052,19 @@ async function runGit(
     timeoutMs,
   });
   if (!allowNonZero && result.exitCode !== 0) {
-    throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
+    throw new Error(
+      result.stderr || result.stdout || `git ${args.join(" ")} failed`,
+    );
   }
   return result;
 }
 
 async function resolveGitBinary(): Promise<string> {
-  for (const candidate of ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]) {
+  for (const candidate of [
+    "/usr/bin/git",
+    "/opt/homebrew/bin/git",
+    "/usr/local/bin/git",
+  ]) {
     if (await safeExists(candidate)) return candidate;
   }
   return "/usr/bin/git";
@@ -853,12 +1115,15 @@ async function safeExists(path: string): Promise<boolean> {
 
 function getIOUtils(): any {
   const ioUtils = (globalThis as any).IOUtils;
-  if (!ioUtils) throw new Error("IOUtils is not available in this Zotero environment.");
+  if (!ioUtils)
+    throw new Error("IOUtils is not available in this Zotero environment.");
   return ioUtils;
 }
 
 function getHomeDir(): string {
-  const envHome = String((globalThis as any).Services?.env?.get?.("HOME") || "");
+  const envHome = String(
+    (globalThis as any).Services?.env?.get?.("HOME") || "",
+  );
   if (envHome) return envHome;
   try {
     const dirsvc = (globalThis as any).Services?.dirsvc;

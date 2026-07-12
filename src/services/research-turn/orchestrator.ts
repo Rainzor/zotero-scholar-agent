@@ -12,6 +12,7 @@ import {
   ensurePaperVault,
   readPaperCompactContext,
   readPaperMemory,
+  writePaperMemory,
   refreshPaperRecordProjection,
   runCodexTurn,
   type CodexEvent,
@@ -36,6 +37,12 @@ import {
   type KnowledgeQualityReport,
 } from "../knowledge-quality";
 import { extractKeywordSuggestions } from "../keyword-suggestions";
+import { extractTierSuggestion } from "../tier-suggestions";
+import {
+  KNOWLEDGE_SURFACE_PLUGIN_START,
+  restoreKnowledgeSurfaceOwnership,
+  type PaperTier,
+} from "../knowledge-surface";
 
 export type ResearchTurnRequest = {
   paper: PaperVaultMeta;
@@ -53,6 +60,10 @@ export type ResearchTurnRequest = {
   priorVisibleMessages: ChatMessage[];
   userDisplayContent: string;
   images?: string[];
+  imageEvidence?: Array<{
+    path: string;
+    pageNumber?: number;
+  }>;
 };
 
 export type ResearchTurnEvents = {
@@ -78,11 +89,13 @@ export type ResearchTurnOutcome = {
   resumedFreshThread: boolean;
   quality: KnowledgeQualityReport;
   keywordSuggestions: string[];
+  tierSuggestion?: PaperTier;
 };
 
 export type ResearchTurnDeps = {
   ensurePaperVault: typeof ensurePaperVault;
   readPaperMemory: typeof readPaperMemory;
+  writePaperMemory: typeof writePaperMemory;
   refreshPaperRecordProjection: typeof refreshPaperRecordProjection;
   readPaperCompactContext: typeof readPaperCompactContext;
   runCodexTurn: typeof runCodexTurn;
@@ -94,6 +107,7 @@ export type ResearchTurnDeps = {
 const defaultDeps: ResearchTurnDeps = {
   ensurePaperVault,
   readPaperMemory,
+  writePaperMemory,
   refreshPaperRecordProjection,
   readPaperCompactContext,
   runCodexTurn,
@@ -193,7 +207,8 @@ async function runResearchTurnInner(
   }
 
   const keywordOutput = extractKeywordSuggestions(result.content);
-  result = { ...result, content: keywordOutput.content };
+  const tierOutput = extractTierSuggestion(keywordOutput.content);
+  result = { ...result, content: tierOutput.content };
   await deps.appendConversationTurn({
     itemKey: paper.itemKey,
     sessionId: request.session.sessionId,
@@ -201,13 +216,24 @@ async function runResearchTurnInner(
     assistantMessage: result.content,
     codexThreadId: result.threadId,
   });
-  const memoryAfter = await deps.readPaperMemory(paper.itemKey);
+  const rawMemoryAfter = await deps.readPaperMemory(paper.itemKey);
   const quality = evaluateKnowledgeSurface({
     before: memoryBefore,
-    after: memoryAfter,
+    after: rawMemoryAfter,
     sourceAbstract: paper.abstract,
     itemKey: paper.itemKey,
   });
+  let memoryAfter = rawMemoryAfter;
+  if (memoryBefore.includes(KNOWLEDGE_SURFACE_PLUGIN_START)) {
+    memoryAfter = restoreKnowledgeSurfaceOwnership(
+      rawMemoryAfter,
+      memoryBefore,
+      paper,
+    );
+    if (memoryAfter !== rawMemoryAfter) {
+      await deps.writePaperMemory(paper.itemKey, memoryAfter);
+    }
+  }
   const relationshipsAfter = await deps.refreshPaperRecordProjection(
     paper,
     quality,
@@ -231,6 +257,7 @@ async function runResearchTurnInner(
     resumedFreshThread,
     quality,
     keywordSuggestions: keywordOutput.suggestions,
+    tierSuggestion: tierOutput.suggestion,
   };
 }
 
@@ -244,8 +271,15 @@ async function runCodexAttempt(options: {
   events: ResearchTurnEvents;
   deps: ResearchTurnDeps;
 }): Promise<CodexTurnResult> {
-  const { request, mentionedContexts, recentMessages, threadId, mode, events, deps } =
-    options;
+  const {
+    request,
+    mentionedContexts,
+    recentMessages,
+    threadId,
+    mode,
+    events,
+    deps,
+  } = options;
   let prompt = buildCodexResearchPrompt({
     itemKey: request.paper.itemKey,
     title: request.paper.title,
@@ -258,12 +292,27 @@ async function runCodexAttempt(options: {
     recentMessages,
   });
   if (request.images?.length) {
+    const evidenceSources: Array<{ path: string; pageNumber?: number }> =
+      request.imageEvidence?.length
+        ? request.imageEvidence
+        : request.images.map((path) => ({ path }));
+    const imageSources = evidenceSources.map((evidence) => ({
+      path: localImageSourceLabel(evidence.path, request.paper.itemKey),
+      pageNumber: evidence.pageNumber,
+    }));
     prompt += [
       "",
       "",
       `Attached local screenshots: ${request.images.length}.`,
+      ...imageSources.map(
+        (source) =>
+          `- Local image: ${source.path}${
+            source.pageNumber ? `; PDF page: ${source.pageNumber}` : ""
+          }`,
+      ),
       "Use them only when relevant to the question.",
-      "Any durable conclusion derived from an image belongs in Reader Thinking or Evidence Pointers and must be labelled as local-only image evidence.",
+      "Paper-grounded conclusions supported by a paper page belong in memory.md with an inline [page N] anchor.",
+      "Interpretations based only on a local screenshot are not paper claims; cite the Local image path in the answer and leave Reader Thinking for user-confirmed notes.md entries.",
     ].join("\n");
   }
   const result = await deps.runCodexTurn({
@@ -281,6 +330,15 @@ async function runCodexAttempt(options: {
   });
   assertTurnHasContent(result);
   return result;
+}
+
+function localImageSourceLabel(path: string, itemKey: string): string {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  const marker = `/${itemKey}/figures/`;
+  const index = normalized.lastIndexOf(marker);
+  return index >= 0
+    ? normalized.slice(index + 1)
+    : normalized.split("/").pop() || "local screenshot";
 }
 
 async function buildMentionedPaperContexts(
@@ -309,9 +367,7 @@ function shouldRetryAsFreshThread(error: unknown, threadId: string): boolean {
   // before or outside the Codex run (binary/vault resolution, callback bugs)
   // would fail identically on a fresh thread, so don't pay for a second run.
   return (
-    error instanceof CodexTurnError &&
-    !error.timedOut &&
-    error.retryFreshThread
+    error instanceof CodexTurnError && !error.timedOut && error.retryFreshThread
   );
 }
 
@@ -322,7 +378,8 @@ function errorMessage(error: unknown): string {
 function assertTurnHasContent(result: CodexTurnResult) {
   if (String(result.content || "").trim()) return;
   throw new CodexTurnError({
-    message: "Codex completed the turn without producing an assistant response.",
+    message:
+      "Codex completed the turn without producing an assistant response.",
     exitCode: 0,
     timedOut: false,
   });

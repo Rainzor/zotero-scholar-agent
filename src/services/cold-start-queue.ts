@@ -195,7 +195,7 @@ export const coldStartQueue = new ColdStartQueue({
         pdfItemId: job.pdfItemId,
         model: cheapModel || undefined,
         reasoningEffort: getConfiguredColdStartReasoningEffort(),
-        deepenInsight: Boolean(cheapModel),
+        linkRelationships: true,
       },
       {
         onProcess: controls.setProcess,
