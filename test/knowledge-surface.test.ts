@@ -4,6 +4,7 @@ import {
   KNOWLEDGE_SURFACE_PLUGIN_START,
   buildInitialNotesMarkdown,
   buildKnowledgeSurfacePluginBlock,
+  insertPaperNoteEntry,
   migrateKnowledgeSurfaceV2,
   parseKnowledgeSurface,
   updateKnowledgeSurfaceSignals,
@@ -195,5 +196,30 @@ Later appended contribution detail.
     expect(notes).toContain("## Reading Context");
     expect(notes).toContain("## Thoughts and Critique");
     expect(notes).toContain("## Actions");
+  });
+
+  it("inserts an attributed action entry under the selected section", () => {
+    const notes = insertPaperNoteEntry(
+      buildInitialNotesMarkdown({
+        itemId: 1,
+        itemKey: "AAAA1111",
+        title: "Paper A",
+      }),
+      {
+        section: "Actions",
+        date: "2026-07-12",
+        author: "agent, user-confirmed",
+        content: "- Re-run the baseline with matched capacity.",
+        actionId: "action-1",
+      },
+    );
+
+    expect(
+      notes.indexOf("### 2026-07-12 [agent, user-confirmed]"),
+    ).toBeGreaterThan(notes.indexOf("## Actions"));
+    expect(
+      notes.indexOf("### 2026-07-12 [agent, user-confirmed]"),
+    ).toBeLessThan(notes.indexOf("## Thoughts and Critique"));
+    expect(notes).toContain("<!-- action-id: action-1 -->");
   });
 });

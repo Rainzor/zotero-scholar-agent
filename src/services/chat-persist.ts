@@ -4,6 +4,7 @@ import {
   normalizeCodexReasoningEffort,
   type CodexReasoningEffort,
 } from "./codex/context-window";
+import { normalizePersistedAgentAction } from "./chat-actions/types";
 
 export type PersistedSession = {
   sessionId: string;
@@ -96,11 +97,20 @@ export function normalizePersistedSession(
     title: String(raw?.title || "Chat"),
     contextMode: "agent",
     messages: Array.isArray(raw?.messages)
-      ? (raw.messages as ChatMessage[])
+      ? (raw.messages as ChatMessage[]).map(normalizePersistedMessage)
       : [],
     createdAt: Number(raw?.createdAt) || now,
     updatedAt: Number(raw?.updatedAt) || now,
   };
+}
+
+function normalizePersistedMessage(message: ChatMessage): ChatMessage {
+  const action = normalizePersistedAgentAction(message?.action);
+  if (!action) {
+    const { action: _action, ...rest } = message || ({} as ChatMessage);
+    return rest as ChatMessage;
+  }
+  return { ...message, action };
 }
 
 export function serializeItemState(state: {

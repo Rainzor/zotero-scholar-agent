@@ -6,6 +6,7 @@ import type { KnowledgeQualityReport } from "./services/knowledge-quality";
 import type { LocalImageRef } from "./services/local-images";
 import type { CodexReasoningEffort } from "./services/codex/context-window";
 import type { PaperTier } from "./services/knowledge-surface";
+import type { AgentActionCard } from "./services/chat-actions/types";
 import hooks from "./hooks";
 import api from "./api";
 
@@ -49,6 +50,7 @@ export type ChatMessage = {
   imageRefs?: LocalImageRef[];
   keywordSuggestions?: string[];
   tierSuggestion?: PaperTier;
+  action?: AgentActionCard;
 };
 export type ChatSession = {
   sessionId: string;

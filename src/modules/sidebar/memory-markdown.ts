@@ -32,15 +32,160 @@ export function filterEmptyMarkdownSections(markdown: string): string {
     .replace(/^(?:[ \t]*\n)+/, "");
 }
 
+export function prepareMemoryMarkdown(markdown: string): string {
+  return prepareMarkdownDocument(markdown, "knowledge");
+}
+
+export function prepareNotesMarkdown(markdown: string): string {
+  return prepareMarkdownDocument(markdown, "notes");
+}
+
+export function prepareCodeNotesMarkdown(markdown: string): string {
+  return prepareMarkdownDocument(markdown, "code");
+}
+
+type MemoryDocumentKind = "knowledge" | "notes" | "code";
+
+function prepareMarkdownDocument(
+  markdown: string,
+  kind: MemoryDocumentKind,
+): string {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const visible: string[] = [];
+  let fence: { marker: "`" | "~"; length: number } | null = null;
+  let seenVisibleContent = false;
+  let inPaperPluginBlock = false;
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (!fence && fenceMatch) {
+      fence = {
+        marker: fenceMatch[1].charAt(0) as "`" | "~",
+        length: fenceMatch[1].length,
+      };
+      visible.push(line);
+      seenVisibleContent = true;
+      continue;
+    }
+    if (
+      fence &&
+      new RegExp(
+        `^\\s*${escapeRegex(fence.marker)}{${fence.length},}\\s*$`,
+      ).test(line)
+    ) {
+      fence = null;
+      visible.push(line);
+      continue;
+    }
+    if (fence) {
+      visible.push(line);
+      continue;
+    }
+
+    if (/^\s*<!--\s*zotero-agent:paper:start\s*-->\s*$/i.test(line)) {
+      inPaperPluginBlock = true;
+      continue;
+    }
+    if (/^\s*<!--\s*zotero-agent:paper:end\s*-->\s*$/i.test(line)) {
+      inPaperPluginBlock = false;
+      continue;
+    }
+    if (
+      isInternalMemoryLine(line, kind, seenVisibleContent, inPaperPluginBlock)
+    ) {
+      continue;
+    }
+    visible.push(line);
+    if (line.trim()) seenVisibleContent = true;
+  }
+
+  return filterEmptyMarkdownSections(
+    collapseVisibleBlankLines(visible).join("\n"),
+  );
+}
+
+function isInternalMemoryLine(
+  line: string,
+  kind: MemoryDocumentKind,
+  seenVisibleContent: boolean,
+  inPaperPluginBlock: boolean,
+): boolean {
+  const leadingDocumentMetadata =
+    !seenVisibleContent &&
+    (/^\s*#\s+\S/.test(line) || /^\s*>?\s*item\s*key\s*:\s*\S/i.test(line));
+  const actionMarker =
+    kind === "notes" && /^\s*<!--\s*action-id:\s*[^>]+-->\s*$/i.test(line);
+  const knownPluginMarker =
+    /^\s*<!--\s*zotero-agent:(?:code:(?:start|end))\s*-->\s*$/i.test(line);
+  return (
+    leadingDocumentMetadata ||
+    actionMarker ||
+    knownPluginMarker ||
+    (kind === "knowledge" &&
+      inPaperPluginBlock &&
+      /^\s*\*\*item\s*key:\*\*\s*\S/i.test(line))
+  );
+}
+
+function collapseVisibleBlankLines(lines: string[]): string[] {
+  const result: string[] = [];
+  let fence: { marker: "`" | "~"; length: number } | null = null;
+  let previousBlank = false;
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (!fence && fenceMatch) {
+      fence = {
+        marker: fenceMatch[1].charAt(0) as "`" | "~",
+        length: fenceMatch[1].length,
+      };
+      result.push(line);
+      previousBlank = false;
+      continue;
+    }
+    if (
+      fence &&
+      new RegExp(
+        `^\\s*${escapeRegex(fence.marker)}{${fence.length},}\\s*$`,
+      ).test(line)
+    ) {
+      fence = null;
+      result.push(line);
+      previousBlank = false;
+      continue;
+    }
+    const blank = !line.trim();
+    if (!fence && blank && previousBlank) continue;
+    result.push(line);
+    previousBlank = !fence && blank;
+  }
+  return result;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function findSectionHeadings(lines: string[]): MarkdownHeading[] {
   const headings: MarkdownHeading[] = [];
-  let fence = "";
+  let fence: { marker: "`" | "~"; length: number } | null = null;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1].charAt(0);
-      fence = fence === marker ? "" : fence || marker;
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (!fence && fenceMatch) {
+      fence = {
+        marker: fenceMatch[1].charAt(0) as "`" | "~",
+        length: fenceMatch[1].length,
+      };
+      continue;
+    }
+    if (
+      fence &&
+      new RegExp(
+        `^\\s*${escapeRegex(fence.marker)}{${fence.length},}\\s*$`,
+      ).test(line)
+    ) {
+      fence = null;
       continue;
     }
     if (fence) continue;

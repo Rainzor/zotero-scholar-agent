@@ -147,4 +147,26 @@ describe("ChatStore context digest", () => {
       first?.title,
     );
   });
+
+  it("adds a message to the captured session after the active session changes", () => {
+    installZoteroStub();
+    const store = new ChatStore();
+    const first = store.createSession(7, "First");
+    const second = store.createSession(7, "Second");
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+
+    store.addMessage(
+      7,
+      { role: "user", content: "belongs to first" },
+      first!.sessionId,
+    );
+
+    store.setActiveSession(7, first!.sessionId);
+    expect(store.getMessages(7).map((message) => message.content)).toEqual([
+      "belongs to first",
+    ]);
+    store.setActiveSession(7, second!.sessionId);
+    expect(store.getMessages(7)).toEqual([]);
+  });
 });

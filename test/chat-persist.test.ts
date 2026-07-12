@@ -98,6 +98,201 @@ describe("normalizePersistedItem", () => {
     expect(normalized.sessions[0].sessionId).toBe("id-1");
     expect(normalized.activeSessionId).toBe("id-1");
   });
+
+  it("marks persisted running actions as interrupted without changing v2", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "note.organize",
+                state: "running",
+                trigger: { source: "slash-command", text: "/note idea" },
+                capabilities: ["codex.read", "vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  pdfItemId: 0,
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  text: "/note idea",
+                  content: "idea",
+                  contentSource: "command",
+                  modelSlug: "",
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/notes.md",
+                  section: "Thinking",
+                },
+                createdAt: 1,
+                updatedAt: 1,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    expect(normalized.version).toBe(2);
+    expect(normalized.sessions[0].messages[0].action).toMatchObject({
+      state: "failed",
+      error: { code: "interrupted", retryable: true },
+      request: { pdfItemId: 0 },
+    });
+  });
+
+  it("drops malformed persisted actions instead of restoring invalid states", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "note.organize",
+                state: "corrupted",
+              } as any,
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
+
+  it("drops persisted actions with malformed optional request fields", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "note.organize",
+                state: "failed",
+                trigger: { source: "slash-command", text: "/note idea" },
+                capabilities: ["codex.read", "vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  pdfItemId: -1,
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  text: "/note idea",
+                  content: "idea",
+                  contentSource: "invalid",
+                  images: [
+                    {
+                      id: "image-1",
+                      relativePath: "KEY/figures/local/image.png",
+                      name: "image.png",
+                      mimeType: "image/png",
+                      pageNumber: 0,
+                    },
+                  ],
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/notes.md",
+                },
+                error: {
+                  code: "interrupted",
+                  message: "Interrupted.",
+                  retryable: true,
+                },
+                createdAt: 1,
+                updatedAt: 1,
+              } as any,
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
+
+  it("drops a persisted Note action with a non-Note target path", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "note.organize",
+                state: "completed",
+                trigger: { source: "slash-command", text: "/note idea" },
+                capabilities: ["codex.read", "vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  pdfItemId: 0,
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  text: "/note idea",
+                  content: "idea",
+                  contentSource: "command",
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "OTHER/notes.md",
+                },
+                result: {
+                  summary: "Saved.",
+                  targetPath: "KEY/notes.md",
+                },
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
 });
 
 describe("serializeItemState", () => {

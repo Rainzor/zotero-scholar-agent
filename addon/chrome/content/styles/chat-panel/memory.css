@@ -269,44 +269,6 @@
   background: var(--za-bg-subtle);
 }
 
-.zoteroagent-reader-thinking-action {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: start;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--za-border);
-  background: var(--za-bg-subtle);
-}
-
-.zoteroagent-reader-thinking-action textarea {
-  min-width: 0;
-  resize: vertical;
-  border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-sm);
-  background: var(--za-bg-surface);
-  color: var(--za-text-primary);
-  padding: 6px 8px;
-  font: inherit;
-  font-size: var(--za-font-xs);
-}
-
-.zoteroagent-reader-thinking-action button {
-  height: 28px;
-  border: 1px solid var(--za-accent);
-  border-radius: var(--za-radius-sm);
-  background: var(--za-accent-soft);
-  color: var(--za-accent);
-  padding: 0 9px;
-  font-size: var(--za-font-xs);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.zoteroagent-reader-thinking-action .zoteroagent-cold-start-status {
-  grid-column: 1 / -1;
-}
-
 .zoteroagent-code-analysis .zoteroagent-cold-start-status {
   grid-column: 1 / -1;
 }

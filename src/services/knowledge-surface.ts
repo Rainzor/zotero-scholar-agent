@@ -231,6 +231,49 @@ export function buildInitialNotesMarkdown(meta: KnowledgeSurfaceMeta): string {
   ].join("\n");
 }
 
+export type PaperNoteSection =
+  | "Reading Context"
+  | "Actions"
+  | "Thoughts and Critique";
+
+export function insertPaperNoteEntry(
+  markdown: string,
+  entry: {
+    section: PaperNoteSection;
+    date: string;
+    author: "user" | "agent, user-confirmed";
+    content: string;
+    actionId?: string;
+  },
+): string {
+  const source = String(markdown || "").trimEnd();
+  const heading = `## ${entry.section}`;
+  const start = source.indexOf(heading);
+  if (start < 0) {
+    throw new Error(`Reader Thinking section is missing: ${entry.section}`);
+  }
+  const contentStart = start + heading.length;
+  const nextHeadingMatch = source.slice(contentStart).match(/\n##\s+[^\n]+\n?/);
+  const insertAt = nextHeadingMatch
+    ? contentStart + (nextHeadingMatch.index || 0)
+    : source.length;
+  const block = [
+    "",
+    `### ${entry.date} [${entry.author}]`,
+    entry.actionId ? `<!-- action-id: ${entry.actionId} -->` : "",
+    "",
+    String(entry.content || "").trim(),
+    "",
+  ]
+    .filter((line, index, lines) => line || lines[index - 1] !== "")
+    .join("\n");
+  return (
+    `${source.slice(0, insertAt).trimEnd()}\n${block}${source
+      .slice(insertAt)
+      .replace(/^\n*/, "\n")}`.trimEnd() + "\n"
+  );
+}
+
 export function migrateKnowledgeSurfaceV2(options: {
   markdown: string;
   meta: KnowledgeSurfaceMeta;

@@ -23,6 +23,9 @@ export type CodexTurnInput = {
   reasoningEffort?: CodexReasoningEffort;
   fallbackToDefaultModel?: boolean;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  webSearch?: boolean;
+  ephemeral?: boolean;
+  outputSchemaPath?: string;
   timeoutMs?: number;
   onStatus?: (text: string) => void;
   onChunk?: (state: {
@@ -199,6 +202,9 @@ async function executeCodexProcess(options: {
     images: input.images,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox || "workspace-write",
+    webSearch: input.webSearch,
+    ephemeral: input.ephemeral,
+    outputSchemaPath: input.outputSchemaPath,
   });
   let lastContent = "";
   const proc = await spawnLineProcess({
@@ -251,8 +257,12 @@ export function buildCodexArgs(options: {
   images?: string[];
   reasoningEffort?: CodexReasoningEffort;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
+  webSearch?: boolean;
+  ephemeral?: boolean;
+  outputSchemaPath?: string;
 }): string[] {
   const base = [
+    ...(options.webSearch ? ["--search"] : []),
     "exec",
     "--json",
     ...(options.reasoningEffort
@@ -264,6 +274,10 @@ export function buildCodexArgs(options: {
     options.vaultDir,
     "-s",
     options.sandbox,
+    ...(options.ephemeral ? ["--ephemeral"] : []),
+    ...(options.outputSchemaPath
+      ? ["--output-schema", options.outputSchemaPath]
+      : []),
   ];
   if (options.threadId) {
     return [...base, "resume", options.threadId, options.prompt];

@@ -1,6 +1,7 @@
 import { getFullText } from "../../modules/pdf-context";
 import {
   buildInitialNotesMarkdown,
+  insertPaperNoteEntry,
   migrateKnowledgeSurfaceV2,
   parseKnowledgeSurface,
   refreshKnowledgeSurfacePluginBlock,
@@ -43,9 +44,14 @@ import {
 } from "./vault-format";
 import {
   CURRENT_VAULT_MANIFEST,
+  isCurrentVaultManifest,
   mergeVaultGitignore,
   normalizeVaultManifest,
 } from "./vault-manifest";
+import {
+  getWorkflowSkillFiles,
+  WORKFLOW_SKILL_VERSION,
+} from "./workflow-skills";
 
 export type { PaperVaultMeta } from "./vault-format";
 export type { SemanticRelationship } from "./vault-format";
@@ -212,6 +218,9 @@ export async function appendPaperNote(options: {
   content: string;
   author?: "user" | "agent, user-confirmed";
   date?: string;
+  section?: "Reading Context" | "Actions" | "Thoughts and Critique";
+  actionId?: string;
+  commit?: boolean;
 }): Promise<boolean> {
   const paths = await getPaperVaultPaths(options.itemKey);
   const existing =
@@ -220,14 +229,15 @@ export async function appendPaperNote(options: {
       itemKey: options.itemKey,
       title: options.itemKey,
     }).trimEnd();
-  const block = [
-    `### ${options.date || new Date().toISOString().slice(0, 10)} [${
-      options.author || "user"
-    }]`,
-    "",
-    String(options.content || "").trim(),
-  ].join("\n");
-  await getIOUtils().writeUTF8(paths.notesPath, `${existing}\n\n${block}\n`);
+  const updated = insertPaperNoteEntry(existing, {
+    section: options.section || "Thoughts and Critique",
+    date: options.date || new Date().toISOString().slice(0, 10),
+    author: options.author || "user",
+    content: options.content,
+    actionId: options.actionId,
+  });
+  await getIOUtils().writeUTF8(paths.notesPath, updated);
+  if (options.commit === false) return false;
   return commitVaultChanges(`note: ${options.itemKey}`);
 }
 
@@ -570,10 +580,7 @@ export async function ensurePaperVault(
   await ensureDirectory(paths.vaultDir);
   await ensureDirectory(paths.paperDir);
   await ensureDirectory(paths.conversationsDir);
-  await ensureRootAgents(joinPath(paths.vaultDir, "AGENTS.md"));
-  await ensureGitRepo(paths.vaultDir);
-  await validateVaultManifest(paths.vaultDir);
-  await ensureGitignore(paths.vaultDir);
+  await ensureVaultWorkflowSkills();
   await untrackIgnoredVaultArtifacts(paths.vaultDir);
   await writeIfMissing(
     joinPath(paths.paperDir, "memory.md"),
@@ -618,6 +625,34 @@ export async function ensurePaperVault(
   return paths;
 }
 
+export async function ensureVaultWorkflowSkills(): Promise<void> {
+  const vaultDir = await getVaultDir();
+  await ensureDirectory(vaultDir);
+  await ensureRootAgents(joinPath(vaultDir, "AGENTS.md"));
+  await ensureGitRepo(vaultDir);
+  await validateVaultManifest(vaultDir);
+  await ensureGitignore(vaultDir);
+  const skillsChanged = await ensureWorkflowSkillFiles(vaultDir);
+  const manifestChanged = await ensureVaultManifest(vaultDir);
+  const manifestCommitted = await isCurrentVaultManifestCommitted(vaultDir);
+  if (skillsChanged || manifestChanged || !manifestCommitted) {
+    const receipt = await commitVaultPaths(
+      `migrate: workflow skills v${WORKFLOW_SKILL_VERSION}`,
+      [
+        "AGENTS.md",
+        ".gitignore",
+        "vault.json",
+        ...Object.keys(getWorkflowSkillFiles()),
+      ],
+    );
+    if (!receipt) {
+      throw new Error(
+        "Vault workflow skill migration completed on disk but could not be committed to git.",
+      );
+    }
+  }
+}
+
 async function isCurrentVaultManifestCommitted(
   vaultDir: string,
 ): Promise<boolean> {
@@ -629,14 +664,7 @@ async function isCurrentVaultManifestCommitted(
   );
   if (result.exitCode !== 0 || !result.stdout.trim()) return false;
   try {
-    const parsed = JSON.parse(result.stdout);
-    return (
-      Number(parsed?.schemaVersion) === CURRENT_VAULT_MANIFEST.schemaVersion &&
-      Number(parsed?.knowledgeSurfaceVersion) ===
-        CURRENT_VAULT_MANIFEST.knowledgeSurfaceVersion &&
-      Number(parsed?.recordProjectionVersion) ===
-        CURRENT_VAULT_MANIFEST.recordProjectionVersion
-    );
+    return isCurrentVaultManifest(JSON.parse(result.stdout));
   } catch {
     return false;
   }
@@ -906,6 +934,162 @@ export async function commitVaultChanges(message: string): Promise<boolean> {
   return commit.exitCode === 0;
 }
 
+export async function commitVaultPaths(
+  message: string,
+  paths: string[],
+): Promise<{
+  commitSha: string;
+  parentSha: string;
+  changedPaths: string[];
+} | null> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const scopedPaths = normalizeVaultCommitPaths(paths);
+  if (!scopedPaths.length) {
+    throw new Error("A path-scoped Vault commit requires at least one path.");
+  }
+  await runGit(vaultDir, ["add", "--", ...scopedPaths]);
+  const diff = await runGit(
+    vaultDir,
+    ["diff", "--cached", "--quiet", "--", ...scopedPaths],
+    30000,
+    true,
+  );
+  if (diff.exitCode === 0) return null;
+  const parent = await runGit(vaultDir, ["rev-parse", "HEAD"], 30000, true);
+  const commit = await runGit(
+    vaultDir,
+    [
+      "-c",
+      "user.name=zotero-agent",
+      "-c",
+      "user.email=agent@local",
+      "commit",
+      "--only",
+      "-m",
+      message,
+      "--",
+      ...scopedPaths,
+    ],
+    120000,
+    true,
+  );
+  if (commit.exitCode !== 0) {
+    throw new Error(
+      commit.stderr || commit.stdout || "Path-scoped Vault commit failed.",
+    );
+  }
+  const head = await runGit(vaultDir, ["rev-parse", "HEAD"]);
+  const changed = await runGit(vaultDir, [
+    "diff-tree",
+    "--root",
+    "--no-commit-id",
+    "--name-only",
+    "-r",
+    "HEAD",
+  ]);
+  return {
+    commitSha: head.stdout.trim(),
+    parentSha: parent.exitCode === 0 ? parent.stdout.trim() : "",
+    changedPaths: changed.stdout
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter(Boolean),
+  };
+}
+
+export async function assertVaultPathsClean(paths: string[]): Promise<void> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const scopedPaths = normalizeVaultCommitPaths(paths);
+  const status = await runGit(
+    vaultDir,
+    ["status", "--porcelain", "--untracked-files=all", "--", ...scopedPaths],
+    30000,
+    true,
+  );
+  if (status.exitCode !== 0) {
+    throw new Error(status.stderr || status.stdout || "git status failed.");
+  }
+  if (status.stdout.trim()) {
+    throw new Error(
+      "Vault target has uncommitted changes. Commit or discard them before retrying this action.",
+    );
+  }
+}
+
+export function normalizeVaultCommitPaths(paths: string[]): string[] {
+  const normalized = new Set<string>();
+  for (const value of paths) {
+    const path = String(value || "")
+      .replace(/\\/g, "/")
+      .replace(/^\.\/+/, "")
+      .replace(/\/+/g, "/")
+      .replace(/\/$/, "");
+    const segments = path.split("/");
+    if (
+      !path ||
+      path === "." ||
+      path.startsWith("/") ||
+      path.startsWith(":") ||
+      path === ".." ||
+      path.startsWith("../") ||
+      path.includes("/../") ||
+      !/^[a-zA-Z0-9._/-]+$/.test(path) ||
+      segments.some(
+        (segment) => segment === "." || segment === ".." || segment === ".git",
+      )
+    ) {
+      throw new Error(`Invalid Vault commit path: ${value}`);
+    }
+    normalized.add(path);
+  }
+  return [...normalized];
+}
+
+export type VaultTextFileSnapshot = {
+  relativePath: string;
+  existed: boolean;
+  content: string;
+};
+
+export async function captureVaultTextFiles(
+  paths: string[],
+): Promise<VaultTextFileSnapshot[]> {
+  const vaultDir = await getVaultDir();
+  const normalized = normalizeVaultCommitPaths(paths);
+  const snapshots: VaultTextFileSnapshot[] = [];
+  for (const relativePath of normalized) {
+    const path = joinPath(vaultDir, ...relativePath.split("/"));
+    const existed = await safeExists(path);
+    snapshots.push({
+      relativePath,
+      existed,
+      content: existed ? await readTextIfExists(path) : "",
+    });
+  }
+  return snapshots;
+}
+
+export async function restoreVaultTextFiles(
+  snapshots: VaultTextFileSnapshot[],
+): Promise<void> {
+  const vaultDir = await getVaultDir();
+  const paths = normalizeVaultCommitPaths(
+    snapshots.map((snapshot) => snapshot.relativePath),
+  );
+  for (const snapshot of snapshots) {
+    const path = joinPath(vaultDir, ...snapshot.relativePath.split("/"));
+    if (snapshot.existed) {
+      await ensureDirectory(path.slice(0, path.lastIndexOf("/")));
+      await getIOUtils().writeUTF8(path, snapshot.content);
+    } else {
+      await getIOUtils().remove(path, { ignoreAbsent: true });
+    }
+  }
+  await runGit(vaultDir, ["reset", "--", ...paths], 30000, true);
+}
+
 // Vault text comes solely from Zotero's PDFWorker full-text extraction. The
 // former PDF.js structured-parse path never succeeded in production (page
 // getTextContent items were unreadable across the reader's Xray boundary), so
@@ -968,6 +1152,22 @@ async function ensureGitignore(vaultDir: string) {
   if (merged !== existing) {
     await getIOUtils().writeUTF8(path, merged);
   }
+}
+
+async function ensureWorkflowSkillFiles(vaultDir: string): Promise<boolean> {
+  let changed = false;
+  for (const [relativePath, content] of Object.entries(
+    getWorkflowSkillFiles(),
+  )) {
+    const path = joinPath(vaultDir, ...relativePath.split("/"));
+    await ensureDirectory(path.slice(0, path.lastIndexOf("/")));
+    const existing = await readTextIfExists(path);
+    const normalized = content.endsWith("\n") ? content : `${content}\n`;
+    if (existing === normalized) continue;
+    await getIOUtils().writeUTF8(path, normalized);
+    changed = true;
+  }
+  return changed;
 }
 
 async function ensureVaultManifest(vaultDir: string): Promise<boolean> {

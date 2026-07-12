@@ -59,6 +59,11 @@ import {
 import { getIconSvg, insertSvgMarkup, setIconButton } from "./sidebar/icons";
 import { showUndoToast } from "./sidebar/feedback";
 import { autoResizeTextarea } from "./sidebar/composer";
+import {
+  getCommandMenuItems,
+  insertCommandTemplate,
+} from "./sidebar/command-menu";
+import type { ActionCardCommand } from "./sidebar/action-card";
 import { isNearBottom, scrollToBottomIfPinned } from "./sidebar/scroll";
 import {
   bindSessionControls,
@@ -79,9 +84,20 @@ import {
   extractRawUserText,
   renderUserMessage as renderUserMessageView,
 } from "./sidebar/user-message-view";
-import { filterEmptyMarkdownSections } from "./sidebar/memory-markdown";
+import {
+  prepareCodeNotesMarkdown,
+  filterEmptyMarkdownSections,
+  prepareMemoryMarkdown,
+  prepareNotesMarkdown,
+} from "./sidebar/memory-markdown";
 import type { ChatMessage, PaperContext, TokenUsage } from "../addon";
 import { chatStore } from "../services/chat-store";
+import {
+  DefaultChatSendFlow,
+  type ChatFlowSink,
+  type ChatSubmission,
+} from "../services/chat-actions/flow";
+import { organizePaperNote } from "../services/chat-actions/note";
 import {
   getZoteroPaperMeta,
   getZoteroPaperMetaByKey,
@@ -89,13 +105,13 @@ import {
 } from "../services/zotero-paper-metadata";
 import {
   listVaultPapers,
+  appendConversationTurn,
   readPaperCodeNotes,
   readPaperMemory,
   readPaperNotes,
   searchVaultMemory,
   PaperTextUnavailableError,
   acceptPaperKeyword,
-  appendPaperNote,
   updatePaperRating,
   updatePaperValueTypes,
   type CodexReasoningEffort,
@@ -107,11 +123,13 @@ import {
 let sectionPaneID: string | null = null;
 let activeBody: HTMLElement | null = null;
 let activeCodexProcess: RunningLineProcess | null = null;
+let activeCodexOwner: { itemId: number; sessionId: string } | null = null;
 let isGenerating = false;
 let mentionRequestSeq = 0;
 const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
+const chatSendFlowMap = new WeakMap<HTMLElement, DefaultChatSendFlow>();
 let referenceSyncRetryTimer: number | null = null;
 const SELECTED_TEXT_PREFIX = "Selected Text: ";
 const RESPONSE_QUOTE_PREFIX = "Response Quote: ";
@@ -620,7 +638,11 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   return panel;
 }
 
-function switchChatView(body: HTMLElement, mode: "chat" | "memory") {
+function switchChatView(
+  body: HTMLElement,
+  mode: "chat" | "memory",
+  renderBrowse = true,
+) {
   hideQuotePopup(body);
   body.dataset.chatMode = mode;
   const isMemory = mode === "memory";
@@ -648,7 +670,7 @@ function switchChatView(body: HTMLElement, mode: "chat" | "memory") {
   body
     .querySelector("#zoteroagent-view-memory")
     ?.classList.toggle("is-active", isMemory);
-  if (isMemory) void renderMemoryBrowse(body);
+  if (isMemory && renderBrowse) void renderMemoryBrowse(body);
 }
 
 function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
@@ -837,12 +859,11 @@ async function appendPaperMemoryCard(
     if (proposals.length) {
       card.appendChild(buildRelationshipProposalReview(body, paper, proposals));
     }
-    card.appendChild(buildReaderThinkingAction(body, paper));
   }
   const inner = doc.createElementNS(XHTML, "div") as HTMLElement;
   inner.className = "zoteroagent-memory-content markdown-body";
   if (surface.body.trim()) {
-    inner.innerHTML = renderMarkdown(filterEmptyMarkdownSections(surface.body));
+    inner.innerHTML = renderMarkdown(prepareMemoryMarkdown(surface.body));
   } else {
     inner.appendChild(
       memoryNotice(
@@ -856,10 +877,11 @@ async function appendPaperMemoryCard(
   if (notes.trim()) {
     const notesHeading = doc.createElementNS(XHTML, "div") as HTMLElement;
     notesHeading.className = "zoteroagent-memory-section-title";
+    notesHeading.id = "zoteroagent-memory-reader-thinking";
     notesHeading.textContent = "Reader Thinking";
     const notesContent = doc.createElementNS(XHTML, "div") as HTMLElement;
     notesContent.className = "zoteroagent-memory-content markdown-body";
-    notesContent.innerHTML = renderMarkdown(filterEmptyMarkdownSections(notes));
+    notesContent.innerHTML = renderMarkdown(prepareNotesMarkdown(notes));
     card.appendChild(notesHeading);
     card.appendChild(notesContent);
   }
@@ -869,9 +891,7 @@ async function appendPaperMemoryCard(
     codeHeading.textContent = "Code Analysis";
     const codeContent = doc.createElementNS(XHTML, "div") as HTMLElement;
     codeContent.className = "zoteroagent-memory-content markdown-body";
-    codeContent.innerHTML = renderMarkdown(
-      filterEmptyMarkdownSections(codeNotes),
-    );
+    codeContent.innerHTML = renderMarkdown(prepareCodeNotesMarkdown(codeNotes));
     card.appendChild(codeHeading);
     card.appendChild(codeContent);
   }
@@ -902,51 +922,6 @@ async function appendPaperMemoryCard(
     card.appendChild(backlinkList);
   }
   host.appendChild(card);
-}
-
-function buildReaderThinkingAction(
-  body: HTMLElement,
-  paper: PaperVaultMeta,
-): HTMLElement {
-  const doc = body.ownerDocument;
-  const wrap = doc.createElementNS(XHTML, "div") as HTMLElement;
-  wrap.className = "zoteroagent-reader-thinking-action";
-  const input = doc.createElementNS(XHTML, "textarea") as HTMLTextAreaElement;
-  input.rows = 2;
-  input.placeholder = "Add your thought, critique, or next action...";
-  input.setAttribute("aria-label", "Reader Thinking");
-  const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
-  button.type = "button";
-  button.textContent = "Add thought";
-  const status = doc.createElementNS(XHTML, "span") as HTMLElement;
-  status.className = "zoteroagent-cold-start-status";
-  button.addEventListener("click", () => {
-    const content = input.value.trim();
-    if (!content) {
-      status.textContent = "Enter a thought first.";
-      return;
-    }
-    input.disabled = true;
-    button.disabled = true;
-    void appendPaperNote({ itemKey: paper.itemKey, content })
-      .then(() => {
-        input.value = "";
-        status.textContent = "Saved to notes.md.";
-      })
-      .catch((error) => {
-        status.textContent =
-          error instanceof Error ? error.message : String(error);
-      })
-      .finally(() => {
-        input.disabled = false;
-        button.disabled = false;
-        if (isSafeBody(body)) void renderMemoryBrowse(body);
-      });
-  });
-  wrap.appendChild(input);
-  wrap.appendChild(button);
-  wrap.appendChild(status);
-  return wrap;
 }
 
 function buildColdStartAction(
@@ -1748,6 +1723,14 @@ function ensureChatUI(body: HTMLElement) {
   mentionPanel.className = "zoteroagent-mention-panel";
   mentionPanel.style.display = "none";
 
+  const commandPanel = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  commandPanel.id = "zoteroagent-command-panel";
+  commandPanel.className = "zoteroagent-command-panel";
+  commandPanel.style.display = "none";
+
   const actionsRow = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   actionsRow.id = "zoteroagent-actions-row";
   actionsRow.className = "zoteroagent-actions-row";
@@ -1810,6 +1793,7 @@ function ensureChatUI(body: HTMLElement) {
   composeArea.appendChild(contextChips);
   composeArea.appendChild(textarea);
   composeArea.appendChild(mentionPanel);
+  composeArea.appendChild(commandPanel);
   composeArea.appendChild(actionsRow);
 
   inputArea.appendChild(composeArea);
@@ -1906,6 +1890,7 @@ function bindChatEvents(body: HTMLElement) {
     .querySelector("#zoteroagent-chat-input")
     ?.addEventListener("keydown", (event) => {
       const ke = event as KeyboardEvent;
+      if (handleCommandMenuKeyDown(body, ke)) return;
       if (handleMentionKeyDown(body, ke)) return;
       if (ke.key === "Enter" && !ke.shiftKey) {
         event.preventDefault();
@@ -1924,13 +1909,19 @@ function bindChatEvents(body: HTMLElement) {
         "#zoteroagent-chat-input",
       ) as HTMLTextAreaElement | null;
       if (input) autoResizeTextarea(input);
-      void updateMentionAutocomplete(body);
+      updateCommandMenu(body);
+      if (getCommandMenuItems(input?.value || "").length) {
+        hideMentionAutocomplete(body);
+      } else {
+        void updateMentionAutocomplete(body);
+      }
     });
   body
     .querySelector("#zoteroagent-chat-input")
     ?.addEventListener("blur", () => {
       body.ownerDocument.defaultView?.setTimeout(() => {
         hideMentionAutocomplete(body);
+        hideCommandMenu(body);
       }, 150);
     });
   body
@@ -2054,6 +2045,7 @@ function setGenerating(body: HTMLElement, generating: boolean) {
       sendBtn.textContent = "Send";
       sendBtn.title = "Send";
       activeCodexProcess = null;
+      activeCodexOwner = null;
     }
   }
   if (!generating) {
@@ -2120,6 +2112,19 @@ function hideAgentStatus(body: HTMLElement) {
 }
 
 function abortGeneration(body: HTMLElement) {
+  const itemId = Number(body.dataset.itemID);
+  const owner = activeCodexOwner;
+  const targetItemId = owner?.itemId || itemId;
+  const sessionId =
+    owner?.sessionId ||
+    (targetItemId > 0 ? chatStore.getActiveSessionId(targetItemId) : "");
+  if (targetItemId > 0 && sessionId) {
+    getChatSendFlow(body).cancel(targetItemId, sessionId);
+    if (getChatSendFlow(body).isActive(targetItemId, sessionId)) {
+      renderMessages(body, itemId);
+      return;
+    }
+  }
   if (activeCodexProcess) {
     try {
       activeCodexProcess.kill();
@@ -2129,7 +2134,6 @@ function abortGeneration(body: HTMLElement) {
     activeCodexProcess = null;
   }
   setGenerating(body, false);
-  const itemId = Number(body.dataset.itemID);
   if (itemId > 0) renderMessages(body, itemId);
 }
 
@@ -2185,7 +2189,9 @@ async function compactSessionContext(
   );
   const paperMeta = getPaperMeta(itemId);
   const isActivePane = () =>
-    isSafeBody(body) && Number(body.dataset.itemID) === itemId;
+    isSafeBody(body) &&
+    Number(body.dataset.itemID) === itemId &&
+    chatStore.getActiveSessionId(itemId) === session.sessionId;
   try {
     const digest = await generateContextDigest({
       itemKey: paperMeta.itemKey,
@@ -2341,15 +2347,14 @@ async function submitQuestion(body: HTMLElement) {
 
   const itemId = Number(body.dataset.itemID);
   if (!itemId || itemId < 0) return;
-
-  // The item pane body is shared across papers in the window. This generation
-  // runs asynchronously, so the user may switch papers while it streams. Data
-  // is always persisted to the chatStore under `itemId`, but DOM updates must
-  // only touch the pane while it is still showing this same paper, otherwise
-  // streamed tokens and the final render would bleed into (and overwrite) the
-  // conversation the user has since switched to.
-  const isActivePane = () =>
-    isSafeBody(body) && Number(body.dataset.itemID) === itemId;
+  let session = chatStore.getSession(itemId);
+  if (!session) session = chatStore.createSession(itemId);
+  if (!session) return;
+  const flow = getChatSendFlow(body);
+  if (!flow.canSubmit()) {
+    showAgentStatus(body, "Wait for the running turn to finish.", "notice");
+    return;
+  }
 
   const refText = addon.data.chat.referenceText;
   const responseQuote = addon.data.chat.responseQuote;
@@ -2361,9 +2366,8 @@ async function submitQuestion(body: HTMLElement) {
   const imageRefs = addon.data.chat.pendingImages.filter(
     (ref) =>
       ref.relativePath.startsWith(`${paperMeta.itemKey}/`) &&
-      ref.sessionId === chatStore.getActiveSessionId(itemId),
+      ref.sessionId === session.sessionId,
   );
-  const imagePaths = await resolveLocalImagePaths(imageRefs);
   const priorVisibleMessages = chatStore
     .getMessages(itemId)
     .map((message) => ({ ...message }));
@@ -2384,13 +2388,8 @@ async function submitQuestion(body: HTMLElement) {
         )
         .join(", ")}]`
     : displayContent;
-
-  chatStore.addMessage(itemId, {
-    role: "user",
-    content: displayContent,
-    contextPapers: mentionedPapers,
-    imageRefs: imageRefs.map((ref) => ({ ...ref })),
-  });
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
   input.value = "";
   autoResizeTextarea(input);
   addon.data.chat.referenceText = "";
@@ -2401,11 +2400,70 @@ async function submitQuestion(body: HTMLElement) {
   );
   syncContextChips(body);
   hideMentionAutocomplete(body);
+  hideCommandMenu(body);
   body.dataset.chatMode = "chat";
   syncLayoutState(body, itemId);
 
-  const session = chatStore.getSession(itemId);
+  const submission: ChatSubmission = {
+    itemId,
+    paper: paperMeta,
+    pdfItemId,
+    session: {
+      sessionId: session.sessionId,
+      codexThreadId: session.codexThreadId || "",
+      modelSlug: session.modelSlug || "",
+      reasoningEffort: session.reasoningEffort,
+      contextDigest: session.contextDigest,
+      contextDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
+    },
+    text: question,
+    selectedText: refText,
+    responseQuote,
+    mentionedPapers,
+    imageRefs: imageRefs.map((ref) => ({ ...ref })),
+    imagePaths: [],
+    priorVisibleMessages,
+    displayContent,
+    conversationDisplayContent,
+  };
+  await flow.submit(
+    submission,
+    createChatFlowSink(body, itemId, session.sessionId),
+  );
+}
+
+async function executeResearchSubmission(
+  body: HTMLElement,
+  request: ChatSubmission,
+  sink: ChatFlowSink,
+) {
+  const {
+    itemId,
+    paper: paperMeta,
+    mentionedPapers,
+    imageRefs,
+    imagePaths,
+    priorVisibleMessages,
+    displayContent,
+    conversationDisplayContent,
+    session,
+  } = request;
+  const isActivePane = () =>
+    isSafeBody(body) &&
+    Number(body.dataset.itemID) === itemId &&
+    chatStore.getActiveSessionId(itemId) === session.sessionId;
+
   const selectedModel = String(session?.modelSlug || "").trim();
+  chatStore.addMessage(
+    itemId,
+    {
+      role: "user",
+      content: displayContent,
+      contextPapers: mentionedPapers,
+      imageRefs: imageRefs.map((ref) => ({ ...ref })),
+    },
+    session.sessionId,
+  );
   const assistant: ChatMessage = {
     role: "assistant",
     content: "",
@@ -2414,25 +2472,35 @@ async function submitQuestion(body: HTMLElement) {
     reasoningEffort: session?.reasoningEffort,
     contextPapers: mentionedPapers,
   };
-  chatStore.addMessage(itemId, assistant);
-  renderMessages(body, itemId);
-  setGenerating(body, true);
-  showAgentStatus(body, "Preparing Codex...");
+  chatStore.addMessage(itemId, assistant, session.sessionId);
+  if (isActivePane()) renderMessages(body, itemId);
+  sink.onRunning?.(true);
+  sink.onStatus?.("Preparing Codex...");
+  let resolvedImagePaths = imagePaths;
+  if (!resolvedImagePaths.length && imageRefs.length) {
+    try {
+      resolvedImagePaths = await resolveLocalImagePaths(imageRefs);
+    } catch (error) {
+      ztoolkit.log("[Agent] Failed to resolve local screenshots:", error);
+      resolvedImagePaths = [];
+      sink.onStatus?.(
+        "Local screenshots are unavailable; continuing without them...",
+      );
+    }
+  }
 
-  const reader = getActiveReader() || addon.data.popup.currentReader;
-  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
-  if (pdfItemId <= 0) {
+  if (request.pdfItemId <= 0) {
     assistant.content =
       "No valid PDF attachment found. Please confirm the item has an accessible PDF attachment in Zotero.";
-    setGenerating(body, false);
+    sink.onRunning?.(false);
     if (isActivePane()) renderMessages(body, itemId);
     return;
   }
 
   const aiQuestion = buildQuotedQuestion({
-    question,
-    selectedText: refText,
-    responseQuote,
+    question: request.text,
+    selectedText: request.selectedText,
+    responseQuote: request.responseQuote,
   });
 
   try {
@@ -2440,7 +2508,7 @@ async function submitQuestion(body: HTMLElement) {
     const result = await runResearchTurn(
       {
         paper: paperMeta,
-        pdfItemId,
+        pdfItemId: request.pdfItemId,
         question: aiQuestion,
         mentionedPapers,
         session: {
@@ -2453,18 +2521,16 @@ async function submitQuestion(body: HTMLElement) {
         },
         priorVisibleMessages,
         userDisplayContent: conversationDisplayContent,
-        images: imagePaths,
+        images: resolvedImagePaths,
         imageEvidence: imageRefs.map((ref, index) => ({
-          path: imagePaths[index] || ref.relativePath,
+          path: resolvedImagePaths[index] || ref.relativePath,
           pageNumber: ref.pageNumber,
         })),
       },
       {
-        onStatus: (text) => {
-          if (isActivePane()) showAgentStatus(body, text);
-        },
+        onStatus: (text) => sink.onStatus?.(text),
         onProcess: (proc) => {
-          activeCodexProcess = proc;
+          sink.onProcess?.(proc);
         },
         onActivities: (activities) => {
           assistant.activities = activities.slice();
@@ -2514,25 +2580,30 @@ async function submitQuestion(body: HTMLElement) {
     }
   }
   chatStore.touchSession(itemId);
-  setGenerating(body, false);
+  sink.onRunning?.(false);
   if (isActivePane()) renderMessages(body, itemId);
-  maybeGenerateSessionTitleLocal(body, itemId, question);
+  maybeGenerateSessionTitleLocal(body, itemId, request.text, session.sessionId);
 }
 
 function maybeGenerateSessionTitleLocal(
   body: HTMLElement,
   itemId: number,
   question: string,
+  sessionId?: string,
 ) {
-  if (!chatStore.needsAutoTitle(itemId)) return;
+  if (!chatStore.needsAutoTitle(itemId, sessionId)) return;
   const title = question
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 48)
     .replace(/[。！？,.，；;:：\s]+$/g, "");
   if (!title) return;
-  chatStore.renameSession(itemId, title);
-  if (isSafeBody(body) && Number(body.dataset.itemID) === itemId)
+  chatStore.renameSession(itemId, title, sessionId);
+  if (
+    isSafeBody(body) &&
+    Number(body.dataset.itemID) === itemId &&
+    (!sessionId || chatStore.getActiveSessionId(itemId) === sessionId)
+  )
     syncSessionHeader(body, itemId);
 }
 
@@ -3216,6 +3287,8 @@ function renderMessages(body: HTMLElement, itemId: number) {
         autoResizeTextarea(input);
         input.focus();
       },
+      onActionCommand: (actionId, command) =>
+        handleActionCardCommand(body, itemId, actionId, command),
       syncSessionHeader: () => syncSessionHeader(body, itemId),
     });
   } catch (e) {
@@ -3274,6 +3347,210 @@ function getMentionTrigger(input: HTMLTextAreaElement): MentionTrigger | null {
     end: cursor,
     query: String(match[2] || "").toLowerCase(),
   };
+}
+
+function getChatSendFlow(body: HTMLElement): DefaultChatSendFlow {
+  const existing = chatSendFlowMap.get(body);
+  if (existing) return existing;
+  const flow = new DefaultChatSendFlow({
+    store: chatStore,
+    organizeNote: organizePaperNote,
+    appendConversationTurn,
+    runResearch: (request, sink) =>
+      executeResearchSubmission(body, request, sink),
+  });
+  chatSendFlowMap.set(body, flow);
+  return flow;
+}
+
+function createChatFlowSink(
+  body: HTMLElement,
+  expectedItemId: number,
+  expectedSessionId: string,
+): ChatFlowSink {
+  const isExpectedContext = () =>
+    isSafeBody(body) &&
+    Number(body.dataset.itemID) === expectedItemId &&
+    chatStore.getActiveSessionId(expectedItemId) === expectedSessionId;
+  return {
+    onChanged: (itemId) => {
+      if (isExpectedContext() && itemId === expectedItemId) {
+        renderMessages(body, itemId);
+        syncLayoutState(body, itemId);
+      }
+    },
+    onRunning: (running) => {
+      if (running) {
+        activeCodexOwner = {
+          itemId: expectedItemId,
+          sessionId: expectedSessionId,
+        };
+      }
+      if (isExpectedContext() || !running) {
+        setGenerating(body, running);
+      } else {
+        isGenerating = running;
+        if (!running) activeCodexProcess = null;
+      }
+    },
+    onStatus: (text) => {
+      if (isExpectedContext()) showAgentStatus(body, text);
+    },
+    onProcess: (process) => {
+      if (process) {
+        activeCodexProcess = process;
+        activeCodexOwner = {
+          itemId: expectedItemId,
+          sessionId: expectedSessionId,
+        };
+      } else if (
+        activeCodexOwner?.itemId === expectedItemId &&
+        activeCodexOwner.sessionId === expectedSessionId
+      ) {
+        activeCodexProcess = null;
+        activeCodexOwner = null;
+      }
+    },
+  };
+}
+
+function handleActionCardCommand(
+  body: HTMLElement,
+  itemId: number,
+  actionId: string,
+  command: ActionCardCommand,
+) {
+  const found = chatStore.findAction(actionId);
+  if (!found) return;
+  if (command === "view") {
+    void openActionTarget(body, found.action);
+    return;
+  }
+  if (command === "cancel") {
+    getChatSendFlow(body).cancel(itemId, found.sessionId);
+    if (getChatSendFlow(body).isActive(itemId, found.sessionId)) {
+      renderMessages(body, itemId);
+      return;
+    }
+    setGenerating(body, false);
+    renderMessages(body, itemId);
+    return;
+  }
+  if (command === "undo") return;
+  void getChatSendFlow(body).decide(
+    actionId,
+    command,
+    createChatFlowSink(body, found.itemId, found.sessionId),
+  );
+}
+
+async function openActionTarget(
+  body: HTMLElement,
+  action: NonNullable<ChatMessage["action"]>,
+) {
+  switchChatView(body, "memory", false);
+  await renderMemoryDetail(
+    body,
+    action.target?.itemKey || action.request.itemKey,
+    action.request.paperTitle,
+  );
+  body
+    .querySelector("#zoteroagent-memory-reader-thinking")
+    ?.scrollIntoView({ block: "start" });
+}
+
+function getCommandPanel(body: HTMLElement): HTMLElement | null {
+  return body.querySelector("#zoteroagent-command-panel") as HTMLElement | null;
+}
+
+function hideCommandMenu(body: HTMLElement) {
+  const panel = getCommandPanel(body);
+  if (!panel) return;
+  panel.style.display = "none";
+  panel.dataset.activeIndex = "0";
+  panel.replaceChildren();
+}
+
+function updateCommandMenu(body: HTMLElement) {
+  const input = body.querySelector(
+    "#zoteroagent-chat-input",
+  ) as HTMLTextAreaElement | null;
+  const panel = getCommandPanel(body);
+  if (!input || !panel) return;
+  const items = getCommandMenuItems(input.value);
+  panel.replaceChildren();
+  if (!items.length) {
+    hideCommandMenu(body);
+    return;
+  }
+  const doc = body.ownerDocument;
+  items.forEach((item, index) => {
+    const row = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
+    row.type = "button";
+    row.className = `zoteroagent-command-item${index === 0 ? " is-active" : ""}`;
+    row.dataset.index = String(index);
+    const command = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    command.className = "zoteroagent-command-name";
+    command.textContent = item.command;
+    const description = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    description.className = "zoteroagent-command-description";
+    description.textContent = item.description;
+    row.appendChild(command);
+    row.appendChild(description);
+    row.addEventListener("mousedown", (event) => event.preventDefault());
+    row.addEventListener("click", () => {
+      applyCommandTemplate(input, item.template);
+      hideCommandMenu(body);
+    });
+    panel.appendChild(row);
+  });
+  panel.dataset.activeIndex = "0";
+  panel.style.display = "flex";
+}
+
+function handleCommandMenuKeyDown(
+  body: HTMLElement,
+  event: KeyboardEvent,
+): boolean {
+  const panel = getCommandPanel(body);
+  if (!panel || panel.style.display === "none") return false;
+  const items = Array.from(
+    panel.querySelectorAll(".zoteroagent-command-item"),
+  ) as HTMLButtonElement[];
+  if (!items.length) return false;
+  let active = Number(panel.dataset.activeIndex || 0);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    active = (active + delta + items.length) % items.length;
+    panel.dataset.activeIndex = String(active);
+    items.forEach((item, index) =>
+      item.classList.toggle("is-active", index === active),
+    );
+    return true;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideCommandMenu(body);
+    return true;
+  }
+  if (event.key !== "Enter") return false;
+  event.preventDefault();
+  items[active]?.click();
+  return true;
+}
+
+function applyCommandTemplate(input: HTMLTextAreaElement, template: string) {
+  const result = insertCommandTemplate(
+    input.value,
+    0,
+    input.value.length,
+    template,
+  );
+  input.value = result.value;
+  input.setSelectionRange(result.cursor, result.cursor);
+  autoResizeTextarea(input);
+  input.focus();
 }
 
 function getMentionPanel(body: HTMLElement): HTMLElement | null {

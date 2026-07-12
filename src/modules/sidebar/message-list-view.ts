@@ -11,6 +11,7 @@ import {
   buildTurnFooter,
   openTurnDetail,
 } from "./turn-details-view";
+import { buildAgentActionCard, type ActionCardCommand } from "./action-card";
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -46,6 +47,7 @@ export type MessageListRenderOptions = {
     itemId: number,
   ) => HTMLElement;
   onSuggestion: (suggestion: string) => void;
+  onActionCommand: (actionId: string, command: ActionCardCommand) => void;
   syncSessionHeader: () => void;
 };
 
@@ -111,6 +113,14 @@ function buildMessage(
   } else {
     options.renderUserMessage(content, message, body);
     main.appendChild(content);
+  }
+
+  if (message.role === "assistant" && message.action) {
+    main.appendChild(
+      buildAgentActionCard(doc, message.action, (command) =>
+        options.onActionCommand(message.action!.id, command),
+      ),
+    );
   }
 
   if (message.role === "assistant" && message.keywordSuggestions?.length) {

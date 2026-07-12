@@ -34,10 +34,19 @@ export {
 
 export {
   CodexTurnError,
+  buildCodexArgs,
   runCodexTurn,
   type CodexTurnInput,
   type CodexTurnResult,
 } from "./runner";
+
+export {
+  buildStructuredCodexArgs,
+  parseStructuredCodexContent,
+  runStructuredCodexTurn,
+  type JsonSchema,
+  type StructuredCodexTurnInput,
+} from "./structured";
 
 export {
   CODEX_CONTEXT_WINDOW_PREF,
@@ -71,9 +80,13 @@ export {
   appendConversationTurn,
   appendPaperNote,
   acceptPaperKeyword,
+  assertVaultPathsClean,
+  captureVaultTextFiles,
   CODEX_VAULT_PATH_PREF,
   commitVaultChanges,
+  commitVaultPaths,
   ensurePaperVault,
+  ensureVaultWorkflowSkills,
   getConfiguredVaultPath,
   getDefaultVaultPath,
   getPaperVaultPaths,
@@ -87,6 +100,7 @@ export {
   readPaperNotes,
   readPaperText,
   refreshPaperRecordProjection,
+  restoreVaultTextFiles,
   searchVaultMemory,
   setConfiguredVaultPath,
   updatePaperRating,
@@ -99,4 +113,6 @@ export {
   type PaperVaultPaths,
   type SemanticRelationship,
   type VaultSearchHit,
+  type VaultTextFileSnapshot,
+  normalizeVaultCommitPaths,
 } from "./vault";

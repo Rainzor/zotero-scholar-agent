@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CURRENT_VAULT_MANIFEST,
+  isCurrentVaultManifest,
   mergeVaultGitignore,
   normalizeVaultManifest,
 } from "../src/services/codex/vault-manifest";
@@ -11,6 +12,7 @@ describe("Vault manifest", () => {
       schemaVersion: 1,
       knowledgeSurfaceVersion: 2,
       recordProjectionVersion: 3,
+      workflowSkillVersion: 1,
     });
     expect(normalizeVaultManifest(null)).toEqual(CURRENT_VAULT_MANIFEST);
     expect(
@@ -39,5 +41,15 @@ describe("Vault manifest", () => {
     expect(() => normalizeVaultManifest({ schemaVersion: 2 })).toThrow(
       "newer than supported",
     );
+  });
+
+  it("treats an older workflow Skill version as uncommitted", () => {
+    expect(
+      isCurrentVaultManifest({
+        ...CURRENT_VAULT_MANIFEST,
+        workflowSkillVersion: 0,
+      }),
+    ).toBe(false);
+    expect(isCurrentVaultManifest(CURRENT_VAULT_MANIFEST)).toBe(true);
   });
 });
