@@ -34,8 +34,10 @@ import {
 import { diffRelationships } from "./relationships";
 import {
   evaluateKnowledgeSurface,
+  isUnbuiltSkeleton,
   type KnowledgeQualityReport,
 } from "../knowledge-quality";
+import { runPaperColdStart, type PaperColdStartRequest } from "../cold-start";
 import { extractKeywordSuggestions } from "../keyword-suggestions";
 import { extractTierSuggestion } from "../tier-suggestions";
 import {
@@ -102,6 +104,7 @@ export type ResearchTurnDeps = {
   appendConversationTurn: typeof appendConversationTurn;
   commitVaultChanges: typeof commitVaultChanges;
   appendVaultLog: typeof appendVaultLog;
+  runColdStart: typeof runPaperColdStart;
 };
 
 const defaultDeps: ResearchTurnDeps = {
@@ -114,6 +117,7 @@ const defaultDeps: ResearchTurnDeps = {
   appendConversationTurn,
   commitVaultChanges,
   appendVaultLog,
+  runColdStart: runPaperColdStart,
 };
 
 export async function runResearchTurn(
@@ -148,7 +152,13 @@ async function runResearchTurnInner(
     onStatus: events.onStatus,
   } satisfies EnsurePaperVaultOptions);
 
-  const memoryBefore = await deps.readPaperMemory(paper.itemKey);
+  const memoryBefore = await autoBuildUnbuiltSkeleton(
+    paper,
+    await deps.readPaperMemory(paper.itemKey),
+    request,
+    events,
+    deps,
+  );
   const relationshipsBefore = await deps.refreshPaperRecordProjection(paper);
   const mentionedContexts = await buildMentionedPaperContexts(
     request.mentionedPapers,
@@ -359,6 +369,54 @@ async function buildMentionedPaperContexts(
     });
   }
   return contexts;
+}
+
+async function autoBuildUnbuiltSkeleton(
+  paper: PaperVaultMeta,
+  memory: string,
+  request: ResearchTurnRequest,
+  events: ResearchTurnEvents,
+  deps: ResearchTurnDeps,
+): Promise<string> {
+  const quality = evaluateKnowledgeSurface({
+    after: memory,
+    itemKey: paper.itemKey,
+  });
+  // Require the plugin-owned block as well as the section-emptiness signal:
+  // every real paper directory gets this block from `ensurePaperVault`, so
+  // its absence means `memory` isn't a genuine (if unbuilt) Knowledge
+  // Surface — avoids treating arbitrary/malformed content as a skeleton.
+  if (
+    !memory.includes(KNOWLEDGE_SURFACE_PLUGIN_START) ||
+    !isUnbuiltSkeleton(quality)
+  ) {
+    return memory;
+  }
+  events.onStatus?.("Building paper record before answering...");
+  try {
+    await deps.runColdStart(
+      {
+        paper,
+        pdfItemId: request.pdfItemId,
+        model: request.session.modelSlug,
+        reasoningEffort: request.session.reasoningEffort,
+        linkRelationships: true,
+      } satisfies PaperColdStartRequest,
+      { onStatus: events.onStatus, onProcess: events.onProcess },
+    );
+  } catch (error) {
+    await deps.appendVaultLog(
+      "auto-cold-start-failed",
+      "Automatic Knowledge Record build failed before a research turn; proceeding with the original question anyway.",
+      {
+        itemKey: paper.itemKey,
+        sessionId: request.session.sessionId,
+        error: errorMessage(error),
+      },
+    );
+    return memory;
+  }
+  return deps.readPaperMemory(paper.itemKey);
 }
 
 function shouldRetryAsFreshThread(error: unknown, threadId: string): boolean {

@@ -180,6 +180,16 @@ export function evaluateKnowledgeSurface(options: {
   };
 }
 
+export function isUnbuiltSkeleton(
+  quality: Pick<KnowledgeQualityReport, "coreSections">,
+): boolean {
+  return (
+    quality.coreSections.missing.length +
+      quality.coreSections.placeholder.length >=
+    4
+  );
+}
+
 function stripPluginOwnedContent(markdown: string): string {
   return String(markdown || "").replace(
     /<!--\s*zotero-agent:paper:start\s*-->[\s\S]*?<!--\s*zotero-agent:paper:end\s*-->/gi,

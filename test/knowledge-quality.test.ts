@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { evaluateKnowledgeSurface } from "../src/services/knowledge-quality";
+import {
+  evaluateKnowledgeSurface,
+  isUnbuiltSkeleton,
+} from "../src/services/knowledge-quality";
 
 const COMPLETE = `# Paper
 
@@ -31,6 +34,19 @@ Reusable takeaway.
 ### Semantic Relationships
 
 ## Evidence Pointers
+`;
+
+const L1_SKELETON = `# Paper
+
+## TL;DR
+
+## Contribution
+
+## Method
+
+## Takeaways
+
+## Library Connections
 `;
 
 describe("evaluateKnowledgeSurface", () => {
@@ -246,5 +262,20 @@ Takeaway.
       "Results",
       "Library Connections",
     ]);
+  });
+});
+
+describe("isUnbuiltSkeleton", () => {
+  it("is true for a fresh, never-touched L1 skeleton", () => {
+    const report = evaluateKnowledgeSurface({ after: L1_SKELETON });
+    expect(isUnbuiltSkeleton(report)).toBe(true);
+  });
+
+  it("is false once the record has real content", () => {
+    const report = evaluateKnowledgeSurface({
+      after: COMPLETE,
+      sourceAbstract: "Source abstract.",
+    });
+    expect(isUnbuiltSkeleton(report)).toBe(false);
   });
 });

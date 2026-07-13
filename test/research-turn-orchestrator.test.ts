@@ -66,6 +66,11 @@ function deps(overrides: Partial<ResearchTurnDeps> = {}): ResearchTurnDeps {
     appendConversationTurn: async () => undefined,
     commitVaultChanges: async () => true,
     appendVaultLog: async () => undefined,
+    runColdStart: async () => {
+      throw new Error(
+        "runColdStart should not be called for these test fixtures (no plugin block present)",
+      );
+    },
   };
   return { ...defaults, ...overrides };
 }
@@ -373,5 +378,124 @@ describe("runResearchTurn", () => {
     );
     expect(outcome.content).toBe("Answer.");
     expect(outcome.keywordSuggestions).toEqual(["diffusion", "causal video"]);
+  });
+});
+
+const SKELETON_WITH_PLUGIN_BLOCK = `<!-- zotero-agent:paper:start -->
+## Bibliography
+Title: Paper
+<!-- zotero-agent:paper:end -->
+
+## TL;DR
+
+## Contribution
+
+## Method
+
+## Takeaways
+
+## Library Connections
+`;
+
+const BUILT_MEMORY_WITH_PLUGIN_BLOCK = `<!-- zotero-agent:paper:start -->
+## Bibliography
+Title: Paper
+<!-- zotero-agent:paper:end -->
+
+## TL;DR
+Summary.
+
+## Contribution
+Advances X.
+
+## Method
+Does Y.
+
+## Takeaways
+Reuse Z.
+
+## Library Connections
+`;
+
+describe("auto-building an unbuilt skeleton before a research turn", () => {
+  it("runs cold start first when memory is an unbuilt skeleton, then proceeds", async () => {
+    const calls: string[] = [];
+    let memoryReads = 0;
+    const statuses: string[] = [];
+    await runResearchTurn(
+      request(),
+      { onStatus: (text) => statuses.push(text) },
+      deps({
+        readPaperMemory: async () => {
+          calls.push("memory");
+          memoryReads++;
+          return memoryReads === 1
+            ? SKELETON_WITH_PLUGIN_BLOCK
+            : BUILT_MEMORY_WITH_PLUGIN_BLOCK;
+        },
+        runColdStart: async (coldStartRequest) => {
+          calls.push("cold-start");
+          expect(coldStartRequest.paper.itemKey).toBe("ITEM1");
+          return {
+            quality: {} as any,
+            relationshipProposals: [],
+            committed: true,
+          };
+        },
+        runCodexTurn: async () => {
+          calls.push("run");
+          return { content: "answer", reasoning: "", threadId: "thread-1" };
+        },
+      }),
+    );
+    expect(calls.indexOf("cold-start")).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf("cold-start")).toBeLessThan(calls.indexOf("run"));
+    expect(statuses).toContain("Building paper record before answering...");
+  });
+
+  it("does not run cold start when the record already has content", async () => {
+    const outcome = await runResearchTurn(
+      request(),
+      {},
+      deps({
+        readPaperMemory: async () => BUILT_MEMORY_WITH_PLUGIN_BLOCK,
+        runCodexTurn: async () => ({
+          content: "answer",
+          reasoning: "",
+          threadId: "thread-1",
+        }),
+      }),
+    );
+    expect(outcome.content).toBe("answer");
+  });
+
+  it("proceeds with the original turn even if the auto cold start fails", async () => {
+    const logs: string[] = [];
+    let memoryReads = 0;
+    const outcome = await runResearchTurn(
+      request(),
+      {},
+      deps({
+        readPaperMemory: async () => {
+          memoryReads++;
+          return memoryReads === 1
+            ? SKELETON_WITH_PLUGIN_BLOCK
+            : SKELETON_WITH_PLUGIN_BLOCK;
+        },
+        runColdStart: async () => {
+          throw new Error("cold start failed");
+        },
+        runCodexTurn: async () => ({
+          content: "answer",
+          reasoning: "",
+          threadId: "thread-1",
+        }),
+        appendVaultLog: async (kind) => {
+          logs.push(kind);
+        },
+      }),
+    );
+    expect(outcome.content).toBe("answer");
+    expect(logs).toContain("auto-cold-start-failed");
   });
 });

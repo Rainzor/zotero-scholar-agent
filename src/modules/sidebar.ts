@@ -17,7 +17,10 @@ import {
   type PaperTier,
   type PaperValueType,
 } from "../services/knowledge-surface";
-import { evaluateKnowledgeSurface } from "../services/knowledge-quality";
+import {
+  evaluateKnowledgeSurface,
+  isUnbuiltSkeleton,
+} from "../services/knowledge-quality";
 import { runPaperColdStart } from "../services/cold-start";
 import {
   repairPaperKnowledge,
@@ -940,10 +943,7 @@ function buildColdStartAction(
   const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   button.className = "zoteroagent-cold-start-action";
   button.type = "button";
-  const hasExistingKnowledge =
-    quality.coreSections.missing.length +
-      quality.coreSections.placeholder.length <
-    4;
+  const hasExistingKnowledge = !isUnbuiltSkeleton(quality);
   button.dataset.action = hasExistingKnowledge ? "repair" : "build";
   button.textContent = hasExistingKnowledge
     ? "Repair Knowledge Record"
