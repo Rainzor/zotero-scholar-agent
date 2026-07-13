@@ -680,6 +680,7 @@ function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
 }
 
 async function renderMemoryBrowse(body: HTMLElement) {
+  hideQuotePopup(body);
   const host = getMemoryBodyEl(body);
   if (!host) return;
   const search = body.querySelector(
@@ -2849,6 +2850,7 @@ function updateStreamingMessage(
 ) {
   try {
     if (!isSafeBody(body)) return;
+    hideQuotePopup(body);
     const container = body.querySelector(
       "#zoteroagent-chat-messages",
     ) as HTMLElement | null;
@@ -4046,7 +4048,10 @@ function getAssistantSelection(
   if (!messages || !messages.contains(startBubble)) return null;
 
   const text = String(selection.toString() || "").trim();
-  if (!text) return null;
+  // Require at least two non-whitespace characters: a single stray character
+  // is almost always an accidental sub-pixel drag (e.g. while clicking a
+  // page-citation chip or Send), not an intentional quote.
+  if (text.length < 2) return null;
   const range = selection.getRangeAt(0);
   let rect: DOMRect | null = null;
   try {
@@ -4075,7 +4080,9 @@ function getAssistantSelection(
       rect = allRects[allRects.length - 1] as DOMRect;
     }
   }
-  if (!rect || (!rect.width && !rect.height)) return null;
+  // A genuinely tiny rect (e.g. from a 1px accidental drag) is structurally
+  // "non-degenerate" but not something a human would call a selection.
+  if (!rect || rect.width + rect.height < 4) return null;
   return { text, rect };
 }
 
