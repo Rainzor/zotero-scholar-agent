@@ -41,6 +41,17 @@ text or a quoted reply, Codex organizes it through the
 preserved in its Conversation Log. Both files are saved in one path-scoped
 Vault commit whose receipt is stored on the Action Card.
 
+The local-knowledge slice adds deterministic `/rate 1..5` and structured,
+read-only `/depth L0|L1|L2`. The plugin restores ownership blocks, enforces
+tier-aware quality gates, writes projections, and commits only action-owned
+paths. Memory displays Rating and Depth read-only after their Chat replacements
+ship.
+
+Undo is conservative. Rating and Depth use `git revert --no-edit`; Note appends
+a retraction rather than deleting the original entry. Undo is allowed only
+while Vault `HEAD` is the action commit, so newer research work is never
+silently overwritten.
+
 Memory removes its Add Thought control in this slice. Remaining writable Memory
 controls migrate in later bounded deliveries before Memory becomes fully
 read-only.

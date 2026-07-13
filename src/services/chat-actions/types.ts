@@ -40,10 +40,15 @@ export type NoteContentSource =
   | "message";
 
 export type AgentActionPaperSnapshot = {
+  itemId?: number;
   itemKey: string;
   title: string;
   creators?: string;
   year?: string;
+  abstract?: string;
+  zoteroCollections?: Array<{ key: string; name: string; path: string }>;
+  zoteroTags?: string[];
+  paperKeywords?: string[];
 };
 
 export type AgentActionImageSnapshot = {
@@ -61,6 +66,7 @@ export type AgentActionRequestSnapshot = {
   pdfItemId?: number;
   sessionId: string;
   paperTitle: string;
+  paper?: AgentActionPaperSnapshot;
   text: string;
   conversationText?: string;
   selectedText?: string;
@@ -69,6 +75,8 @@ export type AgentActionRequestSnapshot = {
   images?: AgentActionImageSnapshot[];
   content?: string;
   contentSource?: NoteContentSource;
+  rating?: number;
+  targetTier?: "L0" | "L1" | "L2";
   modelSlug?: string;
   reasoningEffort?: CodexReasoningEffort;
 };
@@ -85,6 +93,7 @@ export type AgentActionResult = {
   section?: string;
   committed?: boolean;
   commitReceipt?: VaultCommitReceipt;
+  undoCommitReceipt?: VaultCommitReceipt;
 };
 
 export type AgentActionCard = {
@@ -232,6 +241,7 @@ export function normalizePersistedAgentAction(
     !ACTION_STATES.includes(action.state as AgentActionState) ||
     !isValidTrigger(action.trigger) ||
     !isValidRequest(action.request) ||
+    !isValidRequestForKind(action.request, action.kind as AgentActionKind) ||
     !Array.isArray(action.capabilities) ||
     !action.capabilities.every((capability) =>
       ACTION_CAPABILITIES.includes(capability),
@@ -263,46 +273,115 @@ function isValidTrigger(
 function isValidRequest(
   value: AgentActionRequestSnapshot | undefined,
 ): boolean {
+  if (
+    !value ||
+    !finiteNumber(value.itemId) ||
+    value.itemId <= 0 ||
+    !nonEmptyString(value.itemKey) ||
+    !nonEmptyString(value.sessionId) ||
+    !nonEmptyString(value.paperTitle) ||
+    typeof value.text !== "string" ||
+    !optionalString(value.conversationText) ||
+    !optionalString(value.selectedText) ||
+    !optionalString(value.responseQuote) ||
+    !optionalString(value.content) ||
+    !optionalString(value.modelSlug)
+  ) {
+    return false;
+  }
+  if (
+    value.pdfItemId !== undefined &&
+    (!Number.isInteger(value.pdfItemId) || value.pdfItemId < 0)
+  ) {
+    return false;
+  }
+  if (
+    value.rating !== undefined &&
+    (!Number.isInteger(value.rating) || value.rating < 1 || value.rating > 5)
+  ) {
+    return false;
+  }
+  if (
+    value.targetTier !== undefined &&
+    value.targetTier !== "L0" &&
+    value.targetTier !== "L1" &&
+    value.targetTier !== "L2"
+  ) {
+    return false;
+  }
+  if (
+    value.contentSource !== undefined &&
+    !NOTE_CONTENT_SOURCES.includes(value.contentSource)
+  ) {
+    return false;
+  }
+  if (
+    value.reasoningEffort !== undefined &&
+    !REASONING_EFFORTS.includes(value.reasoningEffort)
+  ) {
+    return false;
+  }
+  if (value.paper && !isValidPaperSnapshot(value.paper)) return false;
+  if (
+    value.mentionedPapers &&
+    (!Array.isArray(value.mentionedPapers) ||
+      !value.mentionedPapers.every(isValidMentionedPaper))
+  ) {
+    return false;
+  }
+  if (
+    value.images &&
+    (!Array.isArray(value.images) || !value.images.every(isValidImageSnapshot))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isValidPaperSnapshot(paper: AgentActionPaperSnapshot): boolean {
   return Boolean(
-    value &&
-    finiteNumber(value.itemId) &&
-    value.itemId > 0 &&
-    nonEmptyString(value.itemKey) &&
-    nonEmptyString(value.sessionId) &&
-    nonEmptyString(value.paperTitle) &&
-    typeof value.text === "string" &&
-    optionalString(value.conversationText) &&
-    optionalString(value.selectedText) &&
-    optionalString(value.responseQuote) &&
-    optionalString(value.content) &&
-    (value.pdfItemId === undefined ||
-      (Number.isInteger(value.pdfItemId) && value.pdfItemId >= 0)) &&
-    (value.contentSource === undefined ||
-      NOTE_CONTENT_SOURCES.includes(value.contentSource)) &&
-    optionalString(value.modelSlug) &&
-    (value.reasoningEffort === undefined ||
-      REASONING_EFFORTS.includes(value.reasoningEffort)) &&
-    (!value.mentionedPapers ||
-      (Array.isArray(value.mentionedPapers) &&
-        value.mentionedPapers.every(
-          (paper) =>
-            nonEmptyString(paper?.itemKey) &&
-            nonEmptyString(paper?.title) &&
-            optionalString(paper?.creators) &&
-            optionalString(paper?.year),
+    finiteNumber(paper.itemId) &&
+    Number(paper.itemId) > 0 &&
+    nonEmptyString(paper.itemKey) &&
+    nonEmptyString(paper.title) &&
+    optionalString(paper.creators) &&
+    optionalString(paper.year) &&
+    optionalString(paper.abstract) &&
+    (!paper.zoteroCollections ||
+      (Array.isArray(paper.zoteroCollections) &&
+        paper.zoteroCollections.every(
+          (collection) =>
+            nonEmptyString(collection?.key) &&
+            nonEmptyString(collection?.name) &&
+            typeof collection?.path === "string",
         ))) &&
-    (!value.images ||
-      (Array.isArray(value.images) &&
-        value.images.every(
-          (image) =>
-            nonEmptyString(image?.id) &&
-            nonEmptyString(image?.relativePath) &&
-            nonEmptyString(image?.name) &&
-            nonEmptyString(image?.mimeType) &&
-            optionalString(image?.sessionId) &&
-            (image?.pageNumber === undefined ||
-              (Number.isInteger(image.pageNumber) && image.pageNumber > 0)),
-        ))),
+    (!paper.zoteroTags ||
+      (Array.isArray(paper.zoteroTags) &&
+        paper.zoteroTags.every(nonEmptyString))) &&
+    (!paper.paperKeywords ||
+      (Array.isArray(paper.paperKeywords) &&
+        paper.paperKeywords.every(nonEmptyString))),
+  );
+}
+
+function isValidMentionedPaper(paper: AgentActionPaperSnapshot): boolean {
+  return Boolean(
+    nonEmptyString(paper?.itemKey) &&
+    nonEmptyString(paper?.title) &&
+    optionalString(paper?.creators) &&
+    optionalString(paper?.year),
+  );
+}
+
+function isValidImageSnapshot(image: AgentActionImageSnapshot): boolean {
+  return Boolean(
+    nonEmptyString(image?.id) &&
+    nonEmptyString(image?.relativePath) &&
+    nonEmptyString(image?.name) &&
+    nonEmptyString(image?.mimeType) &&
+    optionalString(image?.sessionId) &&
+    (image?.pageNumber === undefined ||
+      (Number.isInteger(image.pageNumber) && image.pageNumber > 0)),
   );
 }
 
@@ -318,6 +397,14 @@ function isValidTarget(
       (value.section === undefined || typeof value.section === "string"),
     );
   }
+  if (kind === "paper.rating.set" || kind === "paper.depth.set") {
+    return Boolean(
+      value &&
+      nonEmptyString(value.itemKey) &&
+      value.path === `${value.itemKey}/memory.md` &&
+      value.section === "Overview",
+    );
+  }
   return Boolean(
     !value ||
     (nonEmptyString(value.itemKey) &&
@@ -327,15 +414,18 @@ function isValidTarget(
 }
 
 function isValidStatePayload(action: AgentActionCard): boolean {
-  if (action.state === "completed") {
+  if (action.state === "completed" || action.state === "undone") {
     return Boolean(
       action.result &&
       nonEmptyString(action.result.summary) &&
       (!action.result.commitReceipt ||
-        (nonEmptyString(action.result.commitReceipt.commitSha) &&
-          typeof action.result.commitReceipt.parentSha === "string" &&
-          Array.isArray(action.result.commitReceipt.changedPaths) &&
-          action.result.commitReceipt.changedPaths.every(nonEmptyString))),
+        (isValidCommitReceipt(action.result.commitReceipt) &&
+          isValidActionCommitPaths(
+            action,
+            action.result.commitReceipt.changedPaths,
+          ))) &&
+      (!action.result.undoCommitReceipt ||
+        isValidCommitReceipt(action.result.undoCommitReceipt)),
     );
   }
   if (action.state === "failed" || action.state === "cancelled") {
@@ -349,6 +439,84 @@ function isValidStatePayload(action: AgentActionCard): boolean {
   return true;
 }
 
+function isValidCommitReceipt(receipt: VaultCommitReceipt): boolean {
+  return Boolean(
+    isFullGitObjectId(receipt.commitSha) &&
+    isFullGitObjectId(receipt.parentSha) &&
+    Array.isArray(receipt.changedPaths) &&
+    receipt.changedPaths.length > 0 &&
+    receipt.changedPaths.every(isSafeVaultRelativePath),
+  );
+}
+
+function isValidActionCommitPaths(
+  action: Pick<AgentActionCard, "kind" | "request">,
+  paths: string[],
+): boolean {
+  if (!paths.every(isSafeVaultRelativePath)) return false;
+  const itemKey = action.request.itemKey;
+  const conversationPath = `${itemKey}/conversations/${safeSessionSegment(
+    action.request.sessionId,
+  )}.md`;
+  if (action.kind === "note.organize") {
+    return sameStringSet(paths, [`${itemKey}/notes.md`, conversationPath]);
+  }
+  if (action.kind === "paper.rating.set") {
+    return sameStringSet(paths, [
+      `${itemKey}/memory.md`,
+      `${itemKey}/record.json`,
+      "README.md",
+      conversationPath,
+    ]);
+  }
+  if (action.kind === "paper.depth.set") {
+    const required = new Set([
+      `${itemKey}/memory.md`,
+      `${itemKey}/record.json`,
+      conversationPath,
+    ]);
+    const actual = new Set(paths);
+    if (![...required].every((path) => actual.has(path))) return false;
+    return paths.every(
+      (path) =>
+        required.has(path) ||
+        path === `${itemKey}/code-notes.md` ||
+        path.startsWith(`${itemKey}/experiments/`),
+    );
+  }
+  return true;
+}
+
+function isFullGitObjectId(value: string): boolean {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value);
+}
+
+function isSafeVaultRelativePath(value: string): boolean {
+  if (!nonEmptyString(value)) return false;
+  const path = value.replace(/\\/g, "/");
+  const segments = path.split("/");
+  return Boolean(
+    path === value &&
+    !path.startsWith("/") &&
+    !path.startsWith(":") &&
+    /^[a-zA-Z0-9._/-]+$/.test(path) &&
+    segments.every(
+      (segment) =>
+        segment && segment !== "." && segment !== ".." && segment !== ".git",
+    ),
+  );
+}
+
+function sameStringSet(left: string[], right: string[]): boolean {
+  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+}
+
+function safeSessionSegment(input: string): string {
+  return String(input || "unknown")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -359,4 +527,32 @@ function finiteNumber(value: unknown): value is number {
 
 function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
+}
+
+function isValidRequestForKind(
+  request: AgentActionRequestSnapshot | undefined,
+  kind: AgentActionKind,
+): boolean {
+  if (!request) return false;
+  if (kind === "paper.rating.set") {
+    return Boolean(
+      request.paper &&
+      request.paper.itemId === request.itemId &&
+      request.paper.itemKey === request.itemKey &&
+      Number.isInteger(request.rating) &&
+      Number(request.rating) >= 1 &&
+      Number(request.rating) <= 5,
+    );
+  }
+  if (kind === "paper.depth.set") {
+    return Boolean(
+      request.paper &&
+      request.paper.itemId === request.itemId &&
+      request.paper.itemKey === request.itemKey &&
+      (request.targetTier === "L0" ||
+        request.targetTier === "L1" ||
+        request.targetTier === "L2"),
+    );
+  }
+  return true;
 }

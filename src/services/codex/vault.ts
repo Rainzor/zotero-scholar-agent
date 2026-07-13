@@ -274,11 +274,15 @@ export async function updatePaperSignals(
 export async function updatePaperRating(
   paper: PaperVaultMeta,
   rating: number | null,
-): Promise<void> {
+  options: { commit?: boolean } = {},
+): Promise<boolean> {
   const changed = await updatePaperSignals(paper, { rating });
-  if (!changed) return;
+  if (!changed) return false;
   await updateReadme({ ...paper, rating });
-  await commitVaultChanges(`rating: ${paper.itemKey}`);
+  if (options.commit !== false) {
+    await commitVaultChanges(`rating: ${paper.itemKey}`);
+  }
+  return true;
 }
 
 export async function updatePaperValueTypes(
@@ -937,6 +941,8 @@ export async function commitVaultChanges(message: string): Promise<boolean> {
 export async function commitVaultPaths(
   message: string,
   paths: string[],
+  expectedParentSha = "",
+  requireAllPaths = false,
 ): Promise<{
   commitSha: string;
   parentSha: string;
@@ -948,6 +954,20 @@ export async function commitVaultPaths(
   if (!scopedPaths.length) {
     throw new Error("A path-scoped Vault commit requires at least one path.");
   }
+  const stagedBefore = await runGit(
+    vaultDir,
+    ["diff", "--cached", "--quiet"],
+    30000,
+    true,
+  );
+  if (stagedBefore.exitCode !== 0) {
+    throw new Error("Vault has staged changes.");
+  }
+  const parent = await runGit(vaultDir, ["rev-parse", "HEAD"], 30000, true);
+  const parentSha = parent.exitCode === 0 ? parent.stdout.trim() : "";
+  if (expectedParentSha && parentSha !== expectedParentSha) {
+    throw new Error("Vault has newer updates.");
+  }
   await runGit(vaultDir, ["add", "--", ...scopedPaths]);
   const diff = await runGit(
     vaultDir,
@@ -955,47 +975,85 @@ export async function commitVaultPaths(
     30000,
     true,
   );
-  if (diff.exitCode === 0) return null;
-  const parent = await runGit(vaultDir, ["rev-parse", "HEAD"], 30000, true);
-  const commit = await runGit(
-    vaultDir,
-    [
-      "-c",
-      "user.name=zotero-agent",
-      "-c",
-      "user.email=agent@local",
-      "commit",
-      "--only",
-      "-m",
-      message,
-      "--",
-      ...scopedPaths,
-    ],
-    120000,
-    true,
-  );
+  if (diff.exitCode === 0) {
+    return null;
+  }
+  const stagedPathsResult = await runGit(vaultDir, [
+    "diff",
+    "--cached",
+    "--name-only",
+    "--",
+    ...scopedPaths,
+  ]);
+  const stagedPaths = stagedPathsResult.stdout
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .sort();
+  const expectedPaths = [...scopedPaths].sort();
+  if (
+    requireAllPaths &&
+    JSON.stringify(stagedPaths) !== JSON.stringify(expectedPaths)
+  ) {
+    await runGit(vaultDir, ["reset", "--", ...scopedPaths], 30000, true);
+    throw new Error("Not every action-owned Vault path changed.");
+  }
+  const tree = await runGit(vaultDir, ["write-tree"]);
+  const commitArgs = [
+    "-c",
+    "user.name=zotero-agent",
+    "-c",
+    "user.email=agent@local",
+    "commit-tree",
+    tree.stdout.trim(),
+    ...(parentSha ? ["-p", parentSha] : []),
+    "-m",
+    message,
+  ];
+  const commit = await runGit(vaultDir, commitArgs, 120000, true);
   if (commit.exitCode !== 0) {
+    await runGit(vaultDir, ["reset", "--", ...scopedPaths], 30000, true);
     throw new Error(
       commit.stderr || commit.stdout || "Path-scoped Vault commit failed.",
     );
   }
-  const head = await runGit(vaultDir, ["rev-parse", "HEAD"]);
+  const commitSha = commit.stdout.trim();
+  const updateRef = await runGit(
+    vaultDir,
+    [
+      "update-ref",
+      "HEAD",
+      commitSha,
+      parentSha || "0000000000000000000000000000000000000000",
+    ],
+    30000,
+    true,
+  );
+  if (updateRef.exitCode !== 0) {
+    await runGit(vaultDir, ["reset", "--", ...scopedPaths], 30000, true);
+    throw new Error("Vault has newer updates.");
+  }
   const changed = await runGit(vaultDir, [
     "diff-tree",
     "--root",
     "--no-commit-id",
     "--name-only",
     "-r",
-    "HEAD",
+    commitSha,
   ]);
-  return {
-    commitSha: head.stdout.trim(),
-    parentSha: parent.exitCode === 0 ? parent.stdout.trim() : "",
+  const receipt = {
+    commitSha,
+    parentSha,
     changedPaths: changed.stdout
       .split(/\r?\n/)
       .map((path) => path.trim())
       .filter(Boolean),
   };
+  const actualPaths = [...receipt.changedPaths].sort();
+  if (actualPaths.some((path) => !expectedPaths.includes(path))) {
+    throw new Error("Vault action commit paths do not match.");
+  }
+  return receipt;
 }
 
 export async function assertVaultPathsClean(paths: string[]): Promise<void> {
@@ -1047,6 +1105,207 @@ export function normalizeVaultCommitPaths(paths: string[]): string[] {
   return [...normalized];
 }
 
+export function canUndoVaultAction(
+  headSha: string,
+  actionCommitSha: string,
+): { allowed: true } | { allowed: false; reason: string } {
+  return headSha === actionCommitSha
+    ? { allowed: true }
+    : { allowed: false, reason: "Vault has newer updates." };
+}
+
+export async function getVaultHeadSha(): Promise<string> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const result = await runGit(vaultDir, ["rev-parse", "HEAD"]);
+  return result.stdout.trim();
+}
+
+export async function verifyVaultCommitReceipt(receipt: {
+  commitSha: string;
+  parentSha: string;
+  changedPaths: string[];
+}): Promise<void> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  if (
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(receipt.commitSha) ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(receipt.parentSha)
+  ) {
+    throw new Error("Invalid Vault commit receipt.");
+  }
+  const parent = await runGit(
+    vaultDir,
+    ["rev-parse", `${receipt.commitSha}^`],
+    30000,
+    true,
+  );
+  if (parent.exitCode !== 0 || parent.stdout.trim() !== receipt.parentSha) {
+    throw new Error("Vault action commit parent does not match.");
+  }
+  const changed = await runGit(vaultDir, [
+    "diff-tree",
+    "--root",
+    "--no-commit-id",
+    "--name-only",
+    "-r",
+    receipt.commitSha,
+  ]);
+  const expectedPaths = normalizeVaultCommitPaths(receipt.changedPaths).sort();
+  const actualPaths = changed.stdout
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .sort();
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error("Vault action commit paths do not match.");
+  }
+}
+
+export async function revertVaultCommit(
+  actionCommitSha: string,
+  changedPaths: string[] = [],
+  expectedParentSha = "",
+): Promise<{
+  commitSha: string;
+  parentSha: string;
+  changedPaths: string[];
+}> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const head = await getVaultHeadSha();
+  const allowed = canUndoVaultAction(head, actionCommitSha);
+  if (!allowed.allowed) throw new Error(allowed.reason);
+  const existingRevert = await runGit(
+    vaultDir,
+    ["rev-parse", "-q", "--verify", "REVERT_HEAD"],
+    30000,
+    true,
+  );
+  if (existingRevert.exitCode === 0) {
+    throw new Error("Vault has an unfinished revert.");
+  }
+  const expectedPaths = normalizeVaultCommitPaths(changedPaths).sort();
+  await verifyVaultCommitReceipt({
+    commitSha: actionCommitSha,
+    parentSha: expectedParentSha,
+    changedPaths: expectedPaths,
+  });
+  if (expectedPaths.length) {
+    await assertVaultPathsClean(expectedPaths);
+  }
+  const stagedBefore = await runGit(
+    vaultDir,
+    ["diff", "--cached", "--quiet"],
+    30000,
+    true,
+  );
+  if (stagedBefore.exitCode !== 0) {
+    throw new Error("Vault has staged changes.");
+  }
+  const revert = await runGit(
+    vaultDir,
+    ["revert", "--no-commit", actionCommitSha],
+    120000,
+    true,
+  );
+  if (revert.exitCode !== 0) {
+    const revertHead = await runGit(
+      vaultDir,
+      ["rev-parse", "-q", "--verify", "REVERT_HEAD"],
+      30000,
+      true,
+    );
+    if (revertHead.exitCode === 0) {
+      await runGit(vaultDir, ["revert", "--quit"], 30000, true);
+    }
+    await restoreVaultPathsFromHead(expectedPaths);
+    throw new Error(revert.stderr || revert.stdout || "Vault revert failed.");
+  }
+  const tree = await runGit(vaultDir, ["write-tree"]);
+  const commit = await runGit(
+    vaultDir,
+    [
+      "-c",
+      "user.name=zotero-agent",
+      "-c",
+      "user.email=agent@local",
+      "commit-tree",
+      tree.stdout.trim(),
+      "-p",
+      actionCommitSha,
+      "-m",
+      `Revert ${actionCommitSha}`,
+    ],
+    120000,
+    true,
+  );
+  if (commit.exitCode !== 0) {
+    await runGit(vaultDir, ["revert", "--quit"], 30000, true);
+    await restoreVaultPathsFromHead(expectedPaths);
+    throw new Error(commit.stderr || "Could not create Vault revert commit.");
+  }
+  const commitSha = commit.stdout.trim();
+  const updateRef = await runGit(
+    vaultDir,
+    ["update-ref", "HEAD", commitSha, actionCommitSha],
+    30000,
+    true,
+  );
+  if (updateRef.exitCode !== 0) {
+    await runGit(vaultDir, ["revert", "--quit"], 30000, true);
+    await restoreVaultPathsFromHead(expectedPaths);
+    throw new Error("Vault has newer updates.");
+  }
+  await runGit(vaultDir, ["revert", "--quit"], 30000, true);
+  const changed = await runGit(vaultDir, [
+    "diff-tree",
+    "--root",
+    "--no-commit-id",
+    "--name-only",
+    "-r",
+    commitSha,
+  ]);
+  return {
+    commitSha,
+    parentSha: head,
+    changedPaths: changed.stdout
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter(Boolean),
+  };
+}
+
+export async function listPaperReproductionArtifactPaths(
+  itemKey: string,
+): Promise<string[]> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const prefix = safePathSegment(itemKey);
+  const result = await runGit(
+    vaultDir,
+    ["ls-files", "--", `${prefix}/code-notes.md`, `${prefix}/experiments`],
+    30000,
+    true,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || "Could not list L3 artifacts.");
+  }
+  return result.stdout
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+}
+
+export async function removeVaultPaths(paths: string[]): Promise<void> {
+  const vaultDir = await getVaultDir();
+  for (const relativePath of normalizeVaultCommitPaths(paths)) {
+    await getIOUtils().remove(joinPath(vaultDir, ...relativePath.split("/")), {
+      ignoreAbsent: true,
+    });
+  }
+}
+
 export type VaultTextFileSnapshot = {
   relativePath: string;
   existed: boolean;
@@ -1088,6 +1347,45 @@ export async function restoreVaultTextFiles(
     }
   }
   await runGit(vaultDir, ["reset", "--", ...paths], 30000, true);
+}
+
+export async function restoreVaultPathsFromHead(
+  paths: string[],
+): Promise<void> {
+  const vaultDir = await getVaultDir();
+  await ensureGitRepo(vaultDir);
+  const normalized = normalizeVaultCommitPaths(paths);
+  const trackedResult = await runGit(
+    vaultDir,
+    ["ls-tree", "-r", "--name-only", "HEAD", "--", ...normalized],
+    30000,
+    true,
+  );
+  if (trackedResult.exitCode !== 0) {
+    throw new Error(trackedResult.stderr || "Could not inspect Vault HEAD.");
+  }
+  const tracked = trackedResult.stdout
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+  if (tracked.length) {
+    await runGit(vaultDir, [
+      "restore",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      ...tracked,
+    ]);
+  }
+  const trackedSet = new Set(tracked);
+  for (const relativePath of normalized) {
+    if (trackedSet.has(relativePath)) continue;
+    await getIOUtils().remove(joinPath(vaultDir, ...relativePath.split("/")), {
+      ignoreAbsent: true,
+    });
+  }
+  await runGit(vaultDir, ["reset", "--", ...normalized], 30000, true);
 }
 
 // Vault text comes solely from Zotero's PDFWorker full-text extraction. The

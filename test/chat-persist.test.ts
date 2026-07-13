@@ -293,6 +293,248 @@ describe("normalizePersistedItem", () => {
 
     expect(normalized.sessions[0].messages[0].action).toBeUndefined();
   });
+
+  it("drops local knowledge actions without matching paper parameters", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "paper.rating.set",
+                state: "failed",
+                trigger: { source: "slash-command", text: "/rate 5" },
+                capabilities: ["vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  text: "/rate 5",
+                  rating: 5,
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/memory.md",
+                  section: "Overview",
+                },
+                error: {
+                  code: "interrupted",
+                  message: "Interrupted.",
+                  retryable: true,
+                },
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
+
+  it("drops completed local actions with forged commit paths", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "paper.rating.set",
+                state: "completed",
+                trigger: { source: "slash-command", text: "/rate 5" },
+                capabilities: ["vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  paper: {
+                    itemId: 1,
+                    itemKey: "KEY",
+                    title: "Paper",
+                  },
+                  text: "/rate 5",
+                  rating: 5,
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/memory.md",
+                  section: "Overview",
+                },
+                result: {
+                  summary: "Rating updated.",
+                  commitReceipt: {
+                    commitSha: "a".repeat(40),
+                    parentSha: "b".repeat(40),
+                    changedPaths: ["OTHER/memory.md"],
+                  },
+                },
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
+
+  it("accepts L3-to-L0 receipts with only scoped reproduction artifacts", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "paper.depth.set",
+                state: "completed",
+                trigger: { source: "slash-command", text: "/depth L0" },
+                capabilities: ["codex.read", "vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  paper: {
+                    itemId: 1,
+                    itemKey: "KEY",
+                    title: "Paper",
+                  },
+                  text: "/depth L0",
+                  targetTier: "L0",
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/memory.md",
+                  section: "Overview",
+                },
+                result: {
+                  summary: "Compressed.",
+                  commitReceipt: {
+                    commitSha: "a".repeat(40),
+                    parentSha: "b".repeat(40),
+                    changedPaths: [
+                      "KEY/memory.md",
+                      "KEY/record.json",
+                      "KEY/conversations/chat-1.md",
+                      "KEY/code-notes.md",
+                      "KEY/experiments/run-1.md",
+                    ],
+                  },
+                },
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toMatchObject({
+      state: "completed",
+      request: { targetTier: "L0" },
+    });
+  });
+
+  it("drops receipts with path traversal or abbreviated SHAs", () => {
+    const normalized = normalizePersistedItem({
+      version: 2,
+      itemKey: "KEY",
+      sessions: [
+        {
+          sessionId: "chat-1",
+          title: "Chat",
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              action: {
+                version: 1,
+                id: "action-1",
+                kind: "paper.depth.set",
+                state: "completed",
+                trigger: { source: "slash-command", text: "/depth L0" },
+                capabilities: ["codex.read", "vault.write"],
+                request: {
+                  itemId: 1,
+                  itemKey: "KEY",
+                  sessionId: "chat-1",
+                  paperTitle: "Paper",
+                  paper: {
+                    itemId: 1,
+                    itemKey: "KEY",
+                    title: "Paper",
+                  },
+                  text: "/depth L0",
+                  targetTier: "L0",
+                },
+                target: {
+                  itemKey: "KEY",
+                  path: "KEY/memory.md",
+                  section: "Overview",
+                },
+                result: {
+                  summary: "Compressed.",
+                  commitReceipt: {
+                    commitSha: "abcdef1",
+                    parentSha: "abcdef0",
+                    changedPaths: [
+                      "KEY/memory.md",
+                      "KEY/record.json",
+                      "KEY/conversations/chat-1.md",
+                      "KEY/experiments/../../OTHER",
+                    ],
+                  },
+                },
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+
+    expect(normalized.sessions[0].messages[0].action).toBeUndefined();
+  });
 });
 
 describe("serializeItemState", () => {

@@ -112,7 +112,6 @@ import {
   searchVaultMemory,
   PaperTextUnavailableError,
   acceptPaperKeyword,
-  updatePaperRating,
   updatePaperValueTypes,
   type CodexReasoningEffort,
   type PaperVaultMeta,
@@ -1144,52 +1143,25 @@ function buildPaperSignalBar(
   label.className = "zoteroagent-paper-signals-label";
   label.textContent = "Rating";
   bar.appendChild(label);
-  for (let value = 1; value <= 5; value += 1) {
-    const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
-    button.className = "zoteroagent-rating-star";
-    button.type = "button";
-    button.textContent =
-      value <= Number(signals.rating || 0) ? "\u2605" : "\u2606";
-    button.title = `Rate ${value} of 5`;
-    button.setAttribute("aria-label", button.title);
-    button.addEventListener("click", () => {
-      const next = signals.rating === value ? null : value;
-      void updatePaperRating(paper, next).then(() => {
-        if (isSafeBody(body)) void renderMemoryBrowse(body);
-      });
-    });
-    bar.appendChild(button);
-  }
+  const rating = doc.createElementNS(XHTML, "span") as HTMLElement;
+  rating.className = "zoteroagent-rating-value";
+  rating.textContent = signals.rating
+    ? `${"\u2605".repeat(signals.rating)}${"\u2606".repeat(5 - signals.rating)}`
+    : "Unrated";
+  rating.setAttribute(
+    "aria-label",
+    signals.rating ? `${signals.rating} of 5` : "Unrated",
+  );
+  bar.appendChild(rating);
   const tierLabel = doc.createElementNS(XHTML, "span") as HTMLElement;
   tierLabel.className = "zoteroagent-paper-signals-label";
   tierLabel.textContent = "Depth";
-  const tierSelect = doc.createElementNS(XHTML, "select") as HTMLSelectElement;
-  tierSelect.className = "zoteroagent-paper-tier-select";
-  for (const tier of ["L0", "L1", "L2", "L3"] as PaperTier[]) {
-    const option = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
-    option.value = tier;
-    option.textContent = tier;
-    option.selected = tier === signals.tier;
-    if (tier === "L3" && signals.tier !== "L3") option.disabled = true;
-    if (
-      (signals.tier === "L2" && tier === "L1") ||
-      (signals.tier === "L3" && (tier === "L1" || tier === "L2"))
-    ) {
-      option.disabled = true;
-    }
-    tierSelect.appendChild(option);
-  }
-  tierSelect.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
-  const tierStatus = doc.createElementNS(XHTML, "span") as HTMLElement;
-  tierStatus.className = "zoteroagent-paper-tier-status";
-  tierSelect.addEventListener("change", () => {
-    const target = tierSelect.value as PaperTier;
-    if (target === "L3") return;
-    void startTierTransition(body, paper, target, tierSelect, tierStatus);
-  });
   bar.appendChild(tierLabel);
-  bar.appendChild(tierSelect);
-  bar.appendChild(tierStatus);
+  const tier = doc.createElementNS(XHTML, "span") as HTMLElement;
+  tier.className = "zoteroagent-paper-tier-value";
+  tier.textContent = signals.tier;
+  tier.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
+  bar.appendChild(tier);
   for (const valueType of PAPER_VALUE_TYPES) {
     const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
     button.type = "button";
@@ -1231,48 +1203,6 @@ function valueTypeLabel(valueType: PaperValueType): string {
   if (valueType === "transferable-insight") return "Insight";
   if (valueType === "methodology") return "Methodology";
   return "Canon";
-}
-
-async function startTierTransition(
-  body: HTMLElement,
-  paper: PaperVaultMeta,
-  targetTier: Exclude<PaperTier, "L3">,
-  select: HTMLSelectElement,
-  status: HTMLElement,
-) {
-  if (isGenerating) return;
-  const reader = getActiveReader() || addon.data.popup.currentReader;
-  const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
-  if (pdfItemId <= 0) {
-    status.textContent = "No PDF";
-    return;
-  }
-  setGenerating(body, true);
-  select.disabled = true;
-  const session = chatStore.getSession(paper.itemId);
-  try {
-    const result = await transitionPaperTier({
-      paper,
-      pdfItemId,
-      targetTier,
-      model: session?.modelSlug,
-      reasoningEffort: session?.reasoningEffort,
-      onStatus: (text) => {
-        status.textContent = text;
-      },
-      onProcess: (process) => {
-        activeCodexProcess = process;
-      },
-    });
-    status.textContent =
-      result.quality.status === "passed" ? "Updated" : "Review needed";
-  } catch (error) {
-    status.textContent = error instanceof Error ? error.message : String(error);
-  } finally {
-    select.disabled = false;
-    setGenerating(body, false);
-  }
-  if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
 function buildCodeAnalysisAction(
@@ -3436,7 +3366,13 @@ function handleActionCardCommand(
     renderMessages(body, itemId);
     return;
   }
-  if (command === "undo") return;
+  if (command === "undo") {
+    void getChatSendFlow(body).undo(
+      actionId,
+      createChatFlowSink(body, found.itemId, found.sessionId),
+    );
+    return;
+  }
   void getChatSendFlow(body).decide(
     actionId,
     command,
@@ -3454,9 +3390,11 @@ async function openActionTarget(
     action.target?.itemKey || action.request.itemKey,
     action.request.paperTitle,
   );
-  body
-    .querySelector("#zoteroagent-memory-reader-thinking")
-    ?.scrollIntoView({ block: "start" });
+  if (action.target?.section === "Thinking") {
+    body
+      .querySelector("#zoteroagent-memory-reader-thinking")
+      ?.scrollIntoView({ block: "start" });
+  }
 }
 
 function getCommandPanel(body: HTMLElement): HTMLElement | null {

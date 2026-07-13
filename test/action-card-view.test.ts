@@ -49,4 +49,58 @@ describe("getActionCardViewModel", () => {
       actions: [{ id: "retry", label: "Retry" }],
     });
   });
+
+  it("offers Undo for a completed persistent action", () => {
+    const completed = {
+      ...action("completed"),
+      result: {
+        summary: "Rating updated.",
+        committed: true,
+        commitReceipt: {
+          commitSha: "abc",
+          parentSha: "def",
+          changedPaths: ["KEY7/memory.md"],
+        },
+      },
+    } satisfies AgentActionCard;
+
+    expect(getActionCardViewModel(completed).actions).toEqual([
+      { id: "view", label: "View" },
+      { id: "undo", label: "Undo" },
+    ]);
+  });
+
+  it("uses action-specific titles for rating and depth", () => {
+    expect(
+      getActionCardViewModel({
+        ...action("running"),
+        kind: "paper.rating.set",
+      }).title,
+    ).toBe("Set rating");
+    expect(
+      getActionCardViewModel({
+        ...action("running"),
+        kind: "paper.depth.set",
+      }).title,
+    ).toBe("Change depth");
+  });
+
+  it("does not offer Undo for excluded action kinds", () => {
+    const completed = {
+      ...action("completed"),
+      kind: "paper.record.build",
+      result: {
+        summary: "Built.",
+        commitReceipt: {
+          commitSha: "abcdef1",
+          parentSha: "abcdef0",
+          changedPaths: ["KEY7/memory.md"],
+        },
+      },
+    } satisfies AgentActionCard;
+
+    expect(getActionCardViewModel(completed).actions).toEqual([
+      { id: "view", label: "View" },
+    ]);
+  });
 });

@@ -85,11 +85,22 @@ class MemoryStore implements ChatFlowStore {
   touchSession(): void {}
 }
 
+function createFlow(
+  deps: ConstructorParameters<typeof DefaultChatSendFlow>[0],
+) {
+  return new DefaultChatSendFlow({
+    getVaultHeadSha: async () => "abcdef1",
+    verifyVaultCommitReceipt: async () => undefined,
+    restoreVaultPathsFromHead: async () => undefined,
+    ...deps,
+  });
+}
+
 describe("DefaultChatSendFlow", () => {
   it("runs /note as a durable action without using the research turn", async () => {
     const store = new MemoryStore();
     const calls: string[] = [];
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => {
         calls.push("research");
@@ -192,7 +203,7 @@ describe("DefaultChatSendFlow", () => {
   it("returns unknown command help without starting Codex", async () => {
     const store = new MemoryStore();
     let researchRuns = 0;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => {
         researchRuns += 1;
@@ -218,7 +229,7 @@ describe("DefaultChatSendFlow", () => {
   it("passes ordinary questions directly to the existing research turn", async () => {
     const store = new MemoryStore();
     let received = "";
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async (request) => {
         received = request.text;
@@ -244,7 +255,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     let startProcess: (() => void) | undefined;
     let killed = false;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async (request) =>
@@ -287,7 +298,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     let rejectFirst: ((error: Error) => void) | undefined;
     let runs = 0;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () => {
@@ -335,7 +346,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     let finishFirst: (() => void) | undefined;
     let runs = 0;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () => {
@@ -400,7 +411,7 @@ describe("DefaultChatSendFlow", () => {
       restoreVaultTextFiles: async () => undefined,
       commitVaultPaths: async () => null,
     };
-    const firstFlow = new DefaultChatSendFlow({
+    const firstFlow = createFlow({
       ...common,
       store: firstStore,
       organizeNote: async () =>
@@ -415,7 +426,7 @@ describe("DefaultChatSendFlow", () => {
         }),
       newActionId: () => "action-first",
     });
-    const secondFlow = new DefaultChatSendFlow({
+    const secondFlow = createFlow({
       ...common,
       store: secondStore,
       organizeNote: async () => {
@@ -453,7 +464,7 @@ describe("DefaultChatSendFlow", () => {
       restoreVaultTextFiles: async () => undefined,
       commitVaultPaths: async () => null,
     };
-    const researchFlow = new DefaultChatSendFlow({
+    const researchFlow = createFlow({
       ...common,
       store: researchStore,
       runResearch: async () =>
@@ -464,7 +475,7 @@ describe("DefaultChatSendFlow", () => {
         throw new Error("not expected");
       },
     });
-    const actionFlow = new DefaultChatSendFlow({
+    const actionFlow = createFlow({
       ...common,
       store: actionStore,
       runResearch: async () => undefined,
@@ -500,7 +511,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     let startProcess: (() => void) | undefined;
     let killed = false;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async (_request, sink) =>
         new Promise<void>((resolve) => {
@@ -544,7 +555,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     let rejectRun: ((error: Error) => void) | undefined;
     const entries: string[] = [];
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () =>
@@ -579,7 +590,7 @@ describe("DefaultChatSendFlow", () => {
   it("surfaces a cancelled action when its Conversation Log cannot be saved", async () => {
     const store = new MemoryStore();
     let rejectRun: ((error: Error) => void) | undefined;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () =>
@@ -615,10 +626,238 @@ describe("DefaultChatSendFlow", () => {
     );
   });
 
+  it("undoes a completed rating action with a compensating Vault commit", async () => {
+    const store = new MemoryStore();
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      appendConversationTurn: async () => undefined,
+      appendPaperNote: async () => false,
+      assertVaultPathsClean: async () => undefined,
+      captureVaultTextFiles: async () => [],
+      restoreVaultTextFiles: async () => undefined,
+      commitVaultPaths: async () => null,
+      revertVaultCommit: async (commitSha) => {
+        expect(commitSha).toBe("action-commit");
+        return {
+          commitSha: "undo-commit",
+          parentSha: "action-commit",
+          changedPaths: ["KEY7/memory.md"],
+        };
+      },
+    });
+    store.addMessage(7, {
+      role: "assistant",
+      content: "",
+      action: {
+        version: 1,
+        id: "rating-action",
+        kind: "paper.rating.set",
+        state: "completed",
+        trigger: { source: "slash-command", text: "/rate 5" },
+        capabilities: ["vault.write"],
+        request: {
+          itemId: 7,
+          itemKey: "KEY7",
+          sessionId: "chat-1",
+          paperTitle: "Paper",
+          text: "/rate 5",
+          rating: 5,
+        },
+        target: {
+          itemKey: "KEY7",
+          path: "KEY7/memory.md",
+          section: "Overview",
+        },
+        result: {
+          summary: "Rating set to 5.",
+          committed: true,
+          commitReceipt: {
+            commitSha: "action-commit",
+            parentSha: "before",
+            changedPaths: ["KEY7/memory.md"],
+          },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    });
+
+    await flow.undo("rating-action", {});
+
+    expect(store.messages[0].action).toMatchObject({
+      state: "undone",
+      result: {
+        summary: "Action undone.",
+        undoCommitReceipt: { commitSha: "undo-commit" },
+      },
+    });
+  });
+
+  it("keeps an action completed when Vault HEAD has newer updates", async () => {
+    const store = new MemoryStore();
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      appendConversationTurn: async () => undefined,
+      appendPaperNote: async () => false,
+      assertVaultPathsClean: async () => undefined,
+      captureVaultTextFiles: async () => [],
+      restoreVaultTextFiles: async () => undefined,
+      commitVaultPaths: async () => null,
+      revertVaultCommit: async () => {
+        throw new Error("Vault has newer updates.");
+      },
+    });
+    store.addMessage(7, {
+      role: "assistant",
+      content: "",
+      action: {
+        version: 1,
+        id: "depth-action",
+        kind: "paper.depth.set",
+        state: "completed",
+        trigger: { source: "slash-command", text: "/depth L2" },
+        capabilities: ["codex.read", "vault.write"],
+        request: {
+          itemId: 7,
+          itemKey: "KEY7",
+          sessionId: "chat-1",
+          paperTitle: "Paper",
+          text: "/depth L2",
+          targetTier: "L2",
+        },
+        target: {
+          itemKey: "KEY7",
+          path: "KEY7/memory.md",
+          section: "Overview",
+        },
+        result: {
+          summary: "Depth changed.",
+          committed: true,
+          commitReceipt: {
+            commitSha: "action-commit",
+            parentSha: "before",
+            changedPaths: ["KEY7/memory.md"],
+          },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    });
+
+    await flow.undo("depth-action", {});
+
+    expect(store.messages[0].action).toMatchObject({
+      state: "completed",
+      error: {
+        code: "undo-failed",
+        message: "Vault has newer updates.",
+      },
+    });
+  });
+
+  it("undoes a Note by appending a retraction instead of deleting text", async () => {
+    const store = new MemoryStore();
+    const calls: string[] = [];
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      appendConversationTurn: async () => undefined,
+      appendPaperNote: async (request) => {
+        calls.push("retract");
+        expect(request).toMatchObject({
+          itemKey: "KEY7",
+          section: "Actions",
+          actionId: "note-action",
+          commit: false,
+        });
+        expect(request.content).toContain("Retracted action");
+        return false;
+      },
+      assertVaultPathsClean: async () => undefined,
+      captureVaultTextFiles: async () => [
+        {
+          relativePath: "KEY7/notes.md",
+          existed: true,
+          content: "original note",
+        },
+      ],
+      restoreVaultTextFiles: async () => undefined,
+      commitVaultPaths: async (_message, paths) => {
+        calls.push("commit");
+        expect(paths).toEqual(["KEY7/notes.md"]);
+        return {
+          commitSha: "undo-note",
+          parentSha: "note-commit",
+          changedPaths: paths,
+        };
+      },
+      getVaultHeadSha: async () => "note-commit",
+      verifyVaultCommitReceipt: async (receipt) => {
+        expect(receipt.commitSha).toBe("note-commit");
+      },
+    });
+    store.addMessage(7, {
+      role: "assistant",
+      content: "",
+      action: {
+        version: 1,
+        id: "note-action",
+        kind: "note.organize",
+        state: "completed",
+        trigger: { source: "slash-command", text: "/note action" },
+        capabilities: ["codex.read", "vault.write"],
+        request: {
+          itemId: 7,
+          itemKey: "KEY7",
+          sessionId: "chat-1",
+          paperTitle: "Paper",
+          text: "/note action",
+          content: "action",
+        },
+        target: {
+          itemKey: "KEY7",
+          path: "KEY7/notes.md",
+          section: "Thinking",
+        },
+        result: {
+          summary: "Saved.",
+          section: "Actions",
+          committed: true,
+          commitReceipt: {
+            commitSha: "note-commit",
+            parentSha: "before",
+            changedPaths: ["KEY7/notes.md"],
+          },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    });
+
+    await flow.undo("note-action", {});
+
+    expect(calls).toEqual(["retract", "commit"]);
+    expect(store.messages[0].action).toMatchObject({
+      state: "undone",
+      result: { undoCommitReceipt: { commitSha: "undo-note" } },
+    });
+  });
+
   it("rejects a persisted action whose request does not match its session", async () => {
     const store = new MemoryStore();
     let runs = 0;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () => {
@@ -660,7 +899,7 @@ describe("DefaultChatSendFlow", () => {
     const store = new MemoryStore();
     const calls: string[] = [];
     let commitAttempts = 0;
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () => ({
@@ -726,7 +965,7 @@ describe("DefaultChatSendFlow", () => {
   it("preserves the original submission in the Conversation Log when Codex fails", async () => {
     const store = new MemoryStore();
     const calls: string[] = [];
-    const flow = new DefaultChatSendFlow({
+    const flow = createFlow({
       store,
       runResearch: async () => undefined,
       organizeNote: async () => {
@@ -761,6 +1000,170 @@ describe("DefaultChatSendFlow", () => {
     expect(store.messages[1].action).toMatchObject({
       state: "failed",
       error: { message: "provider unavailable" },
+    });
+  });
+
+  it("runs a rating command through the local knowledge transaction", async () => {
+    const store = new MemoryStore();
+    const calls: string[] = [];
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      prepareLocalKnowledgeAction: async (action) => {
+        calls.push("prepare");
+        expect(action.request.rating).toBe(4);
+        expect(action.capabilities).toEqual(["vault.write"]);
+        return {
+          paths: ["KEY7/memory.md", "KEY7/record.json", "README.md"],
+          commitMessage: "action: rating KEY7 4",
+          expectedHeadSha: "head-before",
+          apply: async () => {
+            calls.push("apply");
+            return {
+              summary: "Rating set to 4.",
+              targetPath: "KEY7/memory.md",
+              section: "Overview",
+              changed: true,
+            };
+          },
+        };
+      },
+      appendConversationTurn: async () => {
+        calls.push("conversation");
+      },
+      appendPaperNote: async () => false,
+      assertVaultPathsClean: async () => undefined,
+      captureVaultTextFiles: async (paths) =>
+        paths.map((relativePath) => ({
+          relativePath,
+          existed: true,
+          content: "before",
+        })),
+      restoreVaultTextFiles: async () => undefined,
+      commitVaultPaths: async (_message, paths, expectedParentSha) => {
+        calls.push("commit");
+        expect(expectedParentSha).toBe("head-before");
+        return {
+          commitSha: "rating-commit",
+          parentSha: "before",
+          changedPaths: paths,
+        };
+      },
+      getVaultHeadSha: async () => "head-before",
+      newActionId: () => "rating-action",
+    });
+
+    await flow.submit(submission("/rate 4"), {});
+
+    expect(calls).toEqual(["prepare", "apply", "conversation", "commit"]);
+    expect(store.messages[1].action).toMatchObject({
+      kind: "paper.rating.set",
+      state: "completed",
+      request: { rating: 4 },
+      target: { path: "KEY7/memory.md", section: "Overview" },
+      result: { commitReceipt: { commitSha: "rating-commit" } },
+    });
+  });
+
+  it("fails a no-op action when its Conversation Log cannot be saved", async () => {
+    const store = new MemoryStore();
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      prepareLocalKnowledgeAction: async () => ({
+        paths: [],
+        commitMessage: "",
+        apply: async () => ({
+          summary: "Rating is already 4.",
+          targetPath: "KEY7/memory.md",
+          section: "Overview",
+          changed: false,
+        }),
+      }),
+      appendConversationTurn: async () => undefined,
+      appendPaperNote: async () => false,
+      assertVaultPathsClean: async () => {
+        throw new Error("target has uncommitted changes");
+      },
+      captureVaultTextFiles: async () => [],
+      restoreVaultTextFiles: async () => undefined,
+      commitVaultPaths: async () => null,
+      getVaultHeadSha: async () => "head-before",
+      newActionId: () => "rating-action",
+    });
+
+    await flow.submit(submission("/rate 4"), {});
+
+    expect(store.messages[1].action).toMatchObject({
+      state: "failed",
+      error: {
+        code: "execution-failed",
+      },
+    });
+    expect(store.messages[1].action?.error?.message).toContain(
+      "Conversation Log was not saved",
+    );
+  });
+
+  it("does not apply a stale depth draft after Vault HEAD changes", async () => {
+    const store = new MemoryStore();
+    let applies = 0;
+    let headReads = 0;
+    const restoredFromHead: string[][] = [];
+    const flow = createFlow({
+      store,
+      runResearch: async () => undefined,
+      organizeNote: async () => {
+        throw new Error("not expected");
+      },
+      prepareLocalKnowledgeAction: async () => ({
+        paths: ["KEY7/memory.md", "KEY7/record.json"],
+        commitMessage: "action: depth KEY7 L2",
+        expectedHeadSha: "head-before",
+        apply: async () => {
+          applies += 1;
+          return {
+            summary: "Depth updated.",
+            targetPath: "KEY7/memory.md",
+            section: "Overview",
+            changed: true,
+          };
+        },
+      }),
+      appendConversationTurn: async () => undefined,
+      appendPaperNote: async () => false,
+      assertVaultPathsClean: async () => undefined,
+      captureVaultTextFiles: async (paths) =>
+        paths.map((relativePath) => ({
+          relativePath,
+          existed: true,
+          content: "before",
+        })),
+      restoreVaultTextFiles: async () => undefined,
+      restoreVaultPathsFromHead: async (paths) => {
+        restoredFromHead.push(paths);
+      },
+      commitVaultPaths: async () => null,
+      getVaultHeadSha: async () =>
+        ++headReads === 1 ? "head-before" : "head-newer",
+      newActionId: () => "depth-action",
+    });
+
+    await flow.submit(submission("/depth L2"), {});
+
+    expect(applies).toBe(0);
+    expect(restoredFromHead).toEqual([
+      ["KEY7/memory.md", "KEY7/record.json", "KEY7/conversations/chat-1.md"],
+    ]);
+    expect(store.messages[1].action).toMatchObject({
+      state: "failed",
+      error: { message: expect.stringContaining("Vault has newer updates") },
     });
   });
 });

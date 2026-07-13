@@ -12,8 +12,10 @@ Zotero Agent 是一个面向 Zotero 7/8 的 AI 阅读助手插件。当前主线
 - 在对话中用 `@` 提及 Vault 中的其他论文，让 Codex 基于多篇 Paper Knowledge Records 进行比较和关联。
 - 在输入框粘贴本地截图并随问题发送给 Codex；截图保存在 Vault 的 gitignored 本地目录。
 - 按 L0–L3 选择论文投入深度；L1 为默认速读，L2 为精读，L3 可绑定显式 GitHub 仓库并生成代码分析。
-- 在 Chat 中使用 `/note` 将选区、引用或输入内容整理到独立的
-  `notes.md`，与论文事实和会话日志保持结构隔离。
+- 在 Chat 中使用 `/note` 整理 Reader Thinking，使用 `/rate 1..5`
+  记录评分，使用 `/depth L0|L1|L2` 调整阅读深度。
+- 已完成的持久动作通过 Action Card 提供保守 Undo；若 Vault 已有更新，
+  Undo 会拒绝执行而不是覆盖新内容。
 - 多选 Vault 论文后显式创建可持续更新的 Topic Note，沉淀问题定义、方法脉络、论文立场与开放问题。
 - 从 Memory 视图建立单篇 Knowledge Record，或在 Zotero 多选后通过右键菜单批量建档。
 - 为论文记录 1–5 星评分，并镜像 Zotero collections/tags 作为 Paper Signal Metadata。

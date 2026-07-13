@@ -20,7 +20,13 @@ export function getActionCardViewModel(
   action: AgentActionCard,
 ): ActionCardViewModel {
   const title =
-    action.kind === "note.organize" ? "Organize note" : "Research action";
+    action.kind === "note.organize"
+      ? "Organize note"
+      : action.kind === "paper.rating.set"
+        ? "Set rating"
+        : action.kind === "paper.depth.set"
+          ? "Change depth"
+          : "Research action";
   const meta = [
     action.trigger.source.replace(/-/g, " "),
     action.target?.path,
@@ -55,12 +61,20 @@ export function getActionCardViewModel(
     };
   }
   if (action.state === "completed") {
+    const undoable =
+      (action.kind === "note.organize" ||
+        action.kind === "paper.rating.set" ||
+        action.kind === "paper.depth.set") &&
+      Boolean(action.result?.commitReceipt);
     return {
       title,
-      detail: action.result?.summary || "Completed.",
+      detail: action.error?.message || action.result?.summary || "Completed.",
       meta,
       tone: "success",
-      actions: [{ id: "view", label: "View" }],
+      actions: [
+        { id: "view", label: "View" },
+        ...(undoable ? [{ id: "undo" as const, label: "Undo" }] : []),
+      ],
     };
   }
   if (action.state === "failed" || action.state === "cancelled") {

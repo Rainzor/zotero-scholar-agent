@@ -10,6 +10,16 @@ const COMMANDS: CommandMenuItem[] = [
     description: "Organize Reader Thinking",
     template: "/note ",
   },
+  {
+    command: "/rate",
+    description: "Set paper rating",
+    template: "/rate ",
+  },
+  {
+    command: "/depth",
+    description: "Set L0, L1, or L2 depth",
+    template: "/depth ",
+  },
 ];
 
 export function getCommandMenuItems(value: string): CommandMenuItem[] {

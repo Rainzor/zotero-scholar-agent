@@ -7,10 +7,18 @@ import {
   assertVaultPathsClean,
   captureVaultTextFiles,
   commitVaultPaths,
+  getVaultHeadSha,
+  revertVaultCommit,
+  restoreVaultPathsFromHead,
   restoreVaultTextFiles,
+  verifyVaultCommitReceipt,
 } from "../codex";
 import { safePathSegment } from "../codex/vault-format";
 import { organizePaperNote } from "./note";
+import {
+  prepareLocalKnowledgeAction,
+  type PreparedLocalKnowledgeAction,
+} from "./local-knowledge";
 import { parseChatIntent } from "./intent";
 import { transitionAgentAction, type AgentActionCard } from "./types";
 
@@ -57,6 +65,7 @@ export interface ChatSendFlow {
   ): Promise<void>;
   cancel(itemId: number, sessionId: string): void;
   isActive(itemId: number, sessionId: string): boolean;
+  undo(actionId: string, sink: ChatFlowSink): Promise<void>;
 }
 
 export type ChatFlowStore = {
@@ -80,12 +89,17 @@ type FlowDeps = {
   store: ChatFlowStore;
   runResearch: (request: ChatSubmission, sink: ChatFlowSink) => Promise<void>;
   organizeNote: typeof organizePaperNote;
+  prepareLocalKnowledgeAction?: typeof prepareLocalKnowledgeAction;
   appendConversationTurn: typeof appendConversationTurn;
   appendPaperNote?: typeof appendPaperNote;
   assertVaultPathsClean?: typeof assertVaultPathsClean;
   captureVaultTextFiles?: typeof captureVaultTextFiles;
   restoreVaultTextFiles?: typeof restoreVaultTextFiles;
+  restoreVaultPathsFromHead?: typeof restoreVaultPathsFromHead;
   commitVaultPaths?: typeof commitVaultPaths;
+  getVaultHeadSha?: typeof getVaultHeadSha;
+  revertVaultCommit?: typeof revertVaultCommit;
+  verifyVaultCommitReceipt?: typeof verifyVaultCommitReceipt;
   now?: () => number;
   newActionId?: () => string;
 };
@@ -194,7 +208,14 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       this.deps.store.touchSession(request.itemId);
       sink.onChanged?.(request.itemId);
       try {
-        await this.persistLocalTurn(request, intent.message, "command help");
+        const error = await this.persistLocalTurn(
+          request,
+          intent.message,
+          "command help",
+        );
+        if (error) {
+          sink.onStatus?.(`Conversation Log was not saved: ${error}`);
+        }
       } finally {
         activeLocalTurns = Math.max(0, activeLocalTurns - 1);
       }
@@ -211,13 +232,27 @@ export class DefaultChatSendFlow implements ChatSendFlow {
         source: intent.trigger,
         text: request.text,
       },
-      capabilities: ["codex.read", "vault.write"],
+      capabilities:
+        intent.kind === "paper.rating.set"
+          ? ["vault.write"]
+          : ["codex.read", "vault.write"],
       request: {
         itemId: request.itemId,
         itemKey: request.paper.itemKey,
         pdfItemId: request.pdfItemId,
         sessionId: request.session.sessionId,
         paperTitle: request.paper.title,
+        paper: {
+          itemId: request.paper.itemId,
+          itemKey: request.paper.itemKey,
+          title: request.paper.title,
+          creators: request.paper.creators,
+          year: request.paper.year,
+          abstract: request.paper.abstract,
+          zoteroCollections: request.paper.zoteroCollections,
+          zoteroTags: request.paper.zoteroTags,
+          paperKeywords: request.paper.paperKeywords,
+        },
         text: request.text,
         conversationText: request.conversationDisplayContent,
         selectedText: request.selectedText,
@@ -230,14 +265,23 @@ export class DefaultChatSendFlow implements ChatSendFlow {
         ),
         content: intent.content,
         contentSource: intent.contentSource,
+        rating: intent.rating,
+        targetTier: intent.targetTier,
         modelSlug: request.session.modelSlug,
         reasoningEffort: request.session.reasoningEffort,
       },
-      target: {
-        itemKey: request.paper.itemKey,
-        path: `${request.paper.itemKey}/notes.md`,
-        section: "Thinking",
-      },
+      target:
+        intent.kind === "note.organize"
+          ? {
+              itemKey: request.paper.itemKey,
+              path: `${request.paper.itemKey}/notes.md`,
+              section: "Thinking",
+            }
+          : {
+              itemKey: request.paper.itemKey,
+              path: `${request.paper.itemKey}/memory.md`,
+              section: "Overview",
+            },
       createdAt: now,
       updatedAt: now,
     };
@@ -335,6 +379,61 @@ export class DefaultChatSendFlow implements ChatSendFlow {
     );
   }
 
+  async undo(actionId: string, sink: ChatFlowSink): Promise<void> {
+    if (!this.canSubmit()) {
+      sink.onStatus?.("Wait for the running turn to finish.");
+      return;
+    }
+    const found = this.deps.store.findAction(actionId);
+    const receipt = found?.action.result?.commitReceipt;
+    if (
+      !found ||
+      found.action.state !== "completed" ||
+      !receipt ||
+      (found.action.kind !== "note.organize" &&
+        found.action.kind !== "paper.rating.set" &&
+        found.action.kind !== "paper.depth.set")
+    ) {
+      return;
+    }
+    activeLocalTurns += 1;
+    try {
+      try {
+        const undoReceipt =
+          found.action.kind === "note.organize"
+            ? await this.undoNoteAction(found.action)
+            : await (this.deps.revertVaultCommit || revertVaultCommit)(
+                receipt.commitSha,
+                receipt.changedPaths,
+                receipt.parentSha,
+              );
+        this.deps.store.updateAction(found.itemId, actionId, (action) =>
+          transitionAgentAction(action, "undone", {
+            result: {
+              ...(action.result || { summary: "Undone." }),
+              summary: "Action undone.",
+              undoCommitReceipt: undoReceipt,
+            },
+          }),
+        );
+      } catch (error) {
+        this.deps.store.updateAction(found.itemId, actionId, (action) => ({
+          ...action,
+          error: {
+            code: "undo-failed",
+            message: error instanceof Error ? error.message : String(error),
+            retryable: true,
+          },
+          updatedAt: Date.now(),
+        }));
+      }
+      this.deps.store.touchSession(found.itemId);
+      sink.onChanged?.(found.itemId);
+    } finally {
+      activeLocalTurns = Math.max(0, activeLocalTurns - 1);
+    }
+  }
+
   private async executeAction(
     original: AgentActionCard,
     sink: ChatFlowSink,
@@ -397,7 +496,7 @@ export class DefaultChatSendFlow implements ChatSendFlow {
     const executionId = ++nextExecutionId;
     this.deps.store.updateAction(itemId, actionId, (action) =>
       transitionAgentAction(action, "running", {
-        statusText: "Organizing Reader Thinking...",
+        statusText: actionRunningStatus(original.kind),
       }),
     );
     activeActionsBySession.set(key, {
@@ -408,11 +507,19 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       cancellable: true,
     });
     sink.onRunning?.(true);
-    sink.onStatus?.("Organizing Reader Thinking...");
+    sink.onStatus?.(actionRunningStatus(original.kind));
     sink.onChanged?.(itemId);
+    if (
+      original.kind === "paper.rating.set" ||
+      original.kind === "paper.depth.set"
+    ) {
+      await this.executeLocalKnowledgeAction(original, sink, key, executionId);
+      return;
+    }
     let snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>> | null =
       null;
     let commitReceipt: Awaited<ReturnType<typeof commitVaultPaths>> = null;
+    let expectedHeadSha = "";
     try {
       const result = await this.deps.organizeNote({
         actionId,
@@ -448,6 +555,7 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       const conversationPath = `${
         original.request.itemKey
       }/conversations/${safePathSegment(original.request.sessionId)}.md`;
+      expectedHeadSha = await (this.deps.getVaultHeadSha || getVaultHeadSha)();
       await (this.deps.assertVaultPathsClean || assertVaultPathsClean)([
         notePath,
         conversationPath,
@@ -455,6 +563,12 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       snapshots = await (
         this.deps.captureVaultTextFiles || captureVaultTextFiles
       )([notePath, conversationPath]);
+      if (
+        (await (this.deps.getVaultHeadSha || getVaultHeadSha)()) !==
+        expectedHeadSha
+      ) {
+        throw new Error("Vault has newer updates.");
+      }
       this.throwIfCancelled(actionId);
       await (this.deps.appendPaperNote || appendPaperNote)({
         itemKey: original.request.itemKey,
@@ -484,6 +598,8 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       commitReceipt = await (this.deps.commitVaultPaths || commitVaultPaths)(
         `action: note ${original.request.itemKey}`,
         [notePath, conversationPath],
+        expectedHeadSha,
+        true,
       );
       this.deps.store.updateAction(itemId, actionId, (action) =>
         transitionAgentAction(action, "completed", {
@@ -499,9 +615,7 @@ export class DefaultChatSendFlow implements ChatSendFlow {
     } catch (error) {
       if (snapshots && !commitReceipt) {
         try {
-          await (this.deps.restoreVaultTextFiles || restoreVaultTextFiles)(
-            snapshots,
-          );
+          await this.rollbackSnapshots(snapshots, expectedHeadSha);
         } catch (restoreError) {
           error = new Error(
             `${error instanceof Error ? error.message : String(error)}; rollback failed: ${
@@ -563,6 +677,184 @@ export class DefaultChatSendFlow implements ChatSendFlow {
     }
   }
 
+  private async executeLocalKnowledgeAction(
+    action: AgentActionCard,
+    sink: ChatFlowSink,
+    key: string,
+    executionId: number,
+  ): Promise<void> {
+    const itemId = action.request.itemId;
+    let snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>> | null =
+      null;
+    let commitReceipt: Awaited<ReturnType<typeof commitVaultPaths>> = null;
+    let expectedHeadSha = "";
+    try {
+      const prepared = await (
+        this.deps.prepareLocalKnowledgeAction || prepareLocalKnowledgeAction
+      )(action, {
+        onStatus: sink.onStatus,
+        onProcess: (process) => {
+          const current = this.deps.store.findAction(action.id);
+          if (current?.action.state === "cancelled") {
+            process.kill();
+            return;
+          }
+          const active = activeActionsBySession.get(key);
+          if (active) active.process = process;
+          sink.onProcess?.(process);
+        },
+      });
+      expectedHeadSha = prepared.expectedHeadSha || "";
+      this.throwIfCancelled(action.id);
+      const applied = await this.applyPreparedLocalAction(
+        action,
+        prepared,
+        sink,
+        (captured) => {
+          snapshots = captured;
+        },
+      );
+      commitReceipt = applied.commitReceipt;
+      this.deps.store.updateAction(itemId, action.id, (current) =>
+        transitionAgentAction(current, "completed", {
+          result: {
+            summary: applied.result.summary,
+            targetPath: applied.result.targetPath,
+            section: applied.result.section,
+            committed: Boolean(commitReceipt),
+            commitReceipt: commitReceipt || undefined,
+          },
+        }),
+      );
+    } catch (error) {
+      if (snapshots && !commitReceipt) {
+        try {
+          await this.rollbackSnapshots(snapshots, expectedHeadSha);
+        } catch (restoreError) {
+          error = new Error(
+            `${error instanceof Error ? error.message : String(error)}; rollback failed: ${
+              restoreError instanceof Error
+                ? restoreError.message
+                : String(restoreError)
+            }`,
+          );
+        }
+      }
+      const current = this.deps.store.findAction(action.id);
+      const cancelled = current?.action.state === "cancelled";
+      const logError = await this.persistTerminalConversation(
+        action,
+        cancelled
+          ? "[Action cancelled] Cancelled by user."
+          : `[Action failed] ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+        cancelled ? "cancelled" : "failed",
+      );
+      if (cancelled && logError) {
+        this.deps.store.updateAction(itemId, action.id, (currentAction) => ({
+          ...currentAction,
+          error: {
+            code: "cancelled-log-failed",
+            message: `Cancelled by user. Conversation Log was not saved: ${logError}`,
+            retryable: true,
+          },
+          updatedAt: Date.now(),
+        }));
+      } else if (!cancelled) {
+        this.deps.store.updateAction(itemId, action.id, (currentAction) =>
+          transitionAgentAction(currentAction, "failed", {
+            error: {
+              code: "execution-failed",
+              message: [
+                error instanceof Error ? error.message : String(error),
+                logError ? `Conversation Log was not saved: ${logError}` : "",
+              ]
+                .filter(Boolean)
+                .join(" "),
+              retryable: true,
+            },
+          }),
+        );
+      }
+    } finally {
+      const active = activeActionsBySession.get(key);
+      if (active?.executionId === executionId) {
+        activeActionsBySession.delete(key);
+        this.deps.store.touchSession(itemId);
+        sink.onProcess?.(null);
+        sink.onRunning?.(false);
+        sink.onChanged?.(itemId);
+      }
+    }
+  }
+
+  private async applyPreparedLocalAction(
+    action: AgentActionCard,
+    prepared: PreparedLocalKnowledgeAction,
+    sink: ChatFlowSink,
+    onSnapshots: (
+      snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>>,
+    ) => void,
+  ) {
+    if (!prepared.paths.length) {
+      const result = await prepared.apply();
+      const logError = await this.persistLocalTurn(
+        submissionFromAction(action),
+        result.summary,
+        "action no-op",
+      );
+      if (logError) {
+        throw new Error(`Conversation Log was not saved: ${logError}`);
+      }
+      return { result, commitReceipt: null };
+    }
+    const conversationPath = `${
+      action.request.itemKey
+    }/conversations/${safePathSegment(action.request.sessionId)}.md`;
+    const paths = [...prepared.paths, conversationPath];
+    if (prepared.expectedHeadSha) {
+      const currentHead = await (
+        this.deps.getVaultHeadSha || getVaultHeadSha
+      )();
+      if (currentHead !== prepared.expectedHeadSha) {
+        throw new Error("Vault has newer updates.");
+      }
+    }
+    await (this.deps.assertVaultPathsClean || assertVaultPathsClean)(paths);
+    const snapshots = await (
+      this.deps.captureVaultTextFiles || captureVaultTextFiles
+    )(paths);
+    onSnapshots(snapshots);
+    if (prepared.expectedHeadSha) {
+      const currentHead = await (
+        this.deps.getVaultHeadSha || getVaultHeadSha
+      )();
+      if (currentHead !== prepared.expectedHeadSha) {
+        throw new Error("Vault has newer updates.");
+      }
+    }
+    this.throwIfCancelled(action.id);
+    const result = await prepared.apply();
+    this.throwIfCancelled(action.id);
+    await this.deps.appendConversationTurn({
+      itemKey: action.request.itemKey,
+      sessionId: action.request.sessionId,
+      userMessage: action.request.conversationText || action.request.text,
+      assistantMessage: result.summary,
+    });
+    this.throwIfCancelled(action.id);
+    const active = activeActionsBySession.get(
+      sessionKey(action.request.itemId, action.request.sessionId),
+    );
+    if (active) active.cancellable = false;
+    sink.onStatus?.("Committing Vault changes...");
+    const commitReceipt = await (
+      this.deps.commitVaultPaths || commitVaultPaths
+    )(prepared.commitMessage, paths, prepared.expectedHeadSha, true);
+    return { result, commitReceipt };
+  }
+
   private async persistTerminalConversation(
     action: AgentActionCard,
     assistantMessage: string,
@@ -570,16 +862,24 @@ export class DefaultChatSendFlow implements ChatSendFlow {
   ): Promise<string | null> {
     let snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>> | null =
       null;
+    let expectedHeadSha = "";
     try {
       const conversationPath = `${
         action.request.itemKey
       }/conversations/${safePathSegment(action.request.sessionId)}.md`;
+      expectedHeadSha = await (this.deps.getVaultHeadSha || getVaultHeadSha)();
       await (this.deps.assertVaultPathsClean || assertVaultPathsClean)([
         conversationPath,
       ]);
       snapshots = await (
         this.deps.captureVaultTextFiles || captureVaultTextFiles
       )([conversationPath]);
+      if (
+        (await (this.deps.getVaultHeadSha || getVaultHeadSha)()) !==
+        expectedHeadSha
+      ) {
+        throw new Error("Vault has newer updates.");
+      }
       await this.deps.appendConversationTurn({
         itemKey: action.request.itemKey,
         sessionId: action.request.sessionId,
@@ -589,6 +889,8 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       await (this.deps.commitVaultPaths || commitVaultPaths)(
         `action: note ${outcome} ${action.request.itemKey}`,
         [conversationPath],
+        expectedHeadSha,
+        true,
       );
       return null;
     } catch (error) {
@@ -596,9 +898,7 @@ export class DefaultChatSendFlow implements ChatSendFlow {
         return error instanceof Error ? error.message : String(error);
       }
       try {
-        await (this.deps.restoreVaultTextFiles || restoreVaultTextFiles)(
-          snapshots,
-        );
+        await this.rollbackSnapshots(snapshots, expectedHeadSha);
       } catch (restoreError) {
         return `${
           error instanceof Error ? error.message : String(error)
@@ -612,23 +912,77 @@ export class DefaultChatSendFlow implements ChatSendFlow {
     }
   }
 
+  private async undoNoteAction(action: AgentActionCard) {
+    const receipt = action.result?.commitReceipt;
+    if (!receipt) throw new Error("This action has no Vault commit.");
+    await (this.deps.verifyVaultCommitReceipt || verifyVaultCommitReceipt)(
+      receipt,
+    );
+    const head = await (this.deps.getVaultHeadSha || getVaultHeadSha)();
+    if (head !== receipt.commitSha) {
+      throw new Error("Vault has newer updates.");
+    }
+    const notesPath = `${action.request.itemKey}/notes.md`;
+    await (this.deps.assertVaultPathsClean || assertVaultPathsClean)([
+      notesPath,
+    ]);
+    const snapshots = await (
+      this.deps.captureVaultTextFiles || captureVaultTextFiles
+    )([notesPath]);
+    try {
+      await (this.deps.appendPaperNote || appendPaperNote)({
+        itemKey: action.request.itemKey,
+        author: "agent, user-confirmed",
+        section:
+          action.result?.section === "Reading Context" ||
+          action.result?.section === "Actions"
+            ? action.result.section
+            : "Thoughts and Critique",
+        content: `> Retracted action \`${action.id}\`. The original entry remains in history.`,
+        actionId: action.id,
+        commit: false,
+      });
+      const undoReceipt = await (
+        this.deps.commitVaultPaths || commitVaultPaths
+      )(
+        `undo: note ${action.request.itemKey}`,
+        [notesPath],
+        receipt.commitSha,
+        true,
+      );
+      if (!undoReceipt) throw new Error("Note retraction produced no commit.");
+      return undoReceipt;
+    } catch (error) {
+      await this.rollbackSnapshots(snapshots, receipt.commitSha);
+      throw error;
+    }
+  }
+
   private async persistLocalTurn(
     request: ChatSubmission,
     assistantMessage: string,
     label: string,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const conversationPath = `${
       request.paper.itemKey
     }/conversations/${safePathSegment(request.session.sessionId)}.md`;
     let snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>> | null =
       null;
+    let expectedHeadSha = "";
     try {
+      expectedHeadSha = await (this.deps.getVaultHeadSha || getVaultHeadSha)();
       await (this.deps.assertVaultPathsClean || assertVaultPathsClean)([
         conversationPath,
       ]);
       snapshots = await (
         this.deps.captureVaultTextFiles || captureVaultTextFiles
       )([conversationPath]);
+      if (
+        (await (this.deps.getVaultHeadSha || getVaultHeadSha)()) !==
+        expectedHeadSha
+      ) {
+        throw new Error("Vault has newer updates.");
+      }
       await this.deps.appendConversationTurn({
         itemKey: request.paper.itemKey,
         sessionId: request.session.sessionId,
@@ -638,21 +992,45 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       await (this.deps.commitVaultPaths || commitVaultPaths)(
         `chat: ${label} ${request.paper.itemKey}`,
         [conversationPath],
+        expectedHeadSha,
+        true,
       );
-    } catch {
-      if (!snapshots) return;
-      try {
-        await (this.deps.restoreVaultTextFiles || restoreVaultTextFiles)(
-          snapshots,
-        );
-      } catch {
-        // ChatStore remains the UI source of truth when Vault logging fails.
+      return null;
+    } catch (error) {
+      if (!snapshots) {
+        return error instanceof Error ? error.message : String(error);
       }
+      try {
+        await this.rollbackSnapshots(snapshots, expectedHeadSha);
+      } catch (restoreError) {
+        return `${
+          error instanceof Error ? error.message : String(error)
+        }; rollback failed: ${
+          restoreError instanceof Error
+            ? restoreError.message
+            : String(restoreError)
+        }`;
+      }
+      return error instanceof Error ? error.message : String(error);
     }
   }
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  private async rollbackSnapshots(
+    snapshots: Awaited<ReturnType<typeof captureVaultTextFiles>>,
+    expectedHeadSha: string,
+  ): Promise<void> {
+    const currentHead = await (this.deps.getVaultHeadSha || getVaultHeadSha)();
+    if (expectedHeadSha && currentHead !== expectedHeadSha) {
+      await (this.deps.restoreVaultPathsFromHead || restoreVaultPathsFromHead)(
+        snapshots.map((snapshot) => snapshot.relativePath),
+      );
+      return;
+    }
+    await (this.deps.restoreVaultTextFiles || restoreVaultTextFiles)(snapshots);
   }
 
   private throwIfCancelled(actionId: string): void {
@@ -682,6 +1060,42 @@ function actionMatchesLocation(
     action.request.itemKey === location.itemKey &&
     action.request.sessionId === location.sessionId &&
     action.target?.itemKey === location.itemKey &&
-    action.target.path === `${location.itemKey}/notes.md`
+    action.target.path ===
+      `${location.itemKey}/${
+        action.kind === "note.organize" ? "notes.md" : "memory.md"
+      }`
   );
+}
+
+function actionRunningStatus(kind: AgentActionCard["kind"]): string {
+  if (kind === "paper.rating.set") return "Updating paper rating...";
+  if (kind === "paper.depth.set") return "Preparing depth transition...";
+  return "Organizing Reader Thinking...";
+}
+
+function submissionFromAction(action: AgentActionCard): ChatSubmission {
+  const paper = action.request.paper;
+  if (!paper || !paper.itemId) {
+    throw new Error("The action is missing its paper snapshot.");
+  }
+  return {
+    itemId: action.request.itemId,
+    paper: { ...paper, itemId: paper.itemId },
+    pdfItemId: action.request.pdfItemId || 0,
+    session: {
+      sessionId: action.request.sessionId,
+      modelSlug: action.request.modelSlug,
+      reasoningEffort: action.request.reasoningEffort,
+    },
+    text: action.request.text,
+    selectedText: action.request.selectedText || "",
+    responseQuote: action.request.responseQuote || "",
+    mentionedPapers: action.request.mentionedPapers || [],
+    imageRefs: action.request.images || [],
+    imagePaths: [],
+    priorVisibleMessages: [],
+    displayContent: action.request.text,
+    conversationDisplayContent:
+      action.request.conversationText || action.request.text,
+  };
 }

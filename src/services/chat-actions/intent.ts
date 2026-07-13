@@ -17,14 +17,18 @@ export type ParsedChatIntent =
       type: "action";
       execution: "direct" | "confirm";
       kind: AgentActionKind;
-      content: string;
-      contentSource: NoteContentSource;
+      content?: string;
+      contentSource?: NoteContentSource;
+      rating?: number;
+      targetTier?: "L0" | "L1" | "L2";
       trigger: AgentActionTriggerSource;
     };
 
 const COMMAND_HELP = [
   "Available commands:",
   "- `/note [content]` organizes Reader Thinking for this paper.",
+  "- `/rate 1..5` records the paper rating.",
+  "- `/depth L0|L1|L2` rewrites the engagement depth.",
   "",
   "With an empty `/note`, the current PDF selection or quoted reply is used.",
 ].join("\n");
@@ -34,11 +38,36 @@ export function parseChatIntent(input: ChatIntentInput): ParsedChatIntent {
   const slash = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
   if (slash) {
     const command = String(slash[1] || "").toLowerCase();
+    const argument = String(slash[2] || "").trim();
+    if (command === "rate") {
+      const rating = Number(argument);
+      return Number.isInteger(rating) && rating >= 1 && rating <= 5
+        ? {
+            type: "action",
+            execution: "direct",
+            kind: "paper.rating.set",
+            rating,
+            trigger: "slash-command",
+          }
+        : { type: "help", message: COMMAND_HELP };
+    }
+    if (command === "depth") {
+      const targetTier = argument.toUpperCase();
+      return targetTier === "L0" || targetTier === "L1" || targetTier === "L2"
+        ? {
+            type: "action",
+            execution: "direct",
+            kind: "paper.depth.set",
+            targetTier,
+            trigger: "slash-command",
+          }
+        : { type: "help", message: COMMAND_HELP };
+    }
     if (command !== "note") {
       return { type: "help", message: COMMAND_HELP };
     }
     const resolved = resolveNoteContent(
-      String(slash[2] || ""),
+      argument,
       input.selectedText,
       input.responseQuote,
     );
@@ -56,6 +85,27 @@ export function parseChatIntent(input: ChatIntentInput): ParsedChatIntent {
       content: resolved.content,
       contentSource: resolved.source,
       trigger: "slash-command",
+    };
+  }
+
+  const explicitRating = extractExplicitRating(text);
+  if (explicitRating) {
+    return {
+      type: "action",
+      execution: "direct",
+      kind: "paper.rating.set",
+      rating: explicitRating,
+      trigger: "explicit-instruction",
+    };
+  }
+  const explicitTier = extractExplicitDepth(text);
+  if (explicitTier) {
+    return {
+      type: "action",
+      execution: "direct",
+      kind: "paper.depth.set",
+      targetTier: explicitTier,
+      trigger: "explicit-instruction",
     };
   }
 
@@ -79,6 +129,32 @@ export function parseChatIntent(input: ChatIntentInput): ParsedChatIntent {
   }
 
   return { type: "research" };
+}
+
+function extractExplicitRating(text: string): number | undefined {
+  const match =
+    text.match(
+      /^(?:请)?(?:给这篇论文|给论文|论文)\s*(?:打|评为?)\s*([1-5])\s*(?:星|分)[。.!！]?$/,
+    ) ||
+    text.match(
+      /^(?:please\s+)?(?:rate\s+(?:this\s+)?paper|set\s+rating\s+to)\s+([1-5])[.!]?$/i,
+    );
+  const rating = Number(match?.[1]);
+  return Number.isInteger(rating) && rating >= 1 && rating <= 5
+    ? rating
+    : undefined;
+}
+
+function extractExplicitDepth(text: string): "L0" | "L1" | "L2" | undefined {
+  const match =
+    text.match(
+      /^(?:请)?(?:把|将)?(?:阅读)?深度\s*(?:设为|设置为|改为|到)\s*(L[0-2])[。.!！]?$/i,
+    ) ||
+    text.match(
+      /^(?:please\s+)?(?:set|change)\s+(?:the\s+)?depth\s+to\s+(L[0-2])[.!]?$/i,
+    );
+  const tier = String(match?.[1] || "").toUpperCase();
+  return tier === "L0" || tier === "L1" || tier === "L2" ? tier : undefined;
 }
 
 function resolveNoteContent(

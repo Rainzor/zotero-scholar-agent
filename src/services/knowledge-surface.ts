@@ -205,6 +205,26 @@ export function restoreKnowledgeSurfaceOwnership(
   return updateKnowledgeSurfaceSignals(refreshed, beforeSignals);
 }
 
+export function replaceKnowledgeSurfaceInterpretation(
+  markdown: string,
+  interpretationMarkdown: string,
+  targetTier: Exclude<PaperTier, "L3">,
+): string {
+  const current = parseKnowledgeSurface(markdown);
+  const end = current.body.indexOf(KNOWLEDGE_SURFACE_PLUGIN_END);
+  if (end < 0) {
+    throw new Error("Knowledge Surface plugin block is missing.");
+  }
+  const ownedEnd = end + KNOWLEDGE_SURFACE_PLUGIN_END.length;
+  const body = `${current.body.slice(0, ownedEnd).trimEnd()}\n\n${String(
+    interpretationMarkdown || "",
+  ).trim()}\n`;
+  return updateKnowledgeSurfaceSignals(body, {
+    ...current.signals,
+    tier: targetTier,
+  });
+}
+
 export function buildTierInterpretationTemplate(tier: PaperTier): string {
   const lines: string[] = [];
   for (const section of TIER_SECTION_SHAPES[tier]) {
