@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getAgentStatusPresentation } from "../src/services/agent-status";
+import {
+  AGENT_STATUS_NOTICE_AUTO_DISMISS_MS,
+  getAgentStatusPresentation,
+} from "../src/services/agent-status";
 
 describe("getAgentStatusPresentation", () => {
   it("keeps in-progress activity animated", () => {
@@ -14,5 +17,11 @@ describe("getAgentStatusPresentation", () => {
       className: "zoteroagent-agent-status is-notice",
       animated: false,
     });
+  });
+});
+
+describe("AGENT_STATUS_NOTICE_AUTO_DISMISS_MS", () => {
+  it("matches the undo-toast auto-dismiss duration", () => {
+    expect(AGENT_STATUS_NOTICE_AUTO_DISMISS_MS).toBe(6000);
   });
 });

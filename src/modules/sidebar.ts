@@ -52,10 +52,14 @@ import {
 } from "../services/local-images";
 import { buildQuotedQuestion } from "../services/research-turn/prompt";
 import { runResearchTurn } from "../services/research-turn/orchestrator";
+import { type AgentStatusKind } from "../services/agent-status";
 import {
-  getAgentStatusPresentation,
-  type AgentStatusKind,
-} from "../services/agent-status";
+  clearAgentStatus,
+  isTokenCurrent,
+  mountAgentStatusSlot,
+  showBusyStatus,
+  showNoticeStatus,
+} from "./sidebar/agent-status-bar";
 import {
   canJumpToPage,
   jumpToReaderPage,
@@ -1747,6 +1751,7 @@ function ensureChatUI(body: HTMLElement) {
   const headerWrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
   headerWrap.className = "zoteroagent-header-wrap";
   headerWrap.appendChild(viewTabs);
+  mountAgentStatusSlot(doc, headerWrap);
   headerWrap.appendChild(sessionRow);
   headerWrap.appendChild(sessionMenu);
   headerWrap.appendChild(sessionDeleteConfirm);
@@ -1986,55 +1991,25 @@ function showAgentStatus(
   kind: AgentStatusKind = "progress",
 ) {
   if (!isSafeBody(body)) return;
-  const container = body.querySelector(
-    "#zoteroagent-chat-messages",
+  const slot = body.querySelector(
+    "#zoteroagent-agent-status-slot",
   ) as HTMLElement | null;
-  if (!container) return;
-  const shouldStayPinned = isNearBottom(container);
-
-  const msgWrapper = container.querySelector(
-    ".zoteroagent-message.assistant:last-child",
-  ) as HTMLElement | null;
-  if (!msgWrapper) return;
-
-  const mainEl =
-    (msgWrapper.querySelector(
-      ".zoteroagent-message-main",
-    ) as HTMLElement | null) || msgWrapper;
-
-  let statusEl = mainEl.querySelector(
-    ".zoteroagent-agent-status",
-  ) as HTMLElement | null;
-  if (!statusEl) {
-    const doc = body.ownerDocument;
-    statusEl = doc.createElementNS(
-      "http://www.w3.org/1999/xhtml",
-      "div",
-    ) as HTMLElement;
-    const insertRef = mainEl.querySelector(".zoteroagent-message-content");
-    if (insertRef) {
-      mainEl.insertBefore(statusEl, insertRef);
-    } else {
-      mainEl.appendChild(statusEl);
-    }
+  if (!slot) return;
+  if (kind === "notice") {
+    showNoticeStatus(slot, text || "Generating...");
+  } else {
+    showBusyStatus(slot, text || "Generating...", () =>
+      abortGeneration(body),
+    );
   }
-  const presentation = getAgentStatusPresentation(kind);
-  statusEl.className = presentation.className;
-  statusEl.dataset.animated = String(presentation.animated);
-  statusEl.textContent = text || "Generating...";
-
-  scrollToBottomIfPinned(container, shouldStayPinned);
 }
 
 function hideAgentStatus(body: HTMLElement) {
   if (!isSafeBody(body)) return;
-  const container = body.querySelector(
-    "#zoteroagent-chat-messages",
+  const slot = body.querySelector(
+    "#zoteroagent-agent-status-slot",
   ) as HTMLElement | null;
-  if (!container) return;
-  container
-    .querySelectorAll(".zoteroagent-agent-status")
-    .forEach((el) => el.remove());
+  if (slot) clearAgentStatus(slot);
 }
 
 function abortGeneration(body: HTMLElement) {
@@ -2060,6 +2035,10 @@ function abortGeneration(body: HTMLElement) {
     activeCodexProcess = null;
   }
   setGenerating(body, false);
+  const slot = body.querySelector(
+    "#zoteroagent-agent-status-slot",
+  ) as HTMLElement | null;
+  if (slot) showNoticeStatus(slot, "Cancelled.");
   if (itemId > 0) renderMessages(body, itemId);
 }
 
