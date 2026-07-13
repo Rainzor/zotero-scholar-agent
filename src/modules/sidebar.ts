@@ -578,6 +578,7 @@ let memorySearchTimer: ReturnType<typeof setTimeout> | null = null;
 const topicPaperSelection = new Set<string>();
 const pendingRelationshipProposals = new Map<string, RelationshipProposal[]>();
 const codeAnalysisNotices = new Map<string, string>();
+const paperNeedsPdfEnrichment = new Set<string>();
 
 function buildMemoryPanel(doc: Document): HTMLElement {
   const panel = doc.createElementNS(XHTML, "div") as HTMLElement;
@@ -950,28 +951,24 @@ function buildColdStartAction(
   const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   button.className = "zoteroagent-cold-start-action";
   button.type = "button";
+  button.disabled = isGenerating;
   const hasExistingKnowledge = !isUnbuiltSkeleton(quality);
-  button.dataset.action = hasExistingKnowledge ? "repair" : "build";
-  button.textContent = hasExistingKnowledge
-    ? "Repair Knowledge Record"
-    : "Build Knowledge Record";
+  if (paperNeedsPdfEnrichment.has(paper.itemKey)) {
+    button.dataset.action = "enrich-pdf";
+    button.textContent = "Parse PDF with Codex";
+  } else {
+    button.dataset.action = hasExistingKnowledge ? "repair" : "build";
+    button.textContent = hasExistingKnowledge
+      ? "Repair Knowledge Record"
+      : "Build Knowledge Record";
+  }
   button.addEventListener("click", () => {
-    if (body.dataset.coldStartBusy === "true") {
-      abortGeneration(body);
-      delete body.dataset.coldStartBusy;
-      button.textContent =
-        button.dataset.action === "repair"
-          ? "Repair Knowledge Record"
-          : "Build Knowledge Record";
-      status.textContent = "Initialization cancelled.";
-      return;
-    }
     if (button.dataset.action === "enrich-pdf") {
-      void startPdfEnrichment(body, paper, button, status);
+      void startPdfEnrichment(body, paper);
     } else if (button.dataset.action === "repair") {
-      void startPaperRepair(body, paper, quality, button, status);
+      void startPaperRepair(body, paper, quality);
     } else {
-      void startPaperColdStart(body, paper, button, status);
+      void startPaperColdStart(body, paper);
     }
   });
   row.appendChild(status);
@@ -979,24 +976,29 @@ function buildColdStartAction(
   return row;
 }
 
-async function startPaperColdStart(
-  body: HTMLElement,
-  paper: PaperVaultMeta,
-  button: HTMLButtonElement,
-  status: HTMLElement,
-) {
-  if (isGenerating || body.dataset.coldStartBusy === "true") return;
+function getAgentStatusSlot(body: HTMLElement): HTMLElement | null {
+  return body.querySelector(
+    "#zoteroagent-agent-status-slot",
+  ) as HTMLElement | null;
+}
+
+async function startPaperColdStart(body: HTMLElement, paper: PaperVaultMeta) {
+  if (isGenerating) return;
   const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  const slot = getAgentStatusSlot(body);
   if (pdfItemId <= 0) {
-    status.textContent = "No accessible PDF attachment.";
+    if (slot) showNoticeStatus(slot, "No accessible PDF attachment.");
     return;
   }
-  body.dataset.coldStartBusy = "true";
-  button.textContent = "Cancel";
   setGenerating(body, true);
+  let token = slot
+    ? showBusyStatus(slot, "Starting...", () => abortGeneration(body))
+    : 0;
   const session = chatStore.getSession(paper.itemId);
   const model = session?.modelSlug || "";
+  let finalNotice = "";
+  let wonRace = true;
   try {
     const result = await runPaperColdStart(
       {
@@ -1008,39 +1010,45 @@ async function startPaperColdStart(
       },
       {
         onStatus: (text) => {
-          if (isSafeBody(body)) status.textContent = text;
+          if (slot && isTokenCurrent(slot, token)) {
+            token = showBusyStatus(slot, text, () => abortGeneration(body));
+          }
         },
         onProcess: (process) => {
           activeCodexProcess = process;
         },
       },
     );
-    status.textContent =
-      result.quality.status === "passed"
-        ? "Knowledge Record built."
-        : "Knowledge Record built with review items.";
+    if (slot) wonRace = isTokenCurrent(slot, token);
     if (result.relationshipProposals.length) {
       pendingRelationshipProposals.set(
         paper.itemKey,
         result.relationshipProposals,
       );
-      status.textContent += ` ${result.relationshipProposals.length} relationship suggestion(s) need review.`;
+    }
+    paperNeedsPdfEnrichment.delete(paper.itemKey);
+    finalNotice =
+      result.quality.status === "passed"
+        ? "Knowledge Record built."
+        : "Knowledge Record built with review items.";
+    if (result.relationshipProposals.length) {
+      finalNotice += ` ${result.relationshipProposals.length} relationship suggestion(s) need review.`;
     }
   } catch (error) {
+    if (slot) wonRace = isTokenCurrent(slot, token);
     if (error instanceof PaperTextUnavailableError) {
-      button.dataset.action = "enrich-pdf";
-      button.textContent = "Parse PDF with Codex";
-      status.textContent =
+      paperNeedsPdfEnrichment.add(paper.itemKey);
+      finalNotice =
         "This PDF has no readable text layer. Codex enrichment is opt-in.";
-      return;
+    } else {
+      finalNotice = `Initialization failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
-    status.textContent = `Initialization failed: ${
-      error instanceof Error ? error.message : String(error)
-    }`;
   } finally {
-    delete body.dataset.coldStartBusy;
     setGenerating(body, false);
   }
+  if (wonRace && slot) showNoticeStatus(slot, finalNotice);
   if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
@@ -1048,20 +1056,22 @@ async function startPaperRepair(
   body: HTMLElement,
   paper: PaperVaultMeta,
   quality: ReturnType<typeof evaluateKnowledgeSurface>,
-  button: HTMLButtonElement,
-  status: HTMLElement,
 ) {
-  if (isGenerating || body.dataset.coldStartBusy === "true") return;
+  if (isGenerating) return;
   const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  const slot = getAgentStatusSlot(body);
   if (pdfItemId <= 0) {
-    status.textContent = "No accessible PDF attachment.";
+    if (slot) showNoticeStatus(slot, "No accessible PDF attachment.");
     return;
   }
-  body.dataset.coldStartBusy = "true";
-  button.textContent = "Cancel";
   setGenerating(body, true);
+  let token = slot
+    ? showBusyStatus(slot, "Starting repair...", () => abortGeneration(body))
+    : 0;
   const session = chatStore.getSession(paper.itemId);
+  let finalNotice = "";
+  let wonRace = true;
   try {
     const result = await repairPaperKnowledge({
       paper,
@@ -1070,71 +1080,82 @@ async function startPaperRepair(
       model: session?.modelSlug,
       reasoningEffort: session?.reasoningEffort,
       onStatus: (text) => {
-        if (isSafeBody(body)) status.textContent = text;
+        if (slot && isTokenCurrent(slot, token)) {
+          token = showBusyStatus(slot, text, () => abortGeneration(body));
+        }
       },
       onProcess: (process) => {
         activeCodexProcess = process;
       },
     });
-    status.textContent =
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice =
       result.quality.status === "passed"
         ? "Knowledge Record repaired."
         : "Repair completed with remaining review items.";
   } catch (error) {
-    status.textContent = `Repair failed: ${
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = `Repair failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
   } finally {
-    delete body.dataset.coldStartBusy;
     setGenerating(body, false);
   }
+  if (wonRace && slot) showNoticeStatus(slot, finalNotice);
   if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
-async function startPdfEnrichment(
-  body: HTMLElement,
-  paper: PaperVaultMeta,
-  button: HTMLButtonElement,
-  status: HTMLElement,
-) {
-  if (isGenerating || body.dataset.coldStartBusy === "true") return;
+async function startPdfEnrichment(body: HTMLElement, paper: PaperVaultMeta) {
+  if (isGenerating) return;
   const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
   const pdfItem = pdfItemId > 0 ? (Zotero.Items.get(pdfItemId) as any) : null;
   const pdfPath = String(pdfItem?.getFilePath?.() || "");
+  const slot = getAgentStatusSlot(body);
   if (!pdfPath) {
-    status.textContent = "Could not resolve the local PDF path.";
+    if (slot) showNoticeStatus(slot, "Could not resolve the local PDF path.");
     return;
   }
-  body.dataset.coldStartBusy = "true";
-  button.textContent = "Cancel";
   setGenerating(body, true);
+  let token = slot
+    ? showBusyStatus(slot, "Starting PDF parsing...", () =>
+        abortGeneration(body),
+      )
+    : 0;
   const model = chatStore.getSession(paper.itemId)?.modelSlug || "";
   let parsed = false;
+  let finalNotice = "";
+  let wonRace = true;
   try {
     await parseScannedPdfWithCodex({
       paper,
       pdfPath,
       model,
       onStatus: (text) => {
-        if (isSafeBody(body)) status.textContent = text;
+        if (slot && isTokenCurrent(slot, token)) {
+          token = showBusyStatus(slot, text, () => abortGeneration(body));
+        }
       },
       onProcess: (process) => {
         activeCodexProcess = process;
       },
     });
     parsed = true;
+    paperNeedsPdfEnrichment.delete(paper.itemKey);
   } catch (error) {
-    status.textContent = `PDF parsing failed: ${
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = `PDF parsing failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
   } finally {
-    delete body.dataset.coldStartBusy;
     setGenerating(body, false);
   }
-  if (!parsed || !isSafeBody(body)) return;
-  button.dataset.action = "build";
-  await startPaperColdStart(body, paper, button, status);
+  if (!parsed) {
+    if (wonRace && slot) showNoticeStatus(slot, finalNotice);
+    return;
+  }
+  if (!isSafeBody(body)) return;
+  await startPaperColdStart(body, paper);
 }
 
 function buildPaperSignalBar(
@@ -1217,15 +1238,17 @@ function buildCodeAnalysisAction(
   input.placeholder = "https://github.com/owner/repository";
   input.className = "zoteroagent-code-repository";
   input.setAttribute("aria-label", "GitHub repository URL");
+  input.disabled = isGenerating;
   const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   button.type = "button";
   button.className = "zoteroagent-cold-start-action";
   button.textContent = "Analyze code";
+  button.disabled = isGenerating;
   const status = doc.createElementNS(XHTML, "span") as HTMLElement;
   status.className = "zoteroagent-cold-start-status";
   status.textContent = codeAnalysisNotices.get(paper.itemKey) || "";
   button.addEventListener("click", () => {
-    void startCodeAnalysis(body, paper, input, button, status);
+    void startCodeAnalysis(body, paper, input.value);
   });
   wrap.appendChild(input);
   wrap.appendChild(button);
@@ -1236,26 +1259,30 @@ function buildCodeAnalysisAction(
 async function startCodeAnalysis(
   body: HTMLElement,
   paper: PaperVaultMeta,
-  input: HTMLInputElement,
-  button: HTMLButtonElement,
-  status: HTMLElement,
+  repositoryUrlInput: string,
 ) {
   if (isGenerating) return;
   const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
+  const slot = getAgentStatusSlot(body);
   if (pdfItemId <= 0) {
-    status.textContent = "No accessible PDF attachment.";
+    if (slot) showNoticeStatus(slot, "No accessible PDF attachment.");
     return;
   }
-  const repositoryUrl = input.value.trim();
+  const repositoryUrl = repositoryUrlInput.trim();
   if (!repositoryUrl) {
-    status.textContent = "Enter a GitHub repository URL.";
+    if (slot) showNoticeStatus(slot, "Enter a GitHub repository URL.");
     return;
   }
   setGenerating(body, true);
-  input.disabled = true;
-  button.disabled = true;
+  let token = slot
+    ? showBusyStatus(slot, "Starting code analysis...", () =>
+        abortGeneration(body),
+      )
+    : 0;
   const session = chatStore.getSession(paper.itemId);
+  let finalNotice = "";
+  let wonRace = true;
   try {
     const result = await analyzePaperCode(
       {
@@ -1267,32 +1294,33 @@ async function startCodeAnalysis(
       },
       {
         onStatus: (text) => {
-          status.textContent = text;
+          if (slot && isTokenCurrent(slot, token)) {
+            token = showBusyStatus(slot, text, () => abortGeneration(body));
+          }
         },
         onProcess: (process) => {
           activeCodexProcess = process;
         },
       },
     );
-    const notice = result.repositoryModified
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = result.repositoryModified
       ? "Analysis saved. The local checkout was modified; review it before updating."
       : `Analyzed ${result.repository.owner}/${result.repository.repository} at ${result.commit.slice(
           0,
           8,
         )}.`;
-    codeAnalysisNotices.set(paper.itemKey, notice);
-    status.textContent = notice;
+    codeAnalysisNotices.set(paper.itemKey, finalNotice);
   } catch (error) {
-    const notice = `Code analysis failed: ${
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = `Code analysis failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
-    codeAnalysisNotices.set(paper.itemKey, notice);
-    status.textContent = notice;
+    codeAnalysisNotices.set(paper.itemKey, finalNotice);
   } finally {
-    input.disabled = false;
-    button.disabled = false;
     setGenerating(body, false);
   }
+  if (wonRace && slot) showNoticeStatus(slot, finalNotice);
   if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
@@ -1961,9 +1989,9 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   for (const action of sessionActions) action.disabled = generating;
   for (const action of Array.from(
     body.querySelectorAll(
-      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select",
+      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select, .zoteroagent-cold-start-action, .zoteroagent-code-repository",
     ),
-  ) as Array<HTMLButtonElement | HTMLSelectElement>) {
+  ) as Array<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>) {
     action.disabled = generating;
   }
   if (sendBtn) {
