@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWLEDGE_SURFACE_PLUGIN_END,
   KNOWLEDGE_SURFACE_PLUGIN_START,
+  PAPER_VALUE_TYPES,
   buildInitialNotesMarkdown,
   buildKnowledgeSurfacePluginBlock,
   insertPaperNoteEntry,
   migrateKnowledgeSurfaceV2,
   parseKnowledgeSurface,
   updateKnowledgeSurfaceSignals,
+  valueTypeDescription,
+  valueTypeLabel,
 } from "../src/services/knowledge-surface";
 
 const BODY = `# Paper
@@ -221,5 +224,24 @@ Later appended contribution detail.
       notes.indexOf("### 2026-07-12 [agent, user-confirmed]"),
     ).toBeLessThan(notes.indexOf("## Thoughts and Critique"));
     expect(notes).toContain("<!-- action-id: action-1 -->");
+  });
+});
+
+describe("value type label and description", () => {
+  it("gives every value type a short label and a plain-language description", () => {
+    for (const valueType of PAPER_VALUE_TYPES) {
+      const label = valueTypeLabel(valueType);
+      const description = valueTypeDescription(valueType);
+      expect(label).toBeTruthy();
+      expect(description.length).toBeGreaterThan(label.length);
+      expect(description).not.toBe(valueType);
+    }
+  });
+
+  it("maps each slug to its expected label", () => {
+    expect(valueTypeLabel("method-advance")).toBe("Method");
+    expect(valueTypeLabel("transferable-insight")).toBe("Insight");
+    expect(valueTypeLabel("methodology")).toBe("Methodology");
+    expect(valueTypeLabel("canon")).toBe("Canon");
   });
 });

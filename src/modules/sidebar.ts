@@ -14,6 +14,8 @@ import { generateContextDigest } from "../services/context-digest";
 import {
   PAPER_VALUE_TYPES,
   parseKnowledgeSurface,
+  valueTypeDescription,
+  valueTypeLabel,
   type PaperTier,
   type PaperValueType,
 } from "../services/knowledge-surface";
@@ -1172,7 +1174,7 @@ function buildPaperSignalBar(
       signals.valueTypes.includes(valueType),
     );
     button.textContent = valueTypeLabel(valueType);
-    button.title = `Toggle value type: ${valueType}`;
+    button.title = valueTypeDescription(valueType);
     button.addEventListener("click", () => {
       const next = signals.valueTypes.includes(valueType)
         ? signals.valueTypes.filter((entry) => entry !== valueType)
@@ -1197,13 +1199,6 @@ function buildPaperSignalBar(
     bar.appendChild(chip);
   }
   return bar;
-}
-
-function valueTypeLabel(valueType: PaperValueType): string {
-  if (valueType === "method-advance") return "Method";
-  if (valueType === "transferable-insight") return "Insight";
-  if (valueType === "methodology") return "Methodology";
-  return "Canon";
 }
 
 function buildCodeAnalysisAction(

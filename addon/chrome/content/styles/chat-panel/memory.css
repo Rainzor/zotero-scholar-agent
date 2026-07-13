@@ -164,10 +164,11 @@
   margin-left: 4px;
   padding: 2px 5px;
   border: 1px solid var(--za-accent);
-  border-radius: var(--za-radius-sm);
+  border-radius: var(--za-radius-pill);
   background: var(--za-accent-soft);
-  color: var(--za-text-secondary);
+  color: var(--za-text-tertiary);
   font-size: var(--za-font-xs);
+  cursor: default;
 }
 
 .zoteroagent-paper-signal-chip.is-tag {

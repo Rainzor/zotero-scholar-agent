@@ -11,6 +11,23 @@ export const PAPER_VALUE_TYPES = [
 ] as const;
 export type PaperValueType = (typeof PAPER_VALUE_TYPES)[number];
 
+export function valueTypeLabel(valueType: PaperValueType): string {
+  if (valueType === "method-advance") return "Method";
+  if (valueType === "transferable-insight") return "Insight";
+  if (valueType === "methodology") return "Methodology";
+  return "Canon";
+}
+
+export function valueTypeDescription(valueType: PaperValueType): string {
+  if (valueType === "method-advance")
+    return "This paper itself advances a method or technique.";
+  if (valueType === "transferable-insight")
+    return "The value is a transferable insight — not necessarily the method itself.";
+  if (valueType === "methodology")
+    return "This paper represents a broader methodology worth understanding on its own.";
+  return "A foundational, canonical paper that defines terminology or framing for the field.";
+}
+
 export const TIER_SECTION_SHAPES = {
   L0: ["Verdict", "Why Stop Here", "Better Pointers", "Library Connections"],
   L1: ["TL;DR", "Contribution", "Method", "Takeaways", "Library Connections"],
