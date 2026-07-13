@@ -1433,9 +1433,6 @@ async function startTopicNoteCreation(body: HTMLElement) {
   const status = body.querySelector(
     "#zoteroagent-topic-status",
   ) as HTMLElement | null;
-  const button = body.querySelector(
-    "#zoteroagent-topic-create",
-  ) as HTMLButtonElement | null;
   const title = String(input?.value || "").trim();
   if (!title) {
     if (status) status.textContent = "Enter a topic title.";
@@ -1445,10 +1442,15 @@ async function startTopicNoteCreation(body: HTMLElement) {
   const currentItemId = Number(body.dataset.itemID) || 0;
   const session =
     currentItemId > 0 ? chatStore.getSession(currentItemId) : null;
+  const slot = getAgentStatusSlot(body);
   setGenerating(body, true);
-  if (input) input.disabled = true;
-  if (button) button.disabled = true;
-  let finalStatus = "";
+  let token = slot
+    ? showBusyStatus(slot, "Starting topic note...", () =>
+        abortGeneration(body),
+      )
+    : 0;
+  let finalNotice = "";
+  let wonRace = true;
   try {
     const result = await createOrUpdateTopicNote({
       title,
@@ -1456,25 +1458,27 @@ async function startTopicNoteCreation(body: HTMLElement) {
       model: session?.modelSlug,
       reasoningEffort: session?.reasoningEffort,
       onStatus: (text) => {
-        if (status) status.textContent = text;
+        if (slot && isTokenCurrent(slot, token)) {
+          token = showBusyStatus(slot, text, () => abortGeneration(body));
+        }
       },
       onProcess: (process) => {
         activeCodexProcess = process;
       },
     });
-    finalStatus = `Saved ${result.topic.title} from ${result.topic.paperItemKeys.length} papers.`;
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = `Saved ${result.topic.title} from ${result.topic.paperItemKeys.length} papers.`;
     topicPaperSelection.clear();
     if (input) input.value = "";
   } catch (error) {
-    finalStatus = `Topic creation failed: ${
+    if (slot) wonRace = isTokenCurrent(slot, token);
+    finalNotice = `Topic creation failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
   } finally {
-    if (input) input.disabled = false;
-    if (button) button.disabled = false;
     setGenerating(body, false);
-    if (status) status.textContent = finalStatus;
   }
+  if (wonRace && slot) showNoticeStatus(slot, finalNotice);
   if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
@@ -1989,7 +1993,7 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   for (const action of sessionActions) action.disabled = generating;
   for (const action of Array.from(
     body.querySelectorAll(
-      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select, .zoteroagent-cold-start-action, .zoteroagent-code-repository",
+      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select, .zoteroagent-cold-start-action, .zoteroagent-code-repository, .zoteroagent-topic-title",
     ),
   ) as Array<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>) {
     action.disabled = generating;
@@ -3148,30 +3152,45 @@ function buildTierSuggestionBlock(
     const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
     const session = chatStore.getSession(itemId);
     if (pdfItemId <= 0) return;
+    const slot = getAgentStatusSlot(body);
     setGenerating(body, true);
+    let token = slot
+      ? showBusyStatus(slot, "Upgrading to close reading...", () =>
+          abortGeneration(body),
+        )
+      : 0;
+    let wonRace = true;
     void transitionPaperTier({
       paper,
       pdfItemId,
       targetTier: "L2",
       model: session?.modelSlug,
       reasoningEffort: session?.reasoningEffort,
+      onStatus: (text) => {
+        if (slot && isTokenCurrent(slot, token)) {
+          token = showBusyStatus(slot, text, () => abortGeneration(body));
+        }
+      },
       onProcess: (process) => {
         activeCodexProcess = process;
       },
     })
       .then(() => {
+        if (slot) wonRace = isTokenCurrent(slot, token);
         const message = chatStore.getMessages(itemId)[messageIndex];
         if (message) message.tierSuggestion = undefined;
         chatStore.touchSession(itemId);
       })
       .catch((error) => {
-        showAgentStatus(
-          body,
-          `Tier upgrade failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          "notice",
-        );
+        if (slot) wonRace = isTokenCurrent(slot, token);
+        if (wonRace && slot) {
+          showNoticeStatus(
+            slot,
+            `Tier upgrade failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       })
       .finally(() => {
         setGenerating(body, false);
