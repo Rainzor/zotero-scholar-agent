@@ -128,10 +128,6 @@
   border-left: 3px solid var(--za-accent);
 }
 
-.zoteroagent-context-chip.response-quote {
-  border-left: 3px solid var(--za-accent);
-}
-
 .zoteroagent-context-chip.paper-context {
   border-left: 3px solid var(--za-accent);
 }

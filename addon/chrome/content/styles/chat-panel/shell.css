@@ -38,27 +38,6 @@
   user-select: text;
 }
 
-.zoteroagent-quote-popup {
-  position: fixed;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-pill);
-  background: var(--za-bg-surface);
-  color: var(--za-text-secondary);
-  font-size: var(--za-font-sm);
-  font-weight: 600;
-  padding: 4px 10px;
-  box-shadow: 0 4px 12px var(--za-shadow-color);
-  cursor: pointer;
-}
-
-.zoteroagent-quote-popup.is-visible {
-  display: inline-flex;
-}
-
 .zoteroagent-chat-messages::-webkit-scrollbar {
   width: 5px;
 }

@@ -122,7 +122,6 @@ class Addon {
     chat: {
       prefillInput: string;
       referenceText: string;
-      responseQuote: string;
       mentionedPapers: PaperContext[];
       pendingImages: LocalImageRef[];
     };
@@ -148,7 +147,6 @@ class Addon {
       chat: {
         prefillInput: "",
         referenceText: "",
-        responseQuote: "",
         mentionedPapers: [],
         pendingImages: [],
       },

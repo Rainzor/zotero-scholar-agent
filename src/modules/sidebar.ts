@@ -540,10 +540,7 @@ export function syncReferenceCardDirect(retryCount = 0) {
       }
       return;
     }
-    if (
-      inputArea &&
-      (addon.data.chat.referenceText || addon.data.chat.responseQuote)
-    ) {
+    if (inputArea && addon.data.chat.referenceText) {
       inputArea.style.display = "flex";
       activeBody.dataset.chatMode = "chat";
       const itemId = Number(activeBody.dataset.itemID);
@@ -652,7 +649,6 @@ function switchChatView(
   mode: "chat" | "memory",
   renderBrowse = true,
 ) {
-  hideQuotePopupAndClearSelection(body);
   body.dataset.chatMode = mode;
   const isMemory = mode === "memory";
   const setDisplay = (sel: string, value: string) => {
@@ -687,7 +683,6 @@ function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
 }
 
 async function renderMemoryBrowse(body: HTMLElement) {
-  hideQuotePopupAndClearSelection(body);
   const host = getMemoryBodyEl(body);
   if (!host) return;
   const search = body.querySelector(
@@ -1796,15 +1791,6 @@ function ensureChatUI(body: HTMLElement) {
   container.appendChild(messagesDiv);
   container.appendChild(memoryPanel);
   container.appendChild(inputArea);
-  const quotePopup = doc.createElementNS(
-    XHTML_NS,
-    "button",
-  ) as HTMLButtonElement;
-  quotePopup.id = "zoteroagent-quote-popup";
-  quotePopup.className = "zoteroagent-quote-popup";
-  quotePopup.type = "button";
-  setIconButton(quotePopup, "quote", "Quote selection");
-  container.appendChild(quotePopup);
   body.appendChild(container);
 
   bindChatEvents(body);
@@ -1962,7 +1948,6 @@ function bindChatEvents(body: HTMLElement) {
       renderHistoryPanel(body, itemId);
       panel.style.display = "block";
     });
-  bindAssistantSelectionEvents(body);
 }
 
 // ===================== Generation State =====================
@@ -2294,7 +2279,6 @@ async function submitQuestion(body: HTMLElement) {
   }
 
   const refText = addon.data.chat.referenceText;
-  const responseQuote = addon.data.chat.responseQuote;
   const paperMeta = getPaperMeta(itemId);
   const mentionedPapers = normalizePaperContexts(
     addon.data.chat.mentionedPapers,
@@ -2310,8 +2294,6 @@ async function submitQuestion(body: HTMLElement) {
     .map((message) => ({ ...message }));
   const contextBlocks: string[] = [];
   if (refText) contextBlocks.push(`${SELECTED_TEXT_PREFIX}${refText}`);
-  if (responseQuote)
-    contextBlocks.push(`${RESPONSE_QUOTE_PREFIX}${responseQuote}`);
   const displayContent = contextBlocks.length
     ? `${contextBlocks.join("\n\n")}\n\n${question}`
     : question;
@@ -2330,7 +2312,6 @@ async function submitQuestion(body: HTMLElement) {
   input.value = "";
   autoResizeTextarea(input);
   addon.data.chat.referenceText = "";
-  addon.data.chat.responseQuote = "";
   addon.data.chat.mentionedPapers = [];
   addon.data.chat.pendingImages = addon.data.chat.pendingImages.filter(
     (ref) => !imageRefs.some((used) => used.id === ref.id),
@@ -2355,7 +2336,7 @@ async function submitQuestion(body: HTMLElement) {
     },
     text: question,
     selectedText: refText,
-    responseQuote,
+    responseQuote: "",
     mentionedPapers,
     imageRefs: imageRefs.map((ref) => ({ ...ref })),
     imagePaths: [],
@@ -2856,7 +2837,6 @@ function updateStreamingMessage(
 ) {
   try {
     if (!isSafeBody(body)) return;
-    hideQuotePopupAndClearSelection(body);
     const container = body.querySelector(
       "#zoteroagent-chat-messages",
     ) as HTMLElement | null;
@@ -3216,7 +3196,6 @@ function buildTierSuggestionBlock(
 function renderMessages(body: HTMLElement, itemId: number) {
   try {
     if (!isSafeBody(body)) return;
-    hideQuotePopupAndClearSelection(body);
     renderMessageList({
       body,
       itemId,
@@ -3265,11 +3244,7 @@ function syncPrefill(body: HTMLElement) {
 
   syncContextChips(body);
 
-  if (
-    addon.data.chat.referenceText ||
-    addon.data.chat.responseQuote ||
-    addon.data.chat.prefillInput
-  ) {
+  if (addon.data.chat.referenceText || addon.data.chat.prefillInput) {
     body.dataset.chatMode = "chat";
     const itemId = Number(body.dataset.itemID);
     if (itemId > 0) {
@@ -3697,43 +3672,32 @@ function truncateContextPreview(text: string, max = 180): string {
   return `${trimmed.slice(0, max - 1)}…`;
 }
 
-function createContextChip(
-  body: HTMLElement,
-  kind: "text" | "response",
-  rawText: string,
-): HTMLElement {
+function createContextChip(body: HTMLElement, rawText: string): HTMLElement {
   const doc = body.ownerDocument;
   const chip = doc.createElementNS(XHTML_NS, "div") as HTMLElement;
-  chip.className = `zoteroagent-context-chip ${kind === "text" ? "text-context" : "response-quote"}`;
+  chip.className = "zoteroagent-context-chip text-context";
   const preview = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
   preview.type = "button";
   preview.className = "zoteroagent-context-chip-preview";
 
   const icon = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   icon.className = "zoteroagent-context-chip-icon";
-  insertSvgMarkup(icon, getIconSvg(kind === "text" ? "attachPdf" : "quote"));
+  insertSvgMarkup(icon, getIconSvg("attachPdf"));
 
   const label = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
   label.className = "zoteroagent-context-chip-label";
 
-  let displayText = rawText;
-  if (kind === "text") {
-    const parsed = parseQuotedPageContext(rawText);
-    displayText = parsed.text;
-    label.textContent = "Text Context";
-    if (parsed.pageLabel) {
-      const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
-      meta.className = "zoteroagent-context-chip-meta";
-      meta.textContent = `p.${parsed.pageLabel}`;
-      preview.appendChild(icon);
-      preview.appendChild(label);
-      preview.appendChild(meta);
-    } else {
-      preview.appendChild(icon);
-      preview.appendChild(label);
-    }
+  const parsed = parseQuotedPageContext(rawText);
+  const displayText = parsed.text;
+  label.textContent = "Text Context";
+  if (parsed.pageLabel) {
+    const meta = doc.createElementNS(XHTML_NS, "span") as HTMLElement;
+    meta.className = "zoteroagent-context-chip-meta";
+    meta.textContent = `p.${parsed.pageLabel}`;
+    preview.appendChild(icon);
+    preview.appendChild(label);
+    preview.appendChild(meta);
   } else {
-    label.textContent = "Response Quote";
     preview.appendChild(icon);
     preview.appendChild(label);
   }
@@ -3742,21 +3706,12 @@ function createContextChip(
   const dismiss = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
   dismiss.type = "button";
   dismiss.className = "zoteroagent-context-chip-dismiss";
-  setIconButton(
-    dismiss,
-    "clear",
-    kind === "text" ? "Remove text context" : "Remove response quote",
-  );
+  setIconButton(dismiss, "clear", "Remove text context");
   dismiss.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (kind === "text") {
-      addon.data.chat.referenceText = "";
-    } else {
-      addon.data.chat.responseQuote = "";
-    }
+    addon.data.chat.referenceText = "";
     syncContextChips(body);
-    hideQuotePopup(body);
   });
   chip.appendChild(dismiss);
 
@@ -4006,7 +3961,6 @@ function syncContextChips(body: HTMLElement) {
   while (wrap.firstChild) wrap.firstChild.remove();
 
   const refText = String(addon.data.chat.referenceText || "").trim();
-  const responseQuote = String(addon.data.chat.responseQuote || "").trim();
   const itemId = Number(body.dataset.itemID) || 0;
   const currentKey = itemId > 0 ? getPaperMeta(itemId).itemKey : "";
   const mentionedPapers = normalizePaperContexts(
@@ -4019,14 +3973,12 @@ function syncContextChips(body: HTMLElement) {
       ref.sessionId === chatStore.getActiveSessionId(itemId),
   );
   addon.data.chat.mentionedPapers = mentionedPapers;
-  if (!refText && !responseQuote && !mentionedPapers.length && !images.length) {
+  if (!refText && !mentionedPapers.length && !images.length) {
     wrap.style.display = "none";
     return;
   }
 
-  if (refText) wrap.appendChild(createContextChip(body, "text", refText));
-  if (responseQuote)
-    wrap.appendChild(createContextChip(body, "response", responseQuote));
+  if (refText) wrap.appendChild(createContextChip(body, refText));
   for (const paper of mentionedPapers) {
     wrap.appendChild(createPaperContextChip(body, paper));
   }
@@ -4036,207 +3988,6 @@ function syncContextChips(body: HTMLElement) {
   wrap.style.display = "flex";
 }
 
-function findAssistantBubbleFromNode(node: Node | null): HTMLElement | null {
-  let current: Node | null = node;
-  while (current) {
-    if (current.nodeType === 1) {
-      const element = current as Element;
-      if (
-        element.classList?.contains("zoteroagent-message") &&
-        element.classList?.contains("assistant")
-      ) {
-        return element as HTMLElement;
-      }
-      const viaClosest = element.closest(".zoteroagent-message.assistant");
-      if (viaClosest) return viaClosest as HTMLElement;
-    }
-    current = (current as any).parentNode || null;
-  }
-  return null;
-}
-
-function getAssistantSelection(
-  body: HTMLElement,
-): { text: string; rect: DOMRect } | null {
-  const win = body.ownerDocument.defaultView;
-  const selection = win?.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed)
-    return null;
-  const startBubble = findAssistantBubbleFromNode(selection.anchorNode);
-  const endBubble = findAssistantBubbleFromNode(selection.focusNode);
-  if (!startBubble || !endBubble || startBubble !== endBubble) return null;
-  const messages = body.querySelector("#zoteroagent-chat-messages");
-  if (!messages || !messages.contains(startBubble)) return null;
-
-  const text = String(selection.toString() || "").trim();
-  // Require at least two non-whitespace characters: a single stray character
-  // is almost always an accidental sub-pixel drag (e.g. while clicking a
-  // page-citation chip or Send), not an intentional quote.
-  if (text.length < 2) return null;
-  const range = selection.getRangeAt(0);
-  let rect: DOMRect | null = null;
-  try {
-    const focusRange = body.ownerDocument.createRange();
-    focusRange.setStart(
-      selection.focusNode || range.endContainer,
-      selection.focusOffset,
-    );
-    focusRange.collapse(true);
-    const focusRect = focusRange.getBoundingClientRect();
-    if (focusRect && (focusRect.width || focusRect.height)) {
-      rect = focusRect;
-    } else {
-      const focusRects = Array.from(focusRange.getClientRects() || []);
-      if (focusRects.length > 0) {
-        rect = focusRects[focusRects.length - 1] as DOMRect;
-      }
-    }
-  } catch {
-    // fall back to range rect below
-  }
-  if (!rect) {
-    rect = range.getBoundingClientRect();
-    const allRects = Array.from(range.getClientRects() || []);
-    if (!rect.width && !rect.height && allRects.length > 0) {
-      rect = allRects[allRects.length - 1] as DOMRect;
-    }
-  }
-  // A genuinely tiny rect (e.g. from a 1px accidental drag) is structurally
-  // "non-degenerate" but not something a human would call a selection.
-  if (!rect || rect.width + rect.height < 4) return null;
-  return { text, rect };
-}
-
-function hideQuotePopup(body: HTMLElement) {
-  const popup = body.querySelector(
-    "#zoteroagent-quote-popup",
-  ) as HTMLElement | null;
-  if (!popup) return;
-  popup.classList.remove("is-visible");
-}
-
-// Hides the popup AND clears the real browser Selection, not just the
-// popup UI. Two independent reasons this matters:
-// (1) Streaming/full re-renders tear down and rebuild the assistant
-//     message DOM (including splitting text nodes around [page N] chips);
-//     Gecko can retarget a stale selection onto the newly inserted text
-//     nodes rather than clearing it.
-// (2) An incidental, non-degenerate selection can form from an ordinary
-//     click-drag over already-rendered text (e.g. while positioning the
-//     cursor or dragging a scrollbar). Hiding the popup on scroll without
-//     clearing that selection leaves it live; any later mouseup/keyup
-//     anywhere in the whole window (the selection listeners are bound at
-//     document capture scope, not just this panel) re-evaluates it and
-//     shows the popup again at wherever that text is now scrolled to.
-// Not used at the pointerdown-elsewhere dismiss site: an ordinary left
-// click already natively collapses any selection, and forcing a clear on
-// every pointerdown (including right-click) would break "right-click to
-// copy the selected text" before the context menu acts on it.
-function hideQuotePopupAndClearSelection(body: HTMLElement) {
-  hideQuotePopup(body);
-  body.ownerDocument.defaultView?.getSelection()?.removeAllRanges();
-}
-
-function showQuotePopup(body: HTMLElement, selectionRect: DOMRect) {
-  const popup = body.querySelector(
-    "#zoteroagent-quote-popup",
-  ) as HTMLElement | null;
-  const win = body.ownerDocument.defaultView;
-  if (!popup || !win) return;
-
-  popup.classList.add("is-visible");
-  const popupWidth = popup.offsetWidth || 92;
-  const popupHeight = popup.offsetHeight || 30;
-  const margin = 8;
-  let left = selectionRect.left + 6;
-  let top = selectionRect.bottom + 6;
-  const maxWidth = win.innerWidth || 0;
-  const maxHeight = win.innerHeight || 0;
-  if (left + popupWidth > maxWidth - margin) {
-    left = maxWidth - popupWidth - margin;
-  }
-  if (left < margin) left = margin;
-  if (top + popupHeight > maxHeight - margin) {
-    top = selectionRect.top - popupHeight - 6;
-  }
-  if (top < margin) top = margin;
-  popup.style.left = `${Math.round(left)}px`;
-  popup.style.top = `${Math.round(top)}px`;
-}
-
-function updateQuotePopupFromSelection(body: HTMLElement) {
-  const selection = getAssistantSelection(body);
-  if (!selection) {
-    hideQuotePopup(body);
-    return;
-  }
-  showQuotePopup(body, selection.rect);
-}
-
-function quoteSelectedAssistantText(body: HTMLElement) {
-  const selection = getAssistantSelection(body);
-  if (!selection) {
-    hideQuotePopup(body);
-    return;
-  }
-  addon.data.chat.responseQuote = selection.text;
-  syncContextChips(body);
-  hideQuotePopup(body);
-  body.dataset.chatMode = "chat";
-  const itemId = Number(body.dataset.itemID);
-  if (itemId > 0) syncLayoutState(body, itemId);
-  const win = body.ownerDocument.defaultView;
-  win?.getSelection()?.removeAllRanges();
-  (
-    body.querySelector("#zoteroagent-chat-input") as HTMLTextAreaElement | null
-  )?.focus();
-}
-
-function bindAssistantSelectionEvents(body: HTMLElement) {
-  if (body.dataset.quoteSelectionBound === "1") return;
-  body.dataset.quoteSelectionBound = "1";
-
-  const messages = body.querySelector(
-    "#zoteroagent-chat-messages",
-  ) as HTMLElement | null;
-  const popup = body.querySelector(
-    "#zoteroagent-quote-popup",
-  ) as HTMLButtonElement | null;
-  const doc = body.ownerDocument;
-  if (!messages || !popup) return;
-
-  popup.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    quoteSelectedAssistantText(body);
-  });
-
-  const handleSelectionUpdate = () => {
-    doc.defaultView?.setTimeout(() => {
-      if (isSafeBody(body)) updateQuotePopupFromSelection(body);
-    }, 0);
-  };
-  // Scoped to this panel, not the whole document: a document-wide capture
-  // listener re-checks selection on every mouseup/keyup anywhere in the
-  // entire Zotero window (clicking a library item, typing elsewhere),
-  // which can resurrect a real-but-irrelevant selection made earlier in
-  // this panel. `body`-scoped capture still catches a drag that starts in
-  // `messages` but releases outside it (e.g. over the composer).
-  body.addEventListener("mouseup", handleSelectionUpdate, true);
-  body.addEventListener("keyup", handleSelectionUpdate, true);
-  messages.addEventListener("scroll", () => {
-    hideQuotePopupAndClearSelection(body);
-  });
-  body.addEventListener(
-    "pointerdown",
-    (event) => {
-      const target = event.target as Element | null;
-      if (target?.closest("#zoteroagent-quote-popup")) return;
-      hideQuotePopup(body);
-    },
-    true,
-  );
-}
 
 function getItemTitle(itemId: number): string {
   try {
