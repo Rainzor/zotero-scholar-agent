@@ -4216,9 +4216,14 @@ function bindAssistantSelectionEvents(body: HTMLElement) {
       if (isSafeBody(body)) updateQuotePopupFromSelection(body);
     }, 0);
   };
-  messages.addEventListener("mouseup", handleSelectionUpdate);
-  doc.addEventListener("mouseup", handleSelectionUpdate, true);
-  doc.addEventListener("keyup", handleSelectionUpdate, true);
+  // Scoped to this panel, not the whole document: a document-wide capture
+  // listener re-checks selection on every mouseup/keyup anywhere in the
+  // entire Zotero window (clicking a library item, typing elsewhere),
+  // which can resurrect a real-but-irrelevant selection made earlier in
+  // this panel. `body`-scoped capture still catches a drag that starts in
+  // `messages` but releases outside it (e.g. over the composer).
+  body.addEventListener("mouseup", handleSelectionUpdate, true);
+  body.addEventListener("keyup", handleSelectionUpdate, true);
   messages.addEventListener("scroll", () => {
     hideQuotePopupAndClearSelection(body);
   });
