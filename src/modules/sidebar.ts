@@ -4116,14 +4116,22 @@ function hideQuotePopup(body: HTMLElement) {
 }
 
 // Hides the popup AND clears the real browser Selection, not just the
-// popup UI. Streaming and full re-renders tear down and rebuild the
-// assistant message DOM (including splitting text nodes around [page N]
-// chips); Gecko can retarget a stale/incidental selection onto the newly
-// inserted text nodes rather than clearing it, producing a real,
-// non-collapsed selection with no user action. The next mouseup/keyup
-// anywhere in the panel then re-triggers the popup at that location. Use
-// this only at DOM-rebuild call sites, not at dismiss-only sites (scroll,
-// outside click) where the user's selection may still be intentional.
+// popup UI. Two independent reasons this matters:
+// (1) Streaming/full re-renders tear down and rebuild the assistant
+//     message DOM (including splitting text nodes around [page N] chips);
+//     Gecko can retarget a stale selection onto the newly inserted text
+//     nodes rather than clearing it.
+// (2) An incidental, non-degenerate selection can form from an ordinary
+//     click-drag over already-rendered text (e.g. while positioning the
+//     cursor or dragging a scrollbar). Hiding the popup on scroll without
+//     clearing that selection leaves it live; any later mouseup/keyup
+//     anywhere in the whole window (the selection listeners are bound at
+//     document capture scope, not just this panel) re-evaluates it and
+//     shows the popup again at wherever that text is now scrolled to.
+// Not used at the pointerdown-elsewhere dismiss site: an ordinary left
+// click already natively collapses any selection, and forcing a clear on
+// every pointerdown (including right-click) would break "right-click to
+// copy the selected text" before the context menu acts on it.
 function hideQuotePopupAndClearSelection(body: HTMLElement) {
   hideQuotePopup(body);
   body.ownerDocument.defaultView?.getSelection()?.removeAllRanges();
@@ -4212,7 +4220,7 @@ function bindAssistantSelectionEvents(body: HTMLElement) {
   doc.addEventListener("mouseup", handleSelectionUpdate, true);
   doc.addEventListener("keyup", handleSelectionUpdate, true);
   messages.addEventListener("scroll", () => {
-    hideQuotePopup(body);
+    hideQuotePopupAndClearSelection(body);
   });
   body.addEventListener(
     "pointerdown",
