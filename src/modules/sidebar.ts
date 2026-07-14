@@ -652,7 +652,7 @@ function switchChatView(
   mode: "chat" | "memory",
   renderBrowse = true,
 ) {
-  hideQuotePopup(body);
+  hideQuotePopupAndClearSelection(body);
   body.dataset.chatMode = mode;
   const isMemory = mode === "memory";
   const setDisplay = (sel: string, value: string) => {
@@ -687,7 +687,7 @@ function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
 }
 
 async function renderMemoryBrowse(body: HTMLElement) {
-  hideQuotePopup(body);
+  hideQuotePopupAndClearSelection(body);
   const host = getMemoryBodyEl(body);
   if (!host) return;
   const search = body.querySelector(
@@ -2856,7 +2856,7 @@ function updateStreamingMessage(
 ) {
   try {
     if (!isSafeBody(body)) return;
-    hideQuotePopup(body);
+    hideQuotePopupAndClearSelection(body);
     const container = body.querySelector(
       "#zoteroagent-chat-messages",
     ) as HTMLElement | null;
@@ -3216,7 +3216,7 @@ function buildTierSuggestionBlock(
 function renderMessages(body: HTMLElement, itemId: number) {
   try {
     if (!isSafeBody(body)) return;
-    hideQuotePopup(body);
+    hideQuotePopupAndClearSelection(body);
     renderMessageList({
       body,
       itemId,
@@ -4113,6 +4113,20 @@ function hideQuotePopup(body: HTMLElement) {
   ) as HTMLElement | null;
   if (!popup) return;
   popup.classList.remove("is-visible");
+}
+
+// Hides the popup AND clears the real browser Selection, not just the
+// popup UI. Streaming and full re-renders tear down and rebuild the
+// assistant message DOM (including splitting text nodes around [page N]
+// chips); Gecko can retarget a stale/incidental selection onto the newly
+// inserted text nodes rather than clearing it, producing a real,
+// non-collapsed selection with no user action. The next mouseup/keyup
+// anywhere in the panel then re-triggers the popup at that location. Use
+// this only at DOM-rebuild call sites, not at dismiss-only sites (scroll,
+// outside click) where the user's selection may still be intentional.
+function hideQuotePopupAndClearSelection(body: HTMLElement) {
+  hideQuotePopup(body);
+  body.ownerDocument.defaultView?.getSelection()?.removeAllRanges();
 }
 
 function showQuotePopup(body: HTMLElement, selectionRect: DOMRect) {
