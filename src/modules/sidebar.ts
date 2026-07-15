@@ -105,6 +105,7 @@ import {
   DefaultChatSendFlow,
   type ChatFlowSink,
   type ChatSubmission,
+  type DirectActionDescriptor,
 } from "../services/chat-actions/flow";
 import { organizePaperNote } from "../services/chat-actions/note";
 import {
@@ -138,6 +139,10 @@ const resizeObserverMap = new WeakMap<HTMLElement, ResizeObserver>();
 const pollTimerMap = new WeakMap<HTMLElement, number>();
 const lastWidthMap = new WeakMap<HTMLElement, number>();
 const chatSendFlowMap = new WeakMap<HTMLElement, DefaultChatSendFlow>();
+const paperSignalsDismissers = new WeakMap<
+  HTMLElement,
+  (event: Event) => void
+>();
 let referenceSyncRetryTimer: number | null = null;
 const SELECTED_TEXT_PREFIX = "Selected Text: ";
 const RESPONSE_QUOTE_PREFIX = "Response Quote: ";
@@ -1741,6 +1746,23 @@ function ensureChatUI(body: HTMLElement) {
   attachPageBtn.className = "zoteroagent-compose-action icon-only";
   setIconButton(attachPageBtn, "image", "Attach current PDF page");
 
+  const signalsToggleBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  signalsToggleBtn.id = "zoteroagent-paper-signals-toggle";
+  signalsToggleBtn.className = "zoteroagent-compose-action icon-only";
+  setIconButton(signalsToggleBtn, "tune", "Set rating and reading depth");
+
+  const signalsPanel = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  signalsPanel.id = "zoteroagent-paper-signals-panel";
+  signalsPanel.className = "zoteroagent-paper-signals-panel";
+  signalsPanel.style.display = "none";
+
+  actionsRight.appendChild(signalsToggleBtn);
   actionsRight.appendChild(attachPageBtn);
   actionsRight.appendChild(sendBtn);
   actionsRow.appendChild(modelSelect);
@@ -1751,6 +1773,7 @@ function ensureChatUI(body: HTMLElement) {
   composeArea.appendChild(textarea);
   composeArea.appendChild(mentionPanel);
   composeArea.appendChild(commandPanel);
+  composeArea.appendChild(signalsPanel);
   composeArea.appendChild(actionsRow);
 
   inputArea.appendChild(composeArea);
@@ -1834,6 +1857,12 @@ function bindChatEvents(body: HTMLElement) {
     .querySelector("#zoteroagent-attach-page")
     ?.addEventListener("click", (event) => {
       void attachCurrentPdfPage(body, event.currentTarget as HTMLButtonElement);
+    });
+  body
+    .querySelector("#zoteroagent-paper-signals-toggle")
+    ?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void togglePaperSignalsPanel(body);
     });
   body
     .querySelector("#zoteroagent-chat-input")
@@ -1967,6 +1996,9 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   const attachPage = body.querySelector(
     "#zoteroagent-attach-page",
   ) as HTMLButtonElement | null;
+  const signalsToggle = body.querySelector(
+    "#zoteroagent-paper-signals-toggle",
+  ) as HTMLButtonElement | null;
   const sessionActions = Array.from(
     body.querySelectorAll(
       "#zoteroagent-session-new, #zoteroagent-session-history, #zoteroagent-session-menu-toggle",
@@ -1975,10 +2007,12 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   if (modelSelect) modelSelect.disabled = generating;
   if (reasoningSelect) reasoningSelect.disabled = generating;
   if (attachPage) attachPage.disabled = generating;
+  if (signalsToggle) signalsToggle.disabled = generating;
+  if (generating) hidePaperSignalsPanel(body);
   for (const action of sessionActions) action.disabled = generating;
   for (const action of Array.from(
     body.querySelectorAll(
-      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-paper-tier-select, .zoteroagent-cold-start-action, .zoteroagent-code-repository, .zoteroagent-topic-title",
+      ".zoteroagent-delete-button, .zoteroagent-edit-button, .zoteroagent-topic-create, .zoteroagent-cold-start-action, .zoteroagent-code-repository, .zoteroagent-topic-title",
     ),
   ) as Array<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>) {
     action.disabled = generating;
@@ -2015,9 +2049,7 @@ function showAgentStatus(
   if (kind === "notice") {
     showNoticeStatus(slot, text || "Generating...");
   } else {
-    showBusyStatus(slot, text || "Generating...", () =>
-      abortGeneration(body),
-    );
+    showBusyStatus(slot, text || "Generating...", () => abortGeneration(body));
   }
 }
 
@@ -3493,6 +3525,239 @@ function getMentionPanel(body: HTMLElement): HTMLElement | null {
   return body.querySelector("#zoteroagent-mention-panel") as HTMLElement | null;
 }
 
+const TIER_RANK: Record<PaperTier, number> = { L0: 0, L1: 1, L2: 2, L3: 3 };
+const DEPTH_TARGETS: Array<{ tier: "L0" | "L1" | "L2"; label: string }> = [
+  { tier: "L0", label: "L0 · card" },
+  { tier: "L1", label: "L1 · skim" },
+  { tier: "L2", label: "L2 · close reading" },
+];
+
+function getPaperSignalsPanel(body: HTMLElement): HTMLElement | null {
+  return body.querySelector(
+    "#zoteroagent-paper-signals-panel",
+  ) as HTMLElement | null;
+}
+
+function hidePaperSignalsPanel(body: HTMLElement) {
+  const panel = getPaperSignalsPanel(body);
+  if (!panel) return;
+  panel.style.display = "none";
+  panel.replaceChildren();
+  const dismiss = paperSignalsDismissers.get(body);
+  if (dismiss) {
+    body.ownerDocument.removeEventListener("click", dismiss, true);
+    paperSignalsDismissers.delete(body);
+  }
+}
+
+async function togglePaperSignalsPanel(body: HTMLElement) {
+  const panel = getPaperSignalsPanel(body);
+  if (!panel) return;
+  if (panel.style.display !== "none") {
+    hidePaperSignalsPanel(body);
+    return;
+  }
+  await renderPaperSignalsPanel(body, panel);
+}
+
+async function renderPaperSignalsPanel(body: HTMLElement, panel: HTMLElement) {
+  const doc = body.ownerDocument;
+  const itemId = Number(body.dataset.itemID);
+  panel.replaceChildren();
+  panel.style.display = "flex";
+  registerPaperSignalsDismiss(body, panel);
+  if (!itemId || itemId <= 0) {
+    const empty = doc.createElementNS(XHTML, "div") as HTMLElement;
+    empty.className = "zoteroagent-paper-signals-empty";
+    empty.textContent = "Open a paper to set its rating and depth.";
+    panel.appendChild(empty);
+    return;
+  }
+  let signals: ReturnType<typeof parseKnowledgeSurface>["signals"] | null =
+    null;
+  try {
+    const meta = getPaperMeta(itemId);
+    const memory = await readPaperMemory(meta.itemKey);
+    signals = parseKnowledgeSurface(memory).signals;
+  } catch {
+    signals = null;
+  }
+  // The read is async; bail if the pane switched papers or the panel closed.
+  if (
+    !isSafeBody(body) ||
+    Number(body.dataset.itemID) !== itemId ||
+    panel.style.display === "none"
+  ) {
+    return;
+  }
+  const rating = signals?.rating ?? null;
+  const tier: PaperTier = signals?.tier ?? "L1";
+  panel.replaceChildren();
+  panel.appendChild(buildRatingRow(doc, body, itemId, rating));
+  panel.appendChild(buildDepthRow(doc, body, itemId, tier));
+}
+
+function buildRatingRow(
+  doc: Document,
+  body: HTMLElement,
+  itemId: number,
+  rating: number | null,
+): HTMLElement {
+  const row = doc.createElementNS(XHTML, "div") as HTMLElement;
+  row.className = "zoteroagent-signals-row";
+  const label = doc.createElementNS(XHTML, "span") as HTMLElement;
+  label.className = "zoteroagent-signals-row-label";
+  label.textContent = "Rating";
+  row.appendChild(label);
+  const stars = doc.createElementNS(XHTML, "div") as HTMLElement;
+  stars.className = "zoteroagent-signals-stars";
+  for (let value = 1; value <= 5; value += 1) {
+    const star = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    star.type = "button";
+    star.className = "zoteroagent-signals-star";
+    star.classList.toggle("is-filled", Boolean(rating) && value <= rating!);
+    star.textContent = Boolean(rating) && value <= rating! ? "★" : "☆";
+    star.setAttribute("aria-label", `${value} of 5`);
+    star.title = `Set rating to ${value}`;
+    star.addEventListener("click", () => {
+      void dispatchPaperSignalAction(
+        body,
+        itemId,
+        { kind: "paper.rating.set", rating: value },
+        `Set rating to ${value}.`,
+      );
+    });
+    stars.appendChild(star);
+  }
+  row.appendChild(stars);
+  return row;
+}
+
+function buildDepthRow(
+  doc: Document,
+  body: HTMLElement,
+  itemId: number,
+  currentTier: PaperTier,
+): HTMLElement {
+  const row = doc.createElementNS(XHTML, "div") as HTMLElement;
+  row.className = "zoteroagent-signals-row";
+  const label = doc.createElementNS(XHTML, "span") as HTMLElement;
+  label.className = "zoteroagent-signals-row-label";
+  label.textContent = "Depth";
+  row.appendChild(label);
+  const select = doc.createElementNS(XHTML, "select") as HTMLSelectElement;
+  select.className = "zoteroagent-signals-depth-select";
+  select.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
+  if (currentTier === "L3") {
+    const l3 = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
+    l3.value = "L3";
+    l3.textContent = "L3 · code";
+    l3.disabled = true;
+    l3.selected = true;
+    select.appendChild(l3);
+  }
+  for (const target of DEPTH_TARGETS) {
+    const option = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
+    option.value = target.tier;
+    option.textContent = target.label;
+    // A deeper record can only be downgraded to L0 (see assertDepthTransition).
+    option.disabled =
+      TIER_RANK[currentTier] > TIER_RANK[target.tier] && target.tier !== "L0";
+    option.selected = target.tier === currentTier;
+    select.appendChild(option);
+  }
+  select.addEventListener("change", () => {
+    const targetTier = select.value as "L0" | "L1" | "L2";
+    if (targetTier === currentTier) return;
+    void dispatchPaperSignalAction(
+      body,
+      itemId,
+      { kind: "paper.depth.set", targetTier },
+      `Change reading depth to ${targetTier}.`,
+    );
+  });
+  row.appendChild(select);
+  return row;
+}
+
+function registerPaperSignalsDismiss(body: HTMLElement, panel: HTMLElement) {
+  const existing = paperSignalsDismissers.get(body);
+  if (existing) body.ownerDocument.removeEventListener("click", existing, true);
+  const dismiss = (event: Event) => {
+    const target = event.target as Node | null;
+    const toggle = body.querySelector("#zoteroagent-paper-signals-toggle");
+    if (
+      target &&
+      (panel.contains(target) || (toggle && toggle.contains(target)))
+    ) {
+      return;
+    }
+    hidePaperSignalsPanel(body);
+  };
+  paperSignalsDismissers.set(body, dismiss);
+  body.ownerDocument.addEventListener("click", dismiss, true);
+}
+
+async function dispatchPaperSignalAction(
+  body: HTMLElement,
+  itemId: number,
+  descriptor: DirectActionDescriptor,
+  phrase: string,
+) {
+  let session = chatStore.getSession(itemId);
+  if (!session) session = chatStore.createSession(itemId);
+  if (!session) return;
+  const flow = getChatSendFlow(body);
+  if (!flow.canSubmit()) {
+    showAgentStatus(body, "Wait for the running turn to finish.", "notice");
+    return;
+  }
+  hidePaperSignalsPanel(body);
+  switchChatView(body, "chat");
+  const submission = buildActionSubmission(body, itemId, session, phrase);
+  await flow.submitAction(
+    submission,
+    descriptor,
+    createChatFlowSink(body, itemId, session.sessionId),
+  );
+}
+
+function buildActionSubmission(
+  body: HTMLElement,
+  itemId: number,
+  session: NonNullable<ReturnType<typeof chatStore.getSession>>,
+  phrase: string,
+): ChatSubmission {
+  const paperMeta = getPaperMeta(itemId);
+  const reader = getActiveReader() || addon.data.popup.currentReader;
+  const pdfItemId = resolvePdfAttachmentItemId(itemId, reader);
+  const priorVisibleMessages = chatStore
+    .getMessages(itemId)
+    .map((message) => ({ ...message }));
+  return {
+    itemId,
+    paper: paperMeta,
+    pdfItemId,
+    session: {
+      sessionId: session.sessionId,
+      codexThreadId: session.codexThreadId || "",
+      modelSlug: session.modelSlug || "",
+      reasoningEffort: session.reasoningEffort,
+      contextDigest: session.contextDigest,
+      contextDigestUpToMessageIndex: session.contextDigestUpToMessageIndex,
+    },
+    text: phrase,
+    selectedText: "",
+    responseQuote: "",
+    mentionedPapers: [],
+    imageRefs: [],
+    imagePaths: [],
+    priorVisibleMessages,
+    displayContent: phrase,
+    conversationDisplayContent: phrase,
+  };
+}
+
 function hideMentionAutocomplete(body: HTMLElement) {
   const panel = getMentionPanel(body);
   if (!panel) return;
@@ -3987,7 +4252,6 @@ function syncContextChips(body: HTMLElement) {
   }
   wrap.style.display = "flex";
 }
-
 
 function getItemTitle(itemId: number): string {
   try {

@@ -13,6 +13,7 @@ export type IconName =
   | "image"
   | "send"
   | "more"
+  | "tune"
   | "refresh";
 
 export function getIconSvg(icon: IconName): string {
@@ -45,6 +46,8 @@ export function getIconSvg(icon: IconName): string {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
     case "more":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.2" fill="currentColor"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/><circle cx="15.5" cy="10" r="1.2" fill="currentColor"/></svg>`;
+    case "tune":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h7M14.5 6H16M4 14h1.5M9 14h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12.5" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="14" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
     case "refresh":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 8.3A6.5 6.5 0 105 15.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16.2 4.2v4.4h-4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     default:

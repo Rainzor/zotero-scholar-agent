@@ -12,22 +12,12 @@ describe("command menu", () => {
         description: "Organize Reader Thinking",
         template: "/note ",
       },
-      {
-        command: "/rate",
-        description: "Set paper rating",
-        template: "/rate ",
-      },
-      {
-        command: "/depth",
-        description: "Set L0, L1, or L2 depth",
-        template: "/depth ",
-      },
     ]);
   });
 
   it("filters commands and inserts a template without submitting", () => {
     expect(getCommandMenuItems("/no")).toHaveLength(1);
-    expect(getCommandMenuItems("/de")).toHaveLength(1);
+    expect(getCommandMenuItems("/de")).toHaveLength(0);
     expect(insertCommandTemplate("prefix", 0, 6, "/note ")).toEqual({
       value: "/note ",
       cursor: 6,

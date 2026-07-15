@@ -130,3 +130,83 @@
   font-size: var(--za-font-xs);
   overflow-wrap: anywhere;
 }
+
+.zoteroagent-paper-signals-panel {
+  position: absolute;
+  right: 6px;
+  left: auto;
+  bottom: calc(100% - 2px);
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 224px;
+  max-width: calc(100% - 12px);
+  padding: 10px 12px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-elevated);
+  box-shadow: 0 6px 18px var(--za-shadow-color);
+}
+
+.zoteroagent-paper-signals-empty {
+  color: var(--za-text-secondary);
+  font-size: var(--za-font-xs);
+}
+
+.zoteroagent-signals-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.zoteroagent-signals-row-label {
+  color: var(--za-text-tertiary);
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.zoteroagent-signals-stars {
+  display: flex;
+  gap: 2px;
+}
+
+.zoteroagent-signals-star {
+  border: 0;
+  background: transparent;
+  color: var(--za-text-tertiary);
+  padding: 0 1px;
+  font-size: var(--za-font-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoteroagent-signals-star.is-filled {
+  color: var(--za-accent);
+}
+
+.zoteroagent-signals-star:hover {
+  color: var(--za-accent);
+}
+
+.zoteroagent-signals-depth-select {
+  height: 26px;
+  border: 1px solid var(--za-border-strong);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-primary);
+  padding: 0 6px;
+  font: inherit;
+  font-size: var(--za-font-xs);
+  cursor: pointer;
+}
+
+.zoteroagent-paper-signals-panel[disabled],
+.zoteroagent-signals-star:disabled,
+.zoteroagent-signals-depth-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

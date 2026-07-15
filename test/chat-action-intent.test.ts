@@ -55,17 +55,16 @@ describe("parseChatIntent", () => {
     }
   });
 
-  it("parses rating and depth commands", () => {
-    expect(parseChatIntent({ text: "/rate 4" })).toMatchObject({
-      type: "action",
-      kind: "paper.rating.set",
-      rating: 4,
-    });
-    expect(parseChatIntent({ text: "/depth L2" })).toMatchObject({
-      type: "action",
-      kind: "paper.depth.set",
-      targetTier: "L2",
-    });
+  it("no longer parses /rate or /depth as slash commands", () => {
+    for (const text of ["/rate 4", "/depth L2"]) {
+      const parsed = parseChatIntent({ text });
+      expect(parsed.type).toBe("help");
+      if (parsed.type === "help") {
+        expect(parsed.message).toContain("/note");
+        expect(parsed.message).not.toContain("/rate");
+        expect(parsed.message).not.toContain("/depth");
+      }
+    }
   });
 
   it("recognizes explicit Chinese rating and depth instructions", () => {
@@ -83,13 +82,12 @@ describe("parseChatIntent", () => {
     });
   });
 
-  it("returns local help for invalid rating and depth arguments", () => {
-    for (const text of ["/rate 6", "/rate", "/depth L3", "/depth deep"]) {
+  it("returns command help for other unknown slash commands", () => {
+    for (const text of ["/summarize paper", "/rate", "/depth deep"]) {
       const parsed = parseChatIntent({ text });
       expect(parsed.type).toBe("help");
       if (parsed.type === "help") {
-        expect(parsed.message).toContain("/rate 1..5");
-        expect(parsed.message).toContain("/depth L0|L1|L2");
+        expect(parsed.message).toContain("/note");
       }
     }
   });

@@ -20,7 +20,13 @@ import {
   type PreparedLocalKnowledgeAction,
 } from "./local-knowledge";
 import { parseChatIntent } from "./intent";
-import { transitionAgentAction, type AgentActionCard } from "./types";
+import {
+  transitionAgentAction,
+  type AgentActionCard,
+  type AgentActionKind,
+  type AgentActionTriggerSource,
+  type NoteContentSource,
+} from "./types";
 
 export type ChatSubmission = {
   itemId: number;
@@ -48,6 +54,10 @@ export type ChatSubmission = {
 
 export type ActionDecision = "confirm" | "dismiss" | "retry";
 
+export type DirectActionDescriptor =
+  | { kind: "paper.rating.set"; rating: number }
+  | { kind: "paper.depth.set"; targetTier: "L0" | "L1" | "L2" };
+
 export type ChatFlowSink = {
   onChanged?: (itemId: number) => void;
   onRunning?: (running: boolean) => void;
@@ -58,6 +68,11 @@ export type ChatFlowSink = {
 export interface ChatSendFlow {
   canSubmit(): boolean;
   submit(request: ChatSubmission, sink: ChatFlowSink): Promise<void>;
+  submitAction(
+    request: ChatSubmission,
+    descriptor: DirectActionDescriptor,
+    sink: ChatFlowSink,
+  ): Promise<void>;
   decide(
     actionId: string,
     decision: ActionDecision,
@@ -222,18 +237,102 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       return;
     }
 
+    const action = this.buildActionCard(request, {
+      kind: intent.kind,
+      trigger: intent.trigger,
+      content: intent.content,
+      contentSource: intent.contentSource,
+      rating: intent.rating,
+      targetTier: intent.targetTier,
+    });
+    this.deps.store.addMessage(
+      request.itemId,
+      {
+        role: "assistant",
+        content: "",
+        model: "Codex",
+        action,
+      },
+      request.session.sessionId,
+    );
+    sink.onChanged?.(request.itemId);
+    if (intent.execution === "direct") {
+      await this.executeAction(action, sink, {
+        itemId: request.itemId,
+        itemKey: request.paper.itemKey,
+        sessionId: request.session.sessionId,
+      });
+    }
+  }
+
+  async submitAction(
+    request: ChatSubmission,
+    descriptor: DirectActionDescriptor,
+    sink: ChatFlowSink,
+  ): Promise<void> {
+    if (!this.canSubmit()) {
+      sink.onStatus?.("Wait for the running turn to finish.");
+      return;
+    }
+    this.deps.store.addMessage(
+      request.itemId,
+      {
+        role: "user",
+        content: request.displayContent,
+      },
+      request.session.sessionId,
+    );
+    const action = this.buildActionCard(request, {
+      kind: descriptor.kind,
+      trigger: "ui-control",
+      rating:
+        descriptor.kind === "paper.rating.set" ? descriptor.rating : undefined,
+      targetTier:
+        descriptor.kind === "paper.depth.set"
+          ? descriptor.targetTier
+          : undefined,
+    });
+    this.deps.store.addMessage(
+      request.itemId,
+      {
+        role: "assistant",
+        content: "",
+        model: "Codex",
+        action,
+      },
+      request.session.sessionId,
+    );
+    sink.onChanged?.(request.itemId);
+    await this.executeAction(action, sink, {
+      itemId: request.itemId,
+      itemKey: request.paper.itemKey,
+      sessionId: request.session.sessionId,
+    });
+  }
+
+  private buildActionCard(
+    request: ChatSubmission,
+    descriptor: {
+      kind: AgentActionKind;
+      trigger: AgentActionTriggerSource;
+      content?: string;
+      contentSource?: NoteContentSource;
+      rating?: number;
+      targetTier?: "L0" | "L1" | "L2";
+    },
+  ): AgentActionCard {
     const now = this.now();
-    const action: AgentActionCard = {
+    return {
       version: 1,
       id: this.newActionId(),
-      kind: intent.kind,
+      kind: descriptor.kind,
       state: "proposed",
       trigger: {
-        source: intent.trigger,
+        source: descriptor.trigger,
         text: request.text,
       },
       capabilities:
-        intent.kind === "paper.rating.set"
+        descriptor.kind === "paper.rating.set"
           ? ["vault.write"]
           : ["codex.read", "vault.write"],
       request: {
@@ -263,15 +362,15 @@ export class DefaultChatSendFlow implements ChatSendFlow {
         images: request.imageRefs.map(
           ({ previewUrl: _previewUrl, ...image }) => ({ ...image }),
         ),
-        content: intent.content,
-        contentSource: intent.contentSource,
-        rating: intent.rating,
-        targetTier: intent.targetTier,
+        content: descriptor.content,
+        contentSource: descriptor.contentSource,
+        rating: descriptor.rating,
+        targetTier: descriptor.targetTier,
         modelSlug: request.session.modelSlug,
         reasoningEffort: request.session.reasoningEffort,
       },
       target:
-        intent.kind === "note.organize"
+        descriptor.kind === "note.organize"
           ? {
               itemKey: request.paper.itemKey,
               path: `${request.paper.itemKey}/notes.md`,
@@ -285,24 +384,6 @@ export class DefaultChatSendFlow implements ChatSendFlow {
       createdAt: now,
       updatedAt: now,
     };
-    this.deps.store.addMessage(
-      request.itemId,
-      {
-        role: "assistant",
-        content: "",
-        model: "Codex",
-        action,
-      },
-      request.session.sessionId,
-    );
-    sink.onChanged?.(request.itemId);
-    if (intent.execution === "direct") {
-      await this.executeAction(action, sink, {
-        itemId: request.itemId,
-        itemKey: request.paper.itemKey,
-        sessionId: request.session.sessionId,
-      });
-    }
   }
 
   async decide(

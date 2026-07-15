@@ -24,6 +24,7 @@ export type AgentActionState =
 export type AgentActionTriggerSource =
   | "slash-command"
   | "explicit-instruction"
+  | "ui-control"
   | "bare-url"
   | "codex-suggestion";
 
@@ -166,6 +167,7 @@ const ACTION_STATES: AgentActionState[] = [
 const TRIGGER_SOURCES: AgentActionTriggerSource[] = [
   "slash-command",
   "explicit-instruction",
+  "ui-control",
   "bare-url",
   "codex-suggestion",
 ];

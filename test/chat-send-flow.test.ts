@@ -1056,7 +1056,11 @@ describe("DefaultChatSendFlow", () => {
       newActionId: () => "rating-action",
     });
 
-    await flow.submit(submission("/rate 4"), {});
+    await flow.submitAction(
+      submission("Set rating to 4"),
+      { kind: "paper.rating.set", rating: 4 },
+      {},
+    );
 
     expect(calls).toEqual(["prepare", "apply", "conversation", "commit"]);
     expect(store.messages[1].action).toMatchObject({
@@ -1098,7 +1102,11 @@ describe("DefaultChatSendFlow", () => {
       newActionId: () => "rating-action",
     });
 
-    await flow.submit(submission("/rate 4"), {});
+    await flow.submitAction(
+      submission("Set rating to 4"),
+      { kind: "paper.rating.set", rating: 4 },
+      {},
+    );
 
     expect(store.messages[1].action).toMatchObject({
       state: "failed",
@@ -1155,7 +1163,11 @@ describe("DefaultChatSendFlow", () => {
       newActionId: () => "depth-action",
     });
 
-    await flow.submit(submission("/depth L2"), {});
+    await flow.submitAction(
+      submission("Change reading depth to L2"),
+      { kind: "paper.depth.set", targetTier: "L2" },
+      {},
+    );
 
     expect(applies).toBe(0);
     expect(restoredFromHead).toEqual([

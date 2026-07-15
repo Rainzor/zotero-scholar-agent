@@ -27,10 +27,9 @@ export type ParsedChatIntent =
 const COMMAND_HELP = [
   "Available commands:",
   "- `/note [content]` organizes Reader Thinking for this paper.",
-  "- `/rate 1..5` records the paper rating.",
-  "- `/depth L0|L1|L2` rewrites the engagement depth.",
   "",
   "With an empty `/note`, the current PDF selection or quoted reply is used.",
+  "Set the rating or reading depth from the composer's paper controls.",
 ].join("\n");
 
 export function parseChatIntent(input: ChatIntentInput): ParsedChatIntent {
@@ -39,30 +38,6 @@ export function parseChatIntent(input: ChatIntentInput): ParsedChatIntent {
   if (slash) {
     const command = String(slash[1] || "").toLowerCase();
     const argument = String(slash[2] || "").trim();
-    if (command === "rate") {
-      const rating = Number(argument);
-      return Number.isInteger(rating) && rating >= 1 && rating <= 5
-        ? {
-            type: "action",
-            execution: "direct",
-            kind: "paper.rating.set",
-            rating,
-            trigger: "slash-command",
-          }
-        : { type: "help", message: COMMAND_HELP };
-    }
-    if (command === "depth") {
-      const targetTier = argument.toUpperCase();
-      return targetTier === "L0" || targetTier === "L1" || targetTier === "L2"
-        ? {
-            type: "action",
-            execution: "direct",
-            kind: "paper.depth.set",
-            targetTier,
-            trigger: "slash-command",
-          }
-        : { type: "help", message: COMMAND_HELP };
-    }
     if (command !== "note") {
       return { type: "help", message: COMMAND_HELP };
     }
