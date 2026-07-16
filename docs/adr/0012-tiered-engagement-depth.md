@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Tiered engagement depth for Paper Knowledge Records

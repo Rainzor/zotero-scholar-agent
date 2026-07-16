@@ -43,12 +43,14 @@
   align-items: center;
 }
 
-.zoteroagent-topic-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
+.zoteroagent-memory-selection-bar {
+  display: flex;
   align-items: center;
-  padding: 0 8px 6px;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px;
+  border-top: 1px solid var(--za-border);
+  background: var(--za-bg-surface);
 }
 
 .zoteroagent-topic-title,
@@ -61,6 +63,10 @@
   color: var(--za-text-primary);
   padding: 0 8px;
   font-size: var(--za-font-xs);
+}
+
+.zoteroagent-memory-selection-bar .zoteroagent-topic-title {
+  flex: 1 1 auto;
 }
 
 .zoteroagent-topic-create {
@@ -80,14 +86,53 @@
   cursor: default;
 }
 
-.zoteroagent-topic-status {
-  grid-column: 1 / -1;
-  min-height: 16px;
+.zoteroagent-topic-cancel {
+  height: 28px;
+  border: 1px solid var(--za-border);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-bg-surface);
+  color: var(--za-text-secondary);
+  padding: 0 9px;
+  font-size: var(--za-font-xs);
+  cursor: pointer;
+}
+
+.zoteroagent-topic-cancel:hover {
+  background: var(--za-bg-subtle);
+}
+
+.zoteroagent-selection-count {
+  flex: 0 0 auto;
   color: var(--za-text-tertiary);
   font-size: var(--za-font-xs);
 }
 
-.zoteroagent-memory-search {
+/* "All papers" header row with an inline "+ New topic" trigger. */
+.zoteroagent-memory-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.zoteroagent-topic-new {
+  flex: 0 0 auto;
+  border: 1px solid var(--za-accent);
+  border-radius: var(--za-radius-pill);
+  background: transparent;
+  color: var(--za-accent);
+  padding: 2px 10px;
+  font-size: var(--za-font-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zoteroagent-topic-new:hover {
+  background: var(--za-accent-soft);
+}
+
+.zoteroagent-memory-search,
+.zoteroagent-memory-filter {
   flex: 1 1 auto;
   min-width: 0;
   border: 1px solid var(--za-border);
@@ -96,6 +141,15 @@
   color: var(--za-text-primary);
   font-size: var(--za-font-md);
   padding: 6px 10px;
+}
+
+/* Full-text search row, revealed by the toolbar search toggle. */
+.zoteroagent-memory-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 8px 6px;
 }
 
 .zoteroagent-memory-refresh {
@@ -171,12 +225,6 @@
   cursor: default;
 }
 
-.zoteroagent-paper-signal-chip.is-tag {
-  border-color: var(--za-accent-soft);
-  background: var(--za-success-soft);
-  color: var(--za-accent);
-}
-
 .zoteroagent-paper-signals-label {
   margin-right: 4px;
   color: var(--za-text-tertiary);
@@ -196,23 +244,6 @@
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-}
-
-.zoteroagent-value-type {
-  height: 22px;
-  border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-sm);
-  background: var(--za-bg-surface);
-  color: var(--za-text-secondary);
-  padding: 0 6px;
-  font-size: var(--za-font-xs);
-  cursor: pointer;
-}
-
-.zoteroagent-value-type.is-active {
-  border-color: var(--za-accent);
-  background: var(--za-accent-soft);
-  color: var(--za-accent);
 }
 
 .zoteroagent-rating-value {
@@ -340,6 +371,10 @@
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 4px;
   align-items: center;
+}
+
+.zoteroagent-memory-list-row.no-select {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .zoteroagent-topic-paper-select {

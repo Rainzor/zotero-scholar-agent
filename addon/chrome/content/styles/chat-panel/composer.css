@@ -81,79 +81,91 @@
   justify-content: space-between;
   min-height: 38px;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 5px 8px;
   border-top: 1px solid var(--za-border);
 }
 
-.zoteroagent-model-select {
-  flex: 1 1 auto;
+.zoteroagent-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  max-width: 150px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+/* ---- Pill (icon + inline select) ---- */
+.zoteroagent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   height: 30px;
+  min-width: 0;
+  padding: 0 8px;
   border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-sm);
+  border-radius: var(--za-radius-pill);
   background: var(--za-bg-subtle);
+  transition: border-color 140ms ease;
+}
+
+.zoteroagent-pill:hover {
+  border-color: var(--za-accent);
+}
+
+.zoteroagent-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--za-text-tertiary);
+}
+
+.zoteroagent-pill-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.zoteroagent-model-select,
+.zoteroagent-reasoning-select {
+  appearance: none;
+  -moz-appearance: none;
+  min-width: 0;
+  height: 28px;
+  border: none;
+  background-color: transparent;
   color: var(--za-text-secondary);
-  padding: 0 24px 0 8px;
+  padding: 0 15px 0 0;
   font-family: inherit;
   font-size: var(--za-font-xs);
   text-overflow: ellipsis;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20'%3E%3Cpath d='M5 8l5 5 5-5' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: 10px;
+}
+
+.zoteroagent-model-select {
+  max-width: 132px;
 }
 
 .zoteroagent-reasoning-select {
-  flex: 0 1 108px;
-  min-width: 0;
-  height: 30px;
-  border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-sm);
-  background: var(--za-bg-subtle);
-  color: var(--za-text-secondary);
-  padding: 0 22px 0 7px;
-  font-family: inherit;
-  font-size: var(--za-font-xs);
-  text-overflow: ellipsis;
+  max-width: 112px;
 }
 
+.zoteroagent-model-select:focus,
+.zoteroagent-reasoning-select:focus {
+  outline: none;
+}
+
+.zoteroagent-model-select:disabled,
 .zoteroagent-reasoning-select:disabled {
   cursor: default;
   opacity: 0.6;
 }
 
-.zoteroagent-model-select:hover:not(:disabled),
-.zoteroagent-model-select:focus {
-  border-color: var(--za-accent);
-  outline: none;
-}
-
-.zoteroagent-model-select:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.zoteroagent-actions-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
 @media (max-width: 420px) {
-  .zoteroagent-actions-row {
-    flex-wrap: wrap;
-  }
-
   .zoteroagent-model-select {
-    flex: 1 1 120px;
-    max-width: none;
-  }
-
-  .zoteroagent-reasoning-select {
-    flex: 1 1 92px;
-  }
-
-  .zoteroagent-actions-right {
-    width: 100%;
-    justify-content: flex-end;
+    max-width: 120px;
   }
 }
 
@@ -162,11 +174,17 @@
   min-width: 30px;
   height: 30px;
   border: 1px solid var(--za-border);
-  border-radius: var(--za-radius-sm);
+  border-radius: 50%;
   background: var(--za-bg-subtle);
   color: var(--za-text-secondary);
   padding: 0;
   cursor: pointer;
+  transition: border-color 140ms ease;
+}
+
+.zoteroagent-compose-action:hover:not(:disabled) {
+  border-color: var(--za-accent);
+  color: var(--za-text-primary);
 }
 
 .zoteroagent-compose-action:disabled {
@@ -174,39 +192,46 @@
   opacity: 0.55;
 }
 
-/* ---- Send Button (primary, pill) ---- */
+/* ---- Send Button (primary, circular icon) ---- */
 .zoteroagent-send-button {
-  min-width: 72px;
+  width: 34px;
+  min-width: 34px;
   height: 34px;
-  border-radius: var(--za-radius-pill);
+  border-radius: 50%;
   border: none;
   background: var(--za-accent);
   color: var(--za-on-accent);
-  font-size: var(--za-font-md);
-  font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 18px;
+  padding: 0;
   transition:
     background-color 140ms ease,
     transform 80ms ease;
   flex-shrink: 0;
-  letter-spacing: 0;
 }
 
 .zoteroagent-send-button:hover {
   background: var(--za-accent);
+  color: var(--za-on-accent);
+  border: none;
+  transform: none;
 }
 
 .zoteroagent-send-button:active {
-  transform: scale(0.97);
+  transform: scale(0.94);
 }
 
 .zoteroagent-send-button.is-stop {
   background: var(--za-danger);
   animation: zoteroagent-pulse 1.5s ease-in-out infinite;
+}
+
+.zoteroagent-compose-action.icon-only svg,
+.zoteroagent-send-button.icon-only svg {
+  width: 16px;
+  height: 16px;
 }
 
 @keyframes zoteroagent-pulse {

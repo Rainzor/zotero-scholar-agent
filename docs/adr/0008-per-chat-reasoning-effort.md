@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Per-chat Codex reasoning effort

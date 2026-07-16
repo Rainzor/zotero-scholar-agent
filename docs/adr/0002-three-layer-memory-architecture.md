@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: backend
 ---
 
 # Three-layer memory architecture for the Knowledge Vault
@@ -16,7 +17,7 @@ Separate memory into **three layers that are never conflated**, per paper direct
 
 1. **Codex Session** (rollout, `thread_id`) — short-term reasoning continuity within one sidebar chat. Ephemeral, disposable, Codex-internal.
 2. **Conversation Log** (`conversations/{sessionId}.md`) — the episodic, human-facing transcript, **one file per chat session** so multiple sessions stay isolated (mirrors the existing multi-session UI). Appended every turn by the plugin. Reviewable by the user; **never fed to Codex as reasoning input**.
-3. **Memory Note** (`memory.md`) — the semantic, internalized long-term knowledge. Codex reads and writes it; it is the *only* layer cross-paper retrieval searches.
+3. **Memory Note** (`memory.md`) — the semantic, internalized long-term knowledge. Codex reads and writes it; it is the _only_ layer cross-paper retrieval searches.
 
 `text.txt` (plugin-extracted PDF text) sits alongside as raw source, not memory. Codex updates `memory.md` agentically per the Vault's `AGENTS.md` rules — only on materially-new learning, rewriting/deduping rather than blind-appending. The plugin auto-commits the Vault to git after each turn, making every memory mutation a reviewable, revertible diff.
 

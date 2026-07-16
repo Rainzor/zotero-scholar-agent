@@ -2,7 +2,7 @@
 
 Goal: prove every load-bearing assumption of the Codex-as-engine design **from the
 command line**, before writing any plugin code. If any check fails, we redesign
-*before* building — that's the whole point of Phase 0.
+_before_ building — that's the whole point of Phase 0.
 
 Verified environment (this machine): `codex-cli 0.142.5`, authenticated
 (`~/.codex/auth.json` present). `codex exec` has NO interactive approval flag —
@@ -89,7 +89,7 @@ grep -n "AAAA1111" "$VAULT/BBBB2222/memory.md"
 ```
 
 PASS if Codex grepped across both papers, produced an accurate comparison
-(BERT = bidirectional Transformer *encoder*; learned vs sinusoidal positions),
+(BERT = bidirectional Transformer _encoder_; learned vs sinusoidal positions),
 and wrote a relative link `../AAAA1111/memory.md` into BBBB2222's memory.
 
 ## A7 — Latency + cost sanity
@@ -125,6 +125,7 @@ to explicitly override, or document that users should keep global AGENTS.md neut
 - [x] A8 global AGENTS.md is benign — PASS (vault rules obeyed, no conflict observed)
 
 ### Critical finding (must fix in Phase 1)
+
 `codex exec` HANGS forever if stdin is a non-TTY pipe left open ("Reading additional
 input from stdin..."). Always close/empty stdin — CLI: `</dev/null`; plugin: close
 the Subprocess stdin pipe immediately.

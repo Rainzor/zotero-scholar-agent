@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Preferences: debounced persistence, read-only Codex detection, and per-service testing

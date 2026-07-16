@@ -46,7 +46,9 @@ export async function spawnLineProcess(
 ): Promise<RunningLineProcess> {
   const Subprocess = importSubprocess();
   if (!Subprocess?.call) {
-    throw new Error("Mozilla Subprocess.call is not available in this Zotero environment.");
+    throw new Error(
+      "Mozilla Subprocess.call is not available in this Zotero environment.",
+    );
   }
 
   const proc = await Subprocess.call({
@@ -124,7 +126,9 @@ function importSubprocess(): SubprocessModule {
   const chromeUtils = (globalThis as any).ChromeUtils;
   if (chromeUtils?.importESModule) {
     try {
-      const mod = chromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
+      const mod = chromeUtils.importESModule(
+        "resource://gre/modules/Subprocess.sys.mjs",
+      );
       return mod.Subprocess || mod.default || mod;
     } catch {
       // Try the legacy JSM below.
@@ -219,10 +223,7 @@ function dirname(path: string): string {
   return index > 0 ? normalized.slice(0, index) : "";
 }
 
-async function readPipeLines(
-  pipe: any,
-  onLine?: LineHandler,
-): Promise<string> {
+async function readPipeLines(pipe: any, onLine?: LineHandler): Promise<string> {
   if (!pipe?.readString) return "";
   let buffer = "";
   let all = "";

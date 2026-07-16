@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: frontend
 ---
 
 # Use semantic UI tokens for Zotero Agent surfaces

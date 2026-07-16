@@ -32,11 +32,14 @@ export type CodexAgentMessageItem = {
   text?: string;
 };
 
-export type CodexItem = CodexCommandItem | CodexAgentMessageItem | {
-  id?: string;
-  type?: string;
-  [key: string]: unknown;
-};
+export type CodexItem =
+  | CodexCommandItem
+  | CodexAgentMessageItem
+  | {
+      id?: string;
+      type?: string;
+      [key: string]: unknown;
+    };
 
 export type CodexEvent =
   | { type: "thread.started"; thread_id?: string }
@@ -133,7 +136,9 @@ export function applyCodexEvent(
   }
 
   if (event.type === "turn.completed") {
-    state.usage = mapUsage(isUsageLike((event as any).usage) ? (event as any).usage : undefined);
+    state.usage = mapUsage(
+      isUsageLike((event as any).usage) ? (event as any).usage : undefined,
+    );
     state.latestStatus = "Codex turn completed.";
     return state;
   }
@@ -141,7 +146,9 @@ export function applyCodexEvent(
   if (event.type === "turn.failed" || event.type === "error") {
     const message =
       event.type === "error"
-        ? String((event as any).message || (event as any).error || "Codex error")
+        ? String(
+            (event as any).message || (event as any).error || "Codex error",
+          )
         : String(event.error || "Codex turn failed");
     state.latestStatus = message;
     if (!state.content) state.content = `[Error] ${message}`;
@@ -151,12 +158,20 @@ export function applyCodexEvent(
   return state;
 }
 
-export function isAgentMessageItem(item: unknown): item is CodexAgentMessageItem {
-  return Boolean(item && typeof item === "object" && (item as any).type === "agent_message");
+export function isAgentMessageItem(
+  item: unknown,
+): item is CodexAgentMessageItem {
+  return Boolean(
+    item && typeof item === "object" && (item as any).type === "agent_message",
+  );
 }
 
 export function isCommandItem(item: unknown): item is CodexCommandItem {
-  return Boolean(item && typeof item === "object" && (item as any).type === "command_execution");
+  return Boolean(
+    item &&
+    typeof item === "object" &&
+    (item as any).type === "command_execution",
+  );
 }
 
 function appendMessageText(existing: string, next: string): string {
@@ -198,9 +213,10 @@ function mapUsage(usage?: CodexUsage): CodexStreamState["usage"] | undefined {
     totalTokens:
       typeof total === "number"
         ? total
-        : typeof promptTokens === "number" || typeof completionTokens === "number"
-        ? (promptTokens || 0) + (completionTokens || 0)
-        : undefined,
+        : typeof promptTokens === "number" ||
+            typeof completionTokens === "number"
+          ? (promptTokens || 0) + (completionTokens || 0)
+          : undefined,
     reasoningTokens: reasoning,
     cachedInputTokens: cached,
   };

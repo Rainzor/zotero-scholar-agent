@@ -24,8 +24,7 @@ describe("estimateMessagesTokens", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
     ];
-    const bare =
-      estimateTokens("hi") + estimateTokens("hello");
+    const bare = estimateTokens("hi") + estimateTokens("hello");
     expect(estimateMessagesTokens(messages)).toBe(bare + 8);
   });
 });

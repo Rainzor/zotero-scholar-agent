@@ -11,7 +11,7 @@ The reader sidebar's Chat and Memory views are a pure CSS `display`
 toggle (`switchChatView`); both subtrees always exist in the DOM. Codex
 busy-status was nonetheless split across two disconnected, tab-specific
 locations: Chat's `showAgentStatus`/`hideAgentStatus` injected an
-animated pill *inside the last assistant message bubble*
+animated pill _inside the last assistant message bubble_
 (`#zoteroagent-chat-messages`), invisible whenever Memory is active;
 each of four Memory-panel actions (Build/Repair/PDF-enrichment/Code
 analysis) wrote into its own inline `<span>`, invisible whenever Chat is
@@ -21,7 +21,7 @@ explanation.
 
 Separately, `renderMemoryBrowse` fully wipes and rebuilds
 `#zoteroagent-memory-body` — triggered not only by tab switches but by
-Zotero's global "tab" notifier (fires ~300ms after *any* tab event
+Zotero's global "tab" notifier (fires ~300ms after _any_ tab event
 anywhere in the app), every section re-render, and manual refresh/sort.
 The four Memory action starters held closures over the specific
 `status`/`button` DOM nodes passed to them at click time; a mid-action

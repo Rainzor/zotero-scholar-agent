@@ -1,5 +1,7 @@
 # UI, Preferences, and Knowledge Status Delivery Plan
 
+> Track: both — Phases 1-3 are frontend; Phase 4 pairs a new backend
+> `KnowledgeStatusIndex` module with a frontend ItemTreeManager column.
 > Status: proposed. Each phase requires explicit confirmation before implementation.
 >
 > Scope: Zotero Agent reader sidebar, preferences window, and main item-tree

@@ -78,9 +78,7 @@ export async function syncModelControls(
   }
   renderReasoningOptions(
     reasoningSelect,
-    !canValidateEffort && selectedEffort
-      ? [selectedEffort]
-      : supportedEfforts,
+    !canValidateEffort && selectedEffort ? [selectedEffort] : supportedEfforts,
     normalizedEffort,
   );
   select.disabled = options.isGenerating();

@@ -12,12 +12,8 @@ import {
 } from "../services/page-evidence";
 import { generateContextDigest } from "../services/context-digest";
 import {
-  PAPER_VALUE_TYPES,
   parseKnowledgeSurface,
-  valueTypeDescription,
-  valueTypeLabel,
   type PaperTier,
-  type PaperValueType,
 } from "../services/knowledge-surface";
 import {
   evaluateKnowledgeSurface,
@@ -34,7 +30,17 @@ import {
   listTopicNotes,
   parseTopicNote,
   readTopicNote,
+  type TopicNoteSummary,
 } from "../services/topic-notes";
+import { renderMemoryNavigator } from "./sidebar/memory-navigator";
+import { TopicSelectionController } from "./sidebar/topic-selection";
+import { filterPapers } from "./sidebar/memory-filter";
+import {
+  initialMemorySearchState,
+  nextMemorySearchState,
+  type MemoryAction,
+  type MemorySearchState,
+} from "./sidebar/memory-view-state";
 import {
   acceptRelationshipProposal,
   type RelationshipProposal,
@@ -122,7 +128,6 @@ import {
   searchVaultMemory,
   PaperTextUnavailableError,
   acceptPaperKeyword,
-  updatePaperValueTypes,
   type CodexReasoningEffort,
   type PaperVaultMeta,
   type RunningLineProcess,
@@ -577,7 +582,8 @@ export function showAgentPanel() {
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 let memorySearchTimer: ReturnType<typeof setTimeout> | null = null;
-const topicPaperSelection = new Set<string>();
+const topicSelection = new TopicSelectionController();
+let memorySearchState: MemorySearchState = initialMemorySearchState;
 const pendingRelationshipProposals = new Map<string, RelationshipProposal[]>();
 const codeAnalysisNotices = new Map<string, string>();
 const paperNeedsPdfEnrichment = new Set<string>();
@@ -591,11 +597,19 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   const toolbar = doc.createElementNS(XHTML, "div") as HTMLElement;
   toolbar.className = "zoteroagent-memory-toolbar";
 
-  const search = doc.createElementNS(XHTML, "input") as HTMLInputElement;
-  search.id = "zoteroagent-memory-search";
-  search.type = "text";
-  search.placeholder = "Search across all papers' memory...";
-  search.className = "zoteroagent-memory-search";
+  const filter = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+  filter.id = "zoteroagent-memory-filter";
+  filter.type = "text";
+  filter.placeholder = "Filter papers by title or author...";
+  filter.className = "zoteroagent-memory-filter";
+
+  const searchToggle = doc.createElementNS(
+    XHTML,
+    "button",
+  ) as HTMLButtonElement;
+  searchToggle.id = "zoteroagent-memory-search-toggle";
+  searchToggle.className = "zoteroagent-memory-refresh";
+  setIconButton(searchToggle, "search", "Search memory contents");
 
   const refresh = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   refresh.id = "zoteroagent-memory-refresh";
@@ -615,13 +629,35 @@ function buildMemoryPanel(doc: Document): HTMLElement {
     sort.appendChild(option);
   }
 
-  toolbar.appendChild(search);
+  toolbar.appendChild(filter);
   toolbar.appendChild(sort);
+  toolbar.appendChild(searchToggle);
   toolbar.appendChild(refresh);
 
-  const topicForm = doc.createElementNS(XHTML, "div") as HTMLElement;
-  topicForm.id = "zoteroagent-topic-form";
-  topicForm.className = "zoteroagent-topic-form";
+  // Full-text Vault search row — hidden until the search toggle is clicked.
+  const searchRow = doc.createElementNS(XHTML, "div") as HTMLElement;
+  searchRow.id = "zoteroagent-memory-search-row";
+  searchRow.className = "zoteroagent-memory-search-row";
+  searchRow.style.display = "none";
+  const search = doc.createElementNS(XHTML, "input") as HTMLInputElement;
+  search.id = "zoteroagent-memory-search";
+  search.type = "text";
+  search.placeholder = "Search across all papers' memory...";
+  search.className = "zoteroagent-memory-search";
+  const searchClose = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  searchClose.id = "zoteroagent-memory-search-close";
+  searchClose.className = "zoteroagent-memory-refresh";
+  setIconButton(searchClose, "clear", "Close search");
+  searchRow.appendChild(search);
+  searchRow.appendChild(searchClose);
+
+  const selectionBar = doc.createElementNS(XHTML, "div") as HTMLElement;
+  selectionBar.id = "zoteroagent-topic-selection-bar";
+  selectionBar.className = "zoteroagent-memory-selection-bar";
+  selectionBar.style.display = "none";
+  const selectionCount = doc.createElementNS(XHTML, "span") as HTMLElement;
+  selectionCount.id = "zoteroagent-topic-status";
+  selectionCount.className = "zoteroagent-selection-count";
   const topicTitle = doc.createElementNS(XHTML, "input") as HTMLInputElement;
   topicTitle.id = "zoteroagent-topic-title";
   topicTitle.type = "text";
@@ -630,22 +666,26 @@ function buildMemoryPanel(doc: Document): HTMLElement {
   const topicCreate = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
   topicCreate.id = "zoteroagent-topic-create";
   topicCreate.type = "button";
-  topicCreate.textContent = "Create Topic";
+  topicCreate.textContent = "Create";
   topicCreate.className = "zoteroagent-topic-create";
-  const topicStatus = doc.createElementNS(XHTML, "span") as HTMLElement;
-  topicStatus.id = "zoteroagent-topic-status";
-  topicStatus.className = "zoteroagent-topic-status";
-  topicForm.appendChild(topicTitle);
-  topicForm.appendChild(topicCreate);
-  topicForm.appendChild(topicStatus);
+  const topicCancel = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+  topicCancel.id = "zoteroagent-topic-cancel";
+  topicCancel.type = "button";
+  topicCancel.textContent = "Cancel";
+  topicCancel.className = "zoteroagent-topic-cancel";
+  selectionBar.appendChild(selectionCount);
+  selectionBar.appendChild(topicTitle);
+  selectionBar.appendChild(topicCreate);
+  selectionBar.appendChild(topicCancel);
 
   const bodyDiv = doc.createElementNS(XHTML, "div") as HTMLElement;
   bodyDiv.id = "zoteroagent-memory-body";
   bodyDiv.className = "zoteroagent-memory-body";
 
   panel.appendChild(toolbar);
-  panel.appendChild(topicForm);
+  panel.appendChild(searchRow);
   panel.appendChild(bodyDiv);
+  panel.appendChild(selectionBar);
   return panel;
 }
 
@@ -687,19 +727,23 @@ function getMemoryBodyEl(body: HTMLElement): HTMLElement | null {
   return body.querySelector("#zoteroagent-memory-body") as HTMLElement | null;
 }
 
+interface NavigatorData {
+  papers: PaperVaultMeta[];
+  topics: TopicNoteSummary[];
+  currentKey: string;
+  currentMeta: PaperVaultMeta | null;
+}
+let navigatorCache: NavigatorData | null = null;
+
+/** Fetch the vault list + topics from disk, cache them, then render. */
 async function renderMemoryBrowse(body: HTMLElement) {
   const host = getMemoryBodyEl(body);
   if (!host) return;
-  const search = body.querySelector(
-    "#zoteroagent-memory-search",
-  ) as HTMLInputElement | null;
-  if (search) search.value = "";
-  host.textContent = "";
   const doc = host.ownerDocument;
 
   const currentItemId = Number(body.dataset.itemID);
-  const currentKey =
-    currentItemId > 0 ? getPaperMeta(currentItemId).itemKey : "";
+  const currentMeta = currentItemId > 0 ? getPaperMeta(currentItemId) : null;
+  const currentKey = currentMeta?.itemKey || "";
 
   let papers: PaperVaultMeta[] = [];
   try {
@@ -708,6 +752,7 @@ async function renderMemoryBrowse(body: HTMLElement) {
       mergeVaultPaperMetadata(paper, getZoteroPaperMetaByKey(paper.itemKey)),
     );
   } catch (error) {
+    host.textContent = "";
     host.appendChild(
       memoryNotice(doc, `Failed to read vault: ${String(error)}`),
     );
@@ -726,117 +771,97 @@ async function renderMemoryBrowse(body: HTMLElement) {
     );
   }
 
-  if (currentItemId > 0) {
-    const currentMeta = getPaperMeta(currentItemId);
-    const header = doc.createElementNS(XHTML, "div") as HTMLElement;
-    header.className = "zoteroagent-memory-section-title";
-    header.textContent = "Current paper";
-    host.appendChild(header);
-    await appendPaperMemoryCard(
-      body,
-      host,
-      currentKey,
-      currentMeta.title,
-      currentMeta,
-    );
-  }
-
+  // Topics failures are non-fatal — render the paper list regardless.
+  let topics: TopicNoteSummary[] = [];
   try {
-    const topics = await listTopicNotes();
-    if (topics.length) {
-      const topicTitle = doc.createElementNS(XHTML, "div") as HTMLElement;
-      topicTitle.className = "zoteroagent-memory-section-title";
-      topicTitle.textContent = `Topics (${topics.length})`;
-      host.appendChild(topicTitle);
-      const topicList = doc.createElementNS(XHTML, "div") as HTMLElement;
-      topicList.className = "zoteroagent-memory-list";
-      for (const topic of topics) {
-        const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
-        row.type = "button";
-        row.className = "zoteroagent-memory-list-item";
-        const title = doc.createElementNS(XHTML, "span") as HTMLElement;
-        title.className = "zoteroagent-memory-list-title";
-        title.textContent = topic.title;
-        const sub = doc.createElementNS(XHTML, "span") as HTMLElement;
-        sub.className = "zoteroagent-memory-list-sub";
-        sub.textContent = `${topic.paperItemKeys.length} papers`;
-        row.appendChild(title);
-        row.appendChild(sub);
-        row.addEventListener("click", () => {
-          void renderTopicDetail(body, topic.slug);
-        });
-        topicList.appendChild(row);
-      }
-      host.appendChild(topicList);
-    }
-  } catch (error) {
-    host.appendChild(
-      memoryNotice(doc, `Failed to read Topic Notes: ${String(error)}`),
-    );
+    topics = await listTopicNotes();
+  } catch {
+    topics = [];
   }
 
-  const listTitle = doc.createElementNS(XHTML, "div") as HTMLElement;
-  listTitle.className = "zoteroagent-memory-section-title";
-  listTitle.textContent = `All papers (${papers.length})`;
-  host.appendChild(listTitle);
+  navigatorCache = { papers, topics, currentKey, currentMeta };
+  renderNavigatorFromCache(body);
+}
 
-  if (!papers.length) {
-    host.appendChild(
-      memoryNotice(
-        doc,
-        "No papers in the vault yet. Ask a question in Chat to let Codex build memory.",
-      ),
-    );
-    return;
-  }
-
-  const list = doc.createElementNS(XHTML, "div") as HTMLElement;
-  list.className = "zoteroagent-memory-list";
-  for (const paper of papers) {
-    const wrapper = doc.createElementNS(XHTML, "div") as HTMLElement;
-    wrapper.className = "zoteroagent-memory-list-row";
-    const select = doc.createElementNS(XHTML, "input") as HTMLInputElement;
-    select.type = "checkbox";
-    select.className = "zoteroagent-topic-paper-select";
-    select.checked = topicPaperSelection.has(paper.itemKey);
-    select.title = `Include ${paper.title || paper.itemKey} in Topic Note`;
-    select.setAttribute("aria-label", select.title);
-    select.addEventListener("change", () => {
-      if (select.checked) topicPaperSelection.add(paper.itemKey);
-      else topicPaperSelection.delete(paper.itemKey);
+/**
+ * Render the navigator from the last-fetched data, applying the current
+ * filter text. Used for instant filtering — no disk I/O, so it can run on
+ * every keystroke without losing the in-progress topic selection.
+ */
+function renderNavigatorFromCache(body: HTMLElement) {
+  const host = getMemoryBodyEl(body);
+  if (!host || !navigatorCache) return;
+  const doc = host.ownerDocument;
+  const { papers, topics, currentKey, currentMeta } = navigatorCache;
+  renderMemoryNavigator({
+    host,
+    papers: filterPapers(papers, memorySearchState.filterText),
+    topics,
+    currentKey,
+    currentPaper: currentMeta || undefined,
+    selection: topicSelection,
+    onToggleSelect: (key, checked) => {
+      topicSelection.toggle(key, checked);
       updateTopicSelectionStatus(body);
-    });
-    const row = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
-    row.type = "button";
-    row.className = "zoteroagent-memory-list-item";
-    if (paper.itemKey === currentKey) row.classList.add("is-current");
-    const title = doc.createElementNS(XHTML, "span") as HTMLElement;
-    title.className = "zoteroagent-memory-list-title";
-    title.textContent = paper.title || paper.itemKey;
-    const sub = doc.createElementNS(XHTML, "span") as HTMLElement;
-    sub.className = "zoteroagent-memory-list-sub";
-    sub.textContent = [
-      paper.rating ? `${paper.rating}/5` : "",
-      paper.creators,
-      paper.year,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    row.appendChild(title);
-    if (sub.textContent) row.appendChild(sub);
-    row.addEventListener("click", () => {
-      void renderMemoryDetail(
-        body,
-        paper.itemKey,
-        paper.title || paper.itemKey,
-      );
-    });
-    wrapper.appendChild(select);
-    wrapper.appendChild(row);
-    list.appendChild(wrapper);
-  }
-  host.appendChild(list);
+    },
+    onOpenPaper: (itemKey, title) => {
+      void renderMemoryDetail(body, itemKey, title);
+    },
+    onOpenTopic: (slug) => {
+      void renderTopicDetail(body, slug);
+    },
+    onNewTopic: () => {
+      topicSelection.enter();
+      renderNavigatorFromCache(body);
+    },
+    buildNotice: (text) => memoryNotice(doc, text),
+  });
   updateTopicSelectionStatus(body);
+}
+
+/**
+ * Single entry point for the toolbar's filter/search affordances. Updates the
+ * pure view-state, reflects it into the DOM (search row visibility, input
+ * sync), and renders either the navigator (browse) or full-text results.
+ */
+function dispatchMemory(body: HTMLElement, action: MemoryAction) {
+  memorySearchState = nextMemorySearchState(memorySearchState, action);
+  const inSearch = memorySearchState.view === "search";
+  const searchRow = body.querySelector(
+    "#zoteroagent-memory-search-row",
+  ) as HTMLElement | null;
+  const searchInput = body.querySelector(
+    "#zoteroagent-memory-search",
+  ) as HTMLInputElement | null;
+  const filterInput = body.querySelector(
+    "#zoteroagent-memory-filter",
+  ) as HTMLInputElement | null;
+  const bar = body.querySelector(
+    "#zoteroagent-topic-selection-bar",
+  ) as HTMLElement | null;
+
+  if (searchRow) searchRow.style.display = inSearch ? "flex" : "none";
+  if (!inSearch && searchInput) searchInput.value = "";
+  if (inSearch && filterInput) filterInput.value = "";
+  if (
+    !inSearch &&
+    filterInput &&
+    filterInput.value !== memorySearchState.filterText
+  ) {
+    filterInput.value = memorySearchState.filterText;
+  }
+  // Selection UI belongs to the browse view only.
+  if (bar && inSearch) bar.style.display = "none";
+
+  if (inSearch && memorySearchState.searchQuery) {
+    void runMemorySearch(body, memorySearchState.searchQuery);
+  } else if (action.type === "filter" && navigatorCache) {
+    // Instant filter — re-render from cache, no disk I/O, selection preserved.
+    renderNavigatorFromCache(body);
+  } else if (isSafeBody(body)) {
+    void renderMemoryBrowse(body);
+  }
+  if (action.type === "openSearch" && searchInput) searchInput.focus();
 }
 
 async function appendPaperMemoryCard(
@@ -934,6 +959,18 @@ async function appendPaperMemoryCard(
   host.appendChild(card);
 }
 
+/**
+ * Re-render the detail card for a paper after an in-card action (build/repair,
+ * code analysis, value-type toggle, relationship review). The card lives only
+ * in the detail view now, so we must refresh detail — NOT the browse navigator,
+ * which would navigate the user away from the paper they are editing.
+ */
+function refreshPaperDetail(body: HTMLElement, paper: PaperVaultMeta) {
+  if (isSafeBody(body)) {
+    void renderMemoryDetail(body, paper.itemKey, paper.title || paper.itemKey);
+  }
+}
+
 function buildColdStartAction(
   body: HTMLElement,
   paper: PaperVaultMeta,
@@ -982,8 +1019,7 @@ function getAgentStatusSlot(body: HTMLElement): HTMLElement | null {
   ) as HTMLElement | null;
 }
 
-async function startPaperColdStart(body: HTMLElement, paper: PaperVaultMeta) {
-  if (isGenerating) return;
+async function startPaperColdStart(body: HTMLElement, paper: PaperVaultMeta) {  if (isGenerating) return;
   const reader = getActiveReader() || addon.data.popup.currentReader;
   const pdfItemId = resolvePdfAttachmentItemId(paper.itemId, reader);
   const slot = getAgentStatusSlot(body);
@@ -1049,7 +1085,7 @@ async function startPaperColdStart(body: HTMLElement, paper: PaperVaultMeta) {
     setGenerating(body, false);
   }
   if (wonRace && slot) showNoticeStatus(slot, finalNotice);
-  if (isSafeBody(body)) void renderMemoryBrowse(body);
+  refreshPaperDetail(body, paper);
 }
 
 async function startPaperRepair(
@@ -1102,7 +1138,7 @@ async function startPaperRepair(
     setGenerating(body, false);
   }
   if (wonRace && slot) showNoticeStatus(slot, finalNotice);
-  if (isSafeBody(body)) void renderMemoryBrowse(body);
+  refreshPaperDetail(body, paper);
 }
 
 async function startPdfEnrichment(body: HTMLElement, paper: PaperVaultMeta) {
@@ -1190,37 +1226,15 @@ function buildPaperSignalBar(
   tier.textContent = signals.tier;
   tier.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
   bar.appendChild(tier);
-  for (const valueType of PAPER_VALUE_TYPES) {
-    const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
-    button.type = "button";
-    button.className = "zoteroagent-value-type";
-    button.classList.toggle(
-      "is-active",
-      signals.valueTypes.includes(valueType),
-    );
-    button.textContent = valueTypeLabel(valueType);
-    button.title = valueTypeDescription(valueType);
-    button.addEventListener("click", () => {
-      const next = signals.valueTypes.includes(valueType)
-        ? signals.valueTypes.filter((entry) => entry !== valueType)
-        : [...signals.valueTypes, valueType];
-      void updatePaperValueTypes(paper, next).then(() => {
-        if (isSafeBody(body)) void renderMemoryBrowse(body);
-      });
-    });
-    bar.appendChild(button);
-  }
-  for (const collection of signals.zoteroCollections.slice(0, 2)) {
+  // Zotero collections are the user's own topical folders (e.g. "WorldModel",
+  // "Base Model") — keep them. The arXiv subject-category tags (e.g.
+  // "Computer Science - Artificial Intelligence") are auto-imported noise and
+  // are intentionally NOT shown.
+  for (const collection of signals.zoteroCollections.slice(0, 3)) {
     const chip = doc.createElementNS(XHTML, "span") as HTMLElement;
     chip.className = "zoteroagent-paper-signal-chip";
     chip.textContent = collection.name;
     chip.title = collection.path;
-    bar.appendChild(chip);
-  }
-  for (const tag of signals.zoteroTags.slice(0, 3)) {
-    const chip = doc.createElementNS(XHTML, "span") as HTMLElement;
-    chip.className = "zoteroagent-paper-signal-chip is-tag";
-    chip.textContent = tag;
     bar.appendChild(chip);
   }
   return bar;
@@ -1321,7 +1335,7 @@ async function startCodeAnalysis(
     setGenerating(body, false);
   }
   if (wonRace && slot) showNoticeStatus(slot, finalNotice);
-  if (isSafeBody(body)) void renderMemoryBrowse(body);
+  refreshPaperDetail(body, paper);
 }
 
 function buildRelationshipProposalReview(
@@ -1347,7 +1361,7 @@ function buildRelationshipProposalReview(
     accept.addEventListener("click", () => {
       void acceptRelationshipProposal({ paper, proposal }).then(() => {
         removePendingRelationshipProposal(paper.itemKey, proposal);
-        if (isSafeBody(body)) void renderMemoryBrowse(body);
+        refreshPaperDetail(body, paper);
       });
     });
     const dismiss = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
@@ -1355,7 +1369,7 @@ function buildRelationshipProposalReview(
     dismiss.textContent = "Dismiss";
     dismiss.addEventListener("click", () => {
       removePendingRelationshipProposal(paper.itemKey, proposal);
-      if (isSafeBody(body)) void renderMemoryBrowse(body);
+      refreshPaperDetail(body, paper);
     });
     row.appendChild(text);
     row.appendChild(accept);
@@ -1411,22 +1425,35 @@ async function renderMemoryDetail(
 }
 
 function updateTopicSelectionStatus(body: HTMLElement) {
+  const bar = body.querySelector(
+    "#zoteroagent-topic-selection-bar",
+  ) as HTMLElement | null;
   const status = body.querySelector(
     "#zoteroagent-topic-status",
   ) as HTMLElement | null;
   const button = body.querySelector(
     "#zoteroagent-topic-create",
   ) as HTMLButtonElement | null;
+  if (bar) bar.style.display = topicSelection.isActive() ? "flex" : "none";
   if (status) {
-    status.textContent = topicPaperSelection.size
-      ? `${topicPaperSelection.size} selected`
-      : "Select papers below";
+    status.textContent = topicSelection.size()
+      ? `${topicSelection.size()} selected`
+      : "Select papers to group";
   }
-  if (button) button.disabled = topicPaperSelection.size < 2 || isGenerating;
+  if (button) button.disabled = !topicSelection.canCreate() || isGenerating;
+}
+
+function cancelTopicSelection(body: HTMLElement) {
+  topicSelection.cancel();
+  const input = body.querySelector(
+    "#zoteroagent-topic-title",
+  ) as HTMLInputElement | null;
+  if (input) input.value = "";
+  if (isSafeBody(body)) void renderMemoryBrowse(body);
 }
 
 async function startTopicNoteCreation(body: HTMLElement) {
-  if (isGenerating || topicPaperSelection.size < 2) return;
+  if (isGenerating || !topicSelection.canCreate()) return;
   const input = body.querySelector(
     "#zoteroagent-topic-title",
   ) as HTMLInputElement | null;
@@ -1454,7 +1481,7 @@ async function startTopicNoteCreation(body: HTMLElement) {
   try {
     const result = await createOrUpdateTopicNote({
       title,
-      paperItemKeys: Array.from(topicPaperSelection),
+      paperItemKeys: topicSelection.keys(),
       model: session?.modelSlug,
       reasoningEffort: session?.reasoningEffort,
       onStatus: (text) => {
@@ -1468,7 +1495,7 @@ async function startTopicNoteCreation(body: HTMLElement) {
     });
     if (slot) wonRace = isTokenCurrent(slot, token);
     finalNotice = `Saved ${result.topic.title} from ${result.topic.paperItemKeys.length} papers.`;
-    topicPaperSelection.clear();
+    topicSelection.cancel();
     if (input) input.value = "";
   } catch (error) {
     if (slot) wonRace = isTokenCurrent(slot, token);
@@ -1511,11 +1538,12 @@ function scheduleMemorySearch(body: HTMLElement, query: string) {
   if (memorySearchTimer) clearTimeout(memorySearchTimer);
   const trimmed = query.trim();
   if (!trimmed) {
-    void renderMemoryBrowse(body);
+    // Empty query collapses search mode back to browse (see reducer).
+    dispatchMemory(body, { type: "search", query: "" });
     return;
   }
   memorySearchTimer = setTimeout(() => {
-    void runMemorySearch(body, trimmed);
+    dispatchMemory(body, { type: "search", query: trimmed });
   }, 220);
 }
 
@@ -1711,6 +1739,7 @@ function ensureChatUI(body: HTMLElement) {
   defaultModelOption.value = "";
   defaultModelOption.textContent = "Codex default";
   modelSelect.appendChild(defaultModelOption);
+  const modelPill = buildComposerPill(doc, "spark", modelSelect);
 
   const reasoningSelect = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -1726,17 +1755,7 @@ function ensureChatUI(body: HTMLElement) {
   defaultReasoningOption.value = "";
   defaultReasoningOption.textContent = "Thinking default";
   reasoningSelect.appendChild(defaultReasoningOption);
-
-  const actionsRight = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "div",
-  );
-  actionsRight.className = "zoteroagent-actions-right";
-
-  const sendBtn = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-  sendBtn.id = "zoteroagent-chat-send";
-  sendBtn.className = "zoteroagent-send-button";
-  sendBtn.textContent = "Send";
+  const reasoningPill = buildComposerPill(doc, "gauge", reasoningSelect);
 
   const attachPageBtn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -1744,7 +1763,7 @@ function ensureChatUI(body: HTMLElement) {
   ) as HTMLButtonElement;
   attachPageBtn.id = "zoteroagent-attach-page";
   attachPageBtn.className = "zoteroagent-compose-action icon-only";
-  setIconButton(attachPageBtn, "image", "Attach current PDF page");
+  setIconButton(attachPageBtn, "attach", "Attach current PDF page");
 
   const signalsToggleBtn = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -1762,12 +1781,26 @@ function ensureChatUI(body: HTMLElement) {
   signalsPanel.className = "zoteroagent-paper-signals-panel";
   signalsPanel.style.display = "none";
 
-  actionsRight.appendChild(signalsToggleBtn);
-  actionsRight.appendChild(attachPageBtn);
-  actionsRight.appendChild(sendBtn);
-  actionsRow.appendChild(modelSelect);
-  actionsRow.appendChild(reasoningSelect);
-  actionsRow.appendChild(actionsRight);
+  const sendBtn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
+  sendBtn.id = "zoteroagent-chat-send";
+  sendBtn.className = "zoteroagent-send-button icon-only";
+  setIconButton(sendBtn, "arrowUp", "Send");
+
+  const actionsLeft = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  );
+  actionsLeft.className = "zoteroagent-actions-left";
+  actionsLeft.appendChild(attachPageBtn);
+  actionsLeft.appendChild(modelPill);
+  actionsLeft.appendChild(reasoningPill);
+  actionsLeft.appendChild(signalsToggleBtn);
+
+  actionsRow.appendChild(actionsLeft);
+  actionsRow.appendChild(sendBtn);
 
   composeArea.appendChild(contextChips);
   composeArea.appendChild(textarea);
@@ -1827,6 +1860,22 @@ function bindChatEvents(body: HTMLElement) {
   body
     .querySelector("#zoteroagent-view-memory")
     ?.addEventListener("click", () => switchChatView(body, "memory"));
+  const memoryFilter = body.querySelector(
+    "#zoteroagent-memory-filter",
+  ) as HTMLInputElement | null;
+  memoryFilter?.addEventListener("input", () => {
+    dispatchMemory(body, { type: "filter", text: memoryFilter.value });
+  });
+  body
+    .querySelector("#zoteroagent-memory-search-toggle")
+    ?.addEventListener("click", () => {
+      dispatchMemory(body, { type: "openSearch" });
+    });
+  body
+    .querySelector("#zoteroagent-memory-search-close")
+    ?.addEventListener("click", () => {
+      dispatchMemory(body, { type: "closeSearch" });
+    });
   const memorySearch = body.querySelector(
     "#zoteroagent-memory-search",
   ) as HTMLInputElement | null;
@@ -1847,6 +1896,11 @@ function bindChatEvents(body: HTMLElement) {
     .querySelector("#zoteroagent-topic-create")
     ?.addEventListener("click", () => {
       void startTopicNoteCreation(body);
+    });
+  body
+    .querySelector("#zoteroagent-topic-cancel")
+    ?.addEventListener("click", () => {
+      cancelTopicSelection(body);
     });
   body
     .querySelector("#zoteroagent-chat-send")
@@ -2020,12 +2074,10 @@ function setGenerating(body: HTMLElement, generating: boolean) {
   if (sendBtn) {
     if (generating) {
       sendBtn.classList.add("is-stop");
-      sendBtn.textContent = "Stop";
-      sendBtn.title = "Stop generating";
+      setIconButton(sendBtn as HTMLButtonElement, "stop", "Stop generating");
     } else {
       sendBtn.classList.remove("is-stop");
-      sendBtn.textContent = "Send";
-      sendBtn.title = "Send";
+      setIconButton(sendBtn as HTMLButtonElement, "arrowUp", "Send");
       activeCodexProcess = null;
       activeCodexOwner = null;
     }
@@ -3525,6 +3577,21 @@ function getMentionPanel(body: HTMLElement): HTMLElement | null {
   return body.querySelector("#zoteroagent-mention-panel") as HTMLElement | null;
 }
 
+function buildComposerPill(
+  doc: Document,
+  icon: Parameters<typeof getIconSvg>[0],
+  control: HTMLElement,
+): HTMLElement {
+  const pill = doc.createElementNS(XHTML, "div") as HTMLElement;
+  pill.className = "zoteroagent-pill";
+  const iconSpan = doc.createElementNS(XHTML, "span") as HTMLElement;
+  iconSpan.className = "zoteroagent-pill-icon";
+  insertSvgMarkup(iconSpan, getIconSvg(icon));
+  pill.appendChild(iconSpan);
+  pill.appendChild(control);
+  return pill;
+}
+
 const TIER_RANK: Record<PaperTier, number> = { L0: 0, L1: 1, L2: 2, L3: 3 };
 const DEPTH_TARGETS: Array<{ tier: "L0" | "L1" | "L2"; label: string }> = [
   { tier: "L0", label: "L0 · card" },
@@ -3645,38 +3712,40 @@ function buildDepthRow(
   label.className = "zoteroagent-signals-row-label";
   label.textContent = "Depth";
   row.appendChild(label);
-  const select = doc.createElementNS(XHTML, "select") as HTMLSelectElement;
-  select.className = "zoteroagent-signals-depth-select";
-  select.title = "L0 card, L1 skim, L2 close reading, L3 code/reproduction";
+  const group = doc.createElementNS(XHTML, "div") as HTMLElement;
+  group.className = "zoteroagent-signals-depth";
+  group.setAttribute("role", "group");
   if (currentTier === "L3") {
-    const l3 = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
-    l3.value = "L3";
-    l3.textContent = "L3 · code";
+    const l3 = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    l3.type = "button";
+    l3.className = "zoteroagent-signals-depth-btn is-active";
+    l3.textContent = "L3";
+    l3.title = "L3 · code/reproduction (downgrade to L0 only)";
     l3.disabled = true;
-    l3.selected = true;
-    select.appendChild(l3);
+    group.appendChild(l3);
   }
   for (const target of DEPTH_TARGETS) {
-    const option = doc.createElementNS(XHTML, "option") as HTMLOptionElement;
-    option.value = target.tier;
-    option.textContent = target.label;
+    const button = doc.createElementNS(XHTML, "button") as HTMLButtonElement;
+    button.type = "button";
+    button.className = "zoteroagent-signals-depth-btn";
+    button.textContent = target.tier;
+    button.title = target.label;
+    button.classList.toggle("is-active", target.tier === currentTier);
     // A deeper record can only be downgraded to L0 (see assertDepthTransition).
-    option.disabled =
+    button.disabled =
       TIER_RANK[currentTier] > TIER_RANK[target.tier] && target.tier !== "L0";
-    option.selected = target.tier === currentTier;
-    select.appendChild(option);
+    button.addEventListener("click", () => {
+      if (target.tier === currentTier) return;
+      void dispatchPaperSignalAction(
+        body,
+        itemId,
+        { kind: "paper.depth.set", targetTier: target.tier },
+        `Change reading depth to ${target.tier}.`,
+      );
+    });
+    group.appendChild(button);
   }
-  select.addEventListener("change", () => {
-    const targetTier = select.value as "L0" | "L1" | "L2";
-    if (targetTier === currentTier) return;
-    void dispatchPaperSignalAction(
-      body,
-      itemId,
-      { kind: "paper.depth.set", targetTier },
-      `Change reading depth to ${targetTier}.`,
-    );
-  });
-  row.appendChild(select);
+  row.appendChild(group);
   return row;
 }
 

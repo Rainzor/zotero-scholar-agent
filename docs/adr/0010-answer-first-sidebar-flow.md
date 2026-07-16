@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: frontend
 ---
 
 # Put the answer before execution detail in the reader sidebar

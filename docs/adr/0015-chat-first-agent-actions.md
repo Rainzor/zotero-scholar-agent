@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Make Chat the authorization boundary for agent actions
@@ -66,6 +67,6 @@ read-only.
 - Workflow Skill updates are plugin-owned, versioned by
   `workflowSkillVersion`, and committed without absorbing unrelated Vault
   changes.
-- Code, Topic, depth, rating, build, repair, PDF enrichment, relationship
-  proposals, action suggestions, and conservative Undo remain later phases of
-  this decision.
+- Depth, rating, and conservative Undo shipped in this decision's
+  local-knowledge slice. Code, Topic, build, repair, PDF enrichment,
+  relationship proposals, and action suggestions remain later phases.

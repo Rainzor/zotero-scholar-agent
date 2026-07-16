@@ -115,6 +115,16 @@ unverified), then update the phase boundary before resuming.
 - Read `README.md`, `CONTEXT.md`, and `docs/adr/` before changing architecture.
 - For design changes, update or add an ADR under `docs/adr/`.
 - Keep vocabulary consistent with `CONTEXT.md`: "Knowledge Vault", "Paper Directory", "Conversation Log", "Memory Note", "In-Focus Paper", and "Item Key".
+- Tag every ADR (`track:` in its YAML frontmatter) and every document under
+  `docs/plans/`, plus `docs/roadmap.md` and `docs/memory-philosophy.md` (a
+  `> Track: ...` line near the top), with `frontend`, `backend`, or `both`.
+  Use `both` whenever the decision pairs a UI change with a backend/service/
+  Vault change, which is the common case. Do not split `docs/` into
+  frontend/backend folders — most decisions here are full-stack, and a folder
+  split would force naturally-coupled decisions apart; the tag exists so
+  track can still be filtered (e.g. `grep -rl "track: frontend" docs/adr/`)
+  without breaking that coupling. See `docs/plans/project-status.md` §2 for
+  the full rationale and current tagging.
 
 ## Dependency Documentation
 

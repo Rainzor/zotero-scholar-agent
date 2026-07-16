@@ -1,19 +1,26 @@
 export type PageJumpState =
   | { ok: true; pageCount?: number }
-  | { ok: false; reason: "no-reader" | "out-of-range" | "navigation-failed"; pageCount?: number };
+  | {
+      ok: false;
+      reason: "no-reader" | "out-of-range" | "navigation-failed";
+      pageCount?: number;
+    };
 
 export function getReaderPageCount(
   reader?: _ZoteroTypes.ReaderInstance | null,
 ): number | undefined {
-  const direct = positiveInteger((reader as any)?._state?.pagesCount) ||
+  const direct =
+    positiveInteger((reader as any)?._state?.pagesCount) ||
     positiveInteger((reader as any)?.state?.pagesCount) ||
     positiveInteger((reader as any)?._internalReader?._state?.pagesCount) ||
     positiveInteger((reader as any)?._internalReader?.state?.pagesCount);
   if (direct) return direct;
   const app = getPdfViewerApplication(reader);
-  return positiveInteger(app?.pagesCount) ||
+  return (
+    positiveInteger(app?.pagesCount) ||
     positiveInteger(app?.pdfViewer?.pagesCount) ||
-    positiveInteger(app?.pdfDocument?.numPages);
+    positiveInteger(app?.pdfDocument?.numPages)
+  );
 }
 
 export function canJumpToPage(
@@ -67,9 +74,7 @@ function getPdfViewerApplication(
     const iframeWin = (reader as any)?._iframeWindow;
     const wrapped = iframeWin?.wrappedJSObject;
     return (
-      wrapped?.PDFViewerApplication ||
-      iframeWin?.PDFViewerApplication ||
-      null
+      wrapped?.PDFViewerApplication || iframeWin?.PDFViewerApplication || null
     );
   } catch {
     return null;

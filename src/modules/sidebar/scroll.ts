@@ -69,7 +69,12 @@ export function restoreMessageScrollAnchor(
 }
 
 export function buildMessageScrollAnchor(
-  message: { role: string; timestamp?: number; content?: string; model?: string },
+  message: {
+    role: string;
+    timestamp?: number;
+    content?: string;
+    model?: string;
+  },
   _fallbackIndex: number,
 ): string {
   return message.timestamp

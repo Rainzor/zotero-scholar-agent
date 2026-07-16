@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Layered PDF parsing: deterministic PDFWorker base, Codex-driven enrichment

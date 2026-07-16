@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Per-chat Codex model selection from the active Codex catalog

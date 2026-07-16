@@ -9,9 +9,7 @@ export function formatActivityLabel(command: string): string {
     return `Read ${fileName(sed[3])} (lines ${sed[1]}–${sed[2]})`;
   }
 
-  const rg = clean.match(
-    /^rg\s+(?:-[\w-]+\s+)*["']([^"']+)["']\s+(.+)$/,
-  );
+  const rg = clean.match(/^rg\s+(?:-[\w-]+\s+)*["']([^"']+)["']\s+(.+)$/);
   if (rg) return `Search ${fileName(rg[2])} for "${rg[1]}"`;
 
   const cat = clean.match(/^cat\s+(.+)$/);
@@ -31,7 +29,9 @@ export function formatActivityLabel(command: string): string {
 }
 
 function unwrapShellCommand(command: string): string {
-  const clean = String(command || "").replace(/\s+/g, " ").trim();
+  const clean = String(command || "")
+    .replace(/\s+/g, " ")
+    .trim();
   const match = clean.match(/^(?:\S*\/)?(?:zsh|bash|sh)\s+-lc\s+(["'])(.*)\1$/);
   return (match ? match[2] : clean).trim();
 }

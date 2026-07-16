@@ -63,7 +63,9 @@ describe("buildCodexResearchPrompt", () => {
       contextDigest: "# Context Digest",
       recentMessages: [{ role: "user", content: "recent question" }],
     });
-    expect(prompt).toContain("Thread context mode: resume existing Codex thread.");
+    expect(prompt).toContain(
+      "Thread context mode: resume existing Codex thread.",
+    );
     expect(prompt).toContain("Hidden Context Digest: omitted");
     expect(prompt).not.toContain("# Context Digest");
     expect(prompt).not.toContain("recent question");

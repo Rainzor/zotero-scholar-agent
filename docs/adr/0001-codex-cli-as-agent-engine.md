@@ -1,12 +1,13 @@
 ---
 status: accepted
+track: backend
 ---
 
 # Replace the custom RAG pipeline with the Codex CLI as agent engine
 
 ## Context
 
-The plugin's agent is currently a self-built, single-paper RAG pipeline (`agent-executor.ts` + `ai-service.ts`): plan pages → load page text → stream an answer, with a per-paper page cache, an `AGENTS.md` overview, per-page citations, multimodal image asks, context-PDF references, multi-provider HTTP config, and token budgeting. Its structural limit is that it reasons about *one paper at a time* and has no durable, cross-paper memory. The stated product goal is the opposite: accumulate and retrieve knowledge *across the whole library* as the user reads many papers over time.
+The plugin's agent is currently a self-built, single-paper RAG pipeline (`agent-executor.ts` + `ai-service.ts`): plan pages → load page text → stream an answer, with a per-paper page cache, an `AGENTS.md` overview, per-page citations, multimodal image asks, context-PDF references, multi-provider HTTP config, and token budgeting. Its structural limit is that it reasons about _one paper at a time_ and has no durable, cross-paper memory. The stated product goal is the opposite: accumulate and retrieve knowledge _across the whole library_ as the user reads many papers over time.
 
 ## Decision
 

@@ -75,7 +75,10 @@ describe("parseTopLevelTomlString", () => {
 
   it("ignores model values inside sections", () => {
     expect(
-      parseTopLevelTomlString(["[profiles.proxy]", 'model = "other"'].join("\n"), "model"),
+      parseTopLevelTomlString(
+        ["[profiles.proxy]", 'model = "other"'].join("\n"),
+        "model",
+      ),
     ).toBe("");
   });
 });
@@ -83,7 +86,12 @@ describe("parseTopLevelTomlString", () => {
 describe("selectCatalogModel", () => {
   const catalog = [
     { slug: "slow", contextWindowTokens: 32000, priority: 10 },
-    { slug: "gpt-5.5", displayName: "GPT-5.5", contextWindowTokens: 272000, priority: 0 },
+    {
+      slug: "gpt-5.5",
+      displayName: "GPT-5.5",
+      contextWindowTokens: 272000,
+      priority: 0,
+    },
   ];
 
   it("prefers an exact configured slug", () => {

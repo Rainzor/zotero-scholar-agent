@@ -28,22 +28,22 @@ This is a **Zotero 7/8 plugin** that adds an AI-powered reading assistant to the
 
 ### UI Modules (`src/modules/`)
 
-| Module              | Responsibility                                                                                                        |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `sidebar.ts`        | Main chat panel: session management, message rendering, Codex streaming updates, Memory view                          |
-| `popup.ts`          | In-reader text-selection popup with "Ask" and "Translate" quick actions                                               |
-| `pdf-context.ts`    | Full-text extraction via Zotero PDFWorker (`getFullText`), trimming trailing references                               |
-| `preferences.ts`    | Settings UI for AI service configuration                                                                              |
-| `reader.ts`         | Reader lifecycle integration                                                                                          |
+| Module           | Responsibility                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `sidebar.ts`     | Main chat panel: session management, message rendering, Codex streaming updates, Memory view |
+| `popup.ts`       | In-reader text-selection popup with "Ask" and "Translate" quick actions                      |
+| `pdf-context.ts` | Full-text extraction via Zotero PDFWorker (`getFullText`), trimming trailing references      |
+| `preferences.ts` | Settings UI for AI service configuration                                                     |
+| `reader.ts`      | Reader lifecycle integration                                                                 |
 
 ### Service Layer (`src/services/`)
 
-| Service              | Responsibility                                                                                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ai-service.ts`      | Abstract AI API client used by non-agent features such as popup translation and preference API checks                                                              |
-| `codex/`             | Codex CLI integration: binary resolution, Mozilla subprocess wrapper, JSONL event parsing, Vault prep, and turn execution                                          |
-| `chat-store.ts`      | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/zoteroagent/chats/{itemKey}.json` (front-end/UI state only — see Storage below) |
-| `prompts.ts`         | Popup translation prompt                                                                                                                                            |
+| Service         | Responsibility                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ai-service.ts` | Abstract AI API client used by non-agent features such as popup translation and preference API checks                                               |
+| `codex/`        | Codex CLI integration: binary resolution, Mozilla subprocess wrapper, JSONL event parsing, Vault prep, and turn execution                           |
+| `chat-store.ts` | Session persistence; saves per-paper JSON files to `{ZoteroDataDir}/zoteroagent/chats/{itemKey}.json` (front-end/UI state only — see Storage below) |
+| `prompts.ts`    | Popup translation prompt                                                                                                                            |
 
 ### Agent Execution Flow
 
@@ -85,11 +85,11 @@ Providers are configured in `src/utils/provider-presets.ts`. Supported API forma
 
 Plugin state lives in three roots, split by purpose:
 
-| Location | Contents | Role |
-| -------- | -------- | ---- |
+| Location                                                                 | Contents                                                                                                                                                                                                                               | Role                                                                                                                 |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Knowledge Vault** — `~/papers` (or pref `codex.vaultPath`), a git repo | per-paper `{itemKey}/`: `text.txt`, `text.meta.json` (parser-version stamp), `memory.md` (Knowledge Surface), `record.json` (Structured Projection), `conversations/{sessionId}.md`; root `AGENTS.md`, `README.md`, `.logs/{date}.log` | **Single source of truth.** Durable, migratable, git-versioned. Codex's working directory (`codex exec -C {vault}`). |
-| **Zotero DataDir** — `{ZoteroDataDir}/zoteroagent/` | `chats/{itemKey}.json` (sessions/messages/`codexThreadId`, UI-specific fields) | Front-end/UI state. Ephemeral — not git-tracked. |
-| **Zotero Prefs** (`Zotero.Prefs`) | vault path, Codex binary path, model slugs, context-window override, AI services list | Configuration. |
+| **Zotero DataDir** — `{ZoteroDataDir}/zoteroagent/`                      | `chats/{itemKey}.json` (sessions/messages/`codexThreadId`, UI-specific fields)                                                                                                                                                         | Front-end/UI state. Ephemeral — not git-tracked.                                                                     |
+| **Zotero Prefs** (`Zotero.Prefs`)                                        | vault path, Codex binary path, model slugs, context-window override, AI services list                                                                                                                                                  | Configuration.                                                                                                       |
 
 **Deliberate dual-write of conversations.** Each turn is persisted twice: the structured session JSON in `chats/` (what the sidebar renders, with per-message reasoning/activities/usage) and a human-readable transcript in the Vault's `conversations/*.md` (git history, browsable record). This is intentional — deleting a session in the UI touches only `chats/` and leaves the Vault record intact. `conversations/*.md` is **append-only** and is not read back by the UI, so it can diverge from edited UI history by design; the Vault is authoritative.
 

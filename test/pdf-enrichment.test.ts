@@ -25,7 +25,9 @@ describe("PDF enrichment validation", () => {
   });
 
   it("parses Poppler pdfinfo page count", () => {
-    expect(parsePdfInfoPageCount("Title: Paper\nPages:          17\n")).toBe(17);
+    expect(parsePdfInfoPageCount("Title: Paper\nPages:          17\n")).toBe(
+      17,
+    );
     expect(parsePdfInfoPageCount("no pages")).toBeUndefined();
   });
 

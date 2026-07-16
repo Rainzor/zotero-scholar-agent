@@ -46,10 +46,7 @@ function buildStatusPill(
   textEl.textContent = text || "Generating...";
   pill.appendChild(textEl);
   if (onCancel) {
-    const cancel = doc.createElementNS(
-      XHTML_NS,
-      "button",
-    ) as HTMLButtonElement;
+    const cancel = doc.createElementNS(XHTML_NS, "button") as HTMLButtonElement;
     cancel.type = "button";
     cancel.className = "zoteroagent-agent-status-cancel";
     cancel.textContent = "Stop";

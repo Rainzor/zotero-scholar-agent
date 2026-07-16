@@ -1,5 +1,6 @@
 # Memory Design Philosophy - Core Conventions for the Knowledge Vault
 
+> Track: backend
 > Status: Living document. This document explains why the memory system is designed this way
 > and provides the philosophical basis for the roadmap and future ADRs.
 > Terminology follows `CONTEXT.md`: Knowledge Vault, Paper Knowledge Record, Knowledge
@@ -34,12 +35,12 @@ papers have no path to become more detailed.
 Engagement depth has four levels and is **dynamically adjustable**. New papers enter the vault
 at the cheapest level by default:
 
-| Level | Positioning | Form | Trigger |
-| ---- | ---- | ---- | ---- |
-| L0 | One-sentence paper note | A 5-line card: conclusion + why more attention is not justified + pointer to more important papers | User downgrade or cold-start judgment |
-| L1 | Standard skim (default) | TL;DR + Contribution + Method skeleton + Takeaways | Cold-start default |
-| L2 | Close reading | Full Knowledge Surface template, with page anchors on key statements | Agent proposes after enough depth has accumulated in conversation; user confirms |
-| L3 | Reproduction-level | L2 + source-code reading notes + hands-on experiment records | User explicitly initiates |
+| Level | Positioning             | Form                                                                                               | Trigger                                                                          |
+| ----- | ----------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| L0    | One-sentence paper note | A 5-line card: conclusion + why more attention is not justified + pointer to more important papers | User downgrade or cold-start judgment                                            |
+| L1    | Standard skim (default) | TL;DR + Contribution + Method skeleton + Takeaways                                                 | Cold-start default                                                               |
+| L2    | Close reading           | Full Knowledge Surface template, with page anchors on key statements                               | Agent proposes after enough depth has accumulated in conversation; user confirms |
+| L3    | Reproduction-level      | L2 + source-code reading notes + hands-on experiment records                                       | User explicitly initiates                                                        |
 
 An upgrade rewrites the note rather than appending to it. A downgrade compresses the content
 into an L0 card; history remains in git. **Determining that a paper is mediocre is itself a
@@ -71,12 +72,12 @@ into the next repair turn or a UI action, so that the system forms a closed loop
 Each file should have exactly one write discipline and one maintainer. This is the only
 criterion needed to decide whether to split a file:
 
-| Discipline | Carrier | Maintainer |
-| ---- | ---- | ---- |
-| Read-only, deterministic | `text.txt`; the plugin-marked block in `memory.md` (bibliography/abstract) | Plugin |
-| Rewrite + deduplicate | Interpretation area of `memory.md` (Contribution...Library Connections) | Model |
-| Append-only, preserve wording exactly | `notes.md` (the carrier for Reader Thinking); `conversations/` | User/plugin |
-| Purely generated, manual edits prohibited | `record.json` | Plugin |
+| Discipline                                | Carrier                                                                    | Maintainer  |
+| ----------------------------------------- | -------------------------------------------------------------------------- | ----------- |
+| Read-only, deterministic                  | `text.txt`; the plugin-marked block in `memory.md` (bibliography/abstract) | Plugin      |
+| Rewrite + deduplicate                     | Interpretation area of `memory.md` (Contribution...Library Connections)    | Model       |
+| Append-only, preserve wording exactly     | `notes.md` (the carrier for Reader Thinking); `conversations/`             | User/plugin |
+| Purely generated, manual edits prohibited | `record.json`                                                              | Plugin      |
 
 Splitting by topic (`method.md`, `results.md`, and so on) is the wrong boundary. It fragments
 the same write discipline, increases the number of rules, and damages human readability and

@@ -1,5 +1,6 @@
 ---
 status: accepted
+track: both
 ---
 
 # Add a hidden Context Digest for long sidebar chats

@@ -98,21 +98,26 @@ export async function resolveCodexContextWindow(options?: {
   const manualModel = getConfiguredCodexModelSlug();
   const configuredModel =
     options?.modelSlug || manualModel || (await readCodexConfiguredModelSlug());
-  const cacheKey = [
-    configuredModel,
-    manualWindow || "",
-    manualModel,
-  ].join("\n");
-  if (!options?.refresh && cachedContextWindow && cachedContextWindowKey === cacheKey) {
+  const cacheKey = [configuredModel, manualWindow || "", manualModel].join(
+    "\n",
+  );
+  if (
+    !options?.refresh &&
+    cachedContextWindow &&
+    cachedContextWindowKey === cacheKey
+  ) {
     return cachedContextWindow;
   }
   if (manualWindow) {
-    return cacheContextWindow({
-      modelSlug: options?.modelSlug || manualModel || undefined,
-      contextWindowTokens: manualWindow,
-      effectiveContextWindowTokens: manualWindow,
-      contextSource: "manual",
-    }, cacheKey);
+    return cacheContextWindow(
+      {
+        modelSlug: options?.modelSlug || manualModel || undefined,
+        contextWindowTokens: manualWindow,
+        effectiveContextWindowTokens: manualWindow,
+        contextSource: "manual",
+      },
+      cacheKey,
+    );
   }
 
   const catalog = await loadCodexModelCatalog(options?.codexPath);
@@ -120,19 +125,25 @@ export async function resolveCodexContextWindow(options?: {
   if (matched) {
     const contextWindow = matched.contextWindowTokens;
     const percent = matched.effectiveContextWindowPercent;
-    return cacheContextWindow({
-      modelSlug: matched.slug,
-      contextWindowTokens: contextWindow,
-      effectiveContextWindowTokens: effectiveWindow(contextWindow, percent),
-      effectiveContextWindowPercent: percent,
-      contextSource: configuredModel ? "codex-config" : "codex-catalog",
-    }, cacheKey);
+    return cacheContextWindow(
+      {
+        modelSlug: matched.slug,
+        contextWindowTokens: contextWindow,
+        effectiveContextWindowTokens: effectiveWindow(contextWindow, percent),
+        effectiveContextWindowPercent: percent,
+        contextSource: configuredModel ? "codex-config" : "codex-catalog",
+      },
+      cacheKey,
+    );
   }
 
-  return cacheContextWindow({
-    modelSlug: configuredModel || undefined,
-    contextSource: "unknown",
-  }, cacheKey);
+  return cacheContextWindow(
+    {
+      modelSlug: configuredModel || undefined,
+      contextSource: "unknown",
+    },
+    cacheKey,
+  );
 }
 
 export function enrichUsageWithContext(
@@ -159,7 +170,8 @@ export async function resolveCodexModelForExecution(
   checkedCatalog: boolean;
 }> {
   const requestedModelSlug = String(modelSlug || "").trim();
-  if (!requestedModelSlug) return { requestedModelSlug: "", checkedCatalog: false };
+  if (!requestedModelSlug)
+    return { requestedModelSlug: "", checkedCatalog: false };
   const catalog = await loadCodexModelCatalog(codexPath);
   if (!catalog.length) {
     return {
@@ -197,20 +209,23 @@ export async function listCodexModels(options?: {
 
 export function parseCodexModelCatalog(raw: string): CodexModelCatalogEntry[] {
   const parsed = parseJsonObjectFromOutput(raw);
-  const models = Array.isArray((parsed as any)?.models) ? (parsed as any).models : [];
+  const models = Array.isArray((parsed as any)?.models)
+    ? (parsed as any).models
+    : [];
   return models
     .map((model: any): CodexModelCatalogEntry | null => {
       const slug = String(model?.slug || "").trim();
       if (!slug) return null;
       return {
         slug,
-        displayName: String(model?.display_name || model?.displayName || "").trim() || undefined,
+        displayName:
+          String(model?.display_name || model?.displayName || "").trim() ||
+          undefined,
         defaultReasoningEffort: normalizeCodexReasoningEffort(
           model?.default_reasoning_level || model?.defaultReasoningEffort,
         ),
         supportedReasoningEfforts: normalizeReasoningEfforts(
-          model?.supported_reasoning_levels ||
-            model?.supportedReasoningEfforts,
+          model?.supported_reasoning_levels || model?.supportedReasoningEfforts,
         ),
         contextWindowTokens: positiveInteger(model?.context_window),
         maxContextWindowTokens: positiveInteger(model?.max_context_window),
@@ -230,7 +245,9 @@ export function parseCodexModelCatalog(raw: string): CodexModelCatalogEntry[] {
 export function normalizeCodexReasoningEffort(
   value: unknown,
 ): CodexReasoningEffort | undefined {
-  const effort = String(value || "").trim().toLowerCase();
+  const effort = String(value || "")
+    .trim()
+    .toLowerCase();
   return effort === "none" ||
     effort === "minimal" ||
     effort === "low" ||
@@ -279,9 +296,13 @@ export function selectCatalogModel(
   preferredSlug?: string,
 ): CodexModelCatalogEntry | undefined {
   if (!catalog.length) return undefined;
-  const preferred = String(preferredSlug || "").trim().toLowerCase();
+  const preferred = String(preferredSlug || "")
+    .trim()
+    .toLowerCase();
   if (preferred) {
-    const exact = catalog.find((model) => model.slug.toLowerCase() === preferred);
+    const exact = catalog.find(
+      (model) => model.slug.toLowerCase() === preferred,
+    );
     if (exact) return exact;
     const byName = catalog.find(
       (model) => model.displayName?.toLowerCase() === preferred,
@@ -314,7 +335,9 @@ async function runCodexDebugModels(
   try {
     const result = await runLineProcess({
       command: codexPath,
-      arguments: bundled ? ["debug", "models", "--bundled"] : ["debug", "models"],
+      arguments: bundled
+        ? ["debug", "models", "--bundled"]
+        : ["debug", "models"],
       timeoutMs: bundled ? 8000 : 5000,
     });
     if (result.exitCode !== 0) return [];
