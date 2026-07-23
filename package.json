@@ -31,7 +31,7 @@
   },
   "homepage": "https://github.com/runzewang/zotero-agent#readme",
   "dependencies": {
-    "katex": "^0.16.44",
+    "katex": "^0.17.0",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0",
     "yaml": "^2.8.3",
